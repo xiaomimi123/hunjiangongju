@@ -13,16 +13,36 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
   if (!(await getSession())) return new Response('未登录', { status: 401 })
   const rel = params.path.join('/')
   const abs = path.normalize(path.join(DATA_DIR, rel))
-  if (!abs.startsWith(path.normalize(DATA_DIR))) return new Response('非法路径', { status: 400 })
+  const root = path.resolve(DATA_DIR)
+  if (abs !== root && !abs.startsWith(root + path.sep)) return new Response('非法路径', { status: 400 })
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return new Response('不存在', { status: 404 })
 
   const size = fs.statSync(abs).size
   const type = MIME[path.extname(abs).toLowerCase()] ?? 'application/octet-stream'
   const range = req.headers.get('range')
   if (range) {
-    const m = /bytes=(\d*)-(\d*)/.exec(range)
-    const start = m?.[1] ? parseInt(m[1]) : 0
-    const end = m?.[2] ? Math.min(parseInt(m[2]), size - 1) : size - 1
+    const m = /^bytes=(\d*)-(\d*)$/.exec(range)
+    let start = 0
+    let end = size - 1
+    let satisfiable = !!m && (m[1] !== '' || m[2] !== '')
+    if (satisfiable) {
+      if (m![1] === '') {
+        // suffix range: bytes=-<suffix>
+        const suffix = parseInt(m![2])
+        start = Math.max(0, size - suffix)
+        end = size - 1
+      } else {
+        start = parseInt(m![1])
+        end = m![2] !== '' ? Math.min(parseInt(m![2]), size - 1) : size - 1
+      }
+      if (start > end || start >= size) satisfiable = false
+    }
+    if (!satisfiable) {
+      return new Response(null, {
+        status: 416,
+        headers: { 'Content-Range': `bytes */${size}` },
+      })
+    }
     const stream = fs.createReadStream(abs, { start, end })
     return new Response(stream as unknown as ReadableStream, {
       status: 206,

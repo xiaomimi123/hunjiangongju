@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
@@ -36,24 +36,39 @@ export default function AdminTaskDetailPage() {
   const [allMaterials, setAllMaterials] = useState<Material[]>([])
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const dirtyRef = useRef(false)
 
   const load = useCallback(async () => {
-    const t = await api<Task>(`/api/tasks/${id}`)
-    setTask(t)
-    setOrder(t.segments.map((s) => s.id))
-    return t
+    try {
+      const t = await api<Task>(`/api/tasks/${id}`)
+      setTask(t)
+      if (!dirtyRef.current) setOrder(t.segments.map((s) => s.id))
+      return t
+    } catch (e) {
+      setErr((e as Error).message)
+      return null
+    }
   }, [id])
 
   useEffect(() => {
     load()
     const timer = setInterval(async () => {
       const t = await load()
-      if (isTerminal(t.status)) clearInterval(timer)
+      if (!t || isTerminal(t.status)) clearInterval(timer)
     }, 3000)
     return () => clearInterval(timer)
   }, [load])
 
-  useEffect(() => { api<Material[]>('/api/materials').then(setAllMaterials) }, [])
+  useEffect(() => {
+    api<Material[]>('/api/materials').then(setAllMaterials).catch((e) => setErr((e as Error).message))
+  }, [])
+
+  useEffect(() => {
+    dirtyRef.current = !!(task && (
+      Object.keys(subs).length + Object.keys(mats).length > 0
+        || order.some((sid, i) => task.segments[i]?.id !== sid)
+    ))
+  }, [task, subs, mats, order])
 
   async function act(fn: () => Promise<unknown>) {
     setErr(''); setBusy(true)
@@ -91,6 +106,14 @@ export default function AdminTaskDetailPage() {
     setPicking(null)
   }
 
+  if (!task && err) {
+    return (
+      <div className="space-y-4 p-4">
+        <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>
+        <Link href="/admin/tasks" className="block text-sm text-blue-600">返回任务列表</Link>
+      </div>
+    )
+  }
   if (!task) return <p>加载中…</p>
   const editable = task.status === 'PREVIEW_PENDING' || task.status === 'QC_FAILED'
   const pending = task.status === 'MATERIAL_PENDING'

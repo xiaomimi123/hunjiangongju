@@ -1,0 +1,22 @@
+{
+  "name": "worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@mixcut/db": "*",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.8.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "tsx": "^4.16.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/fluent-ffmpeg": "^2.1.24",
+    "@types/node": "^20.14.0"
+  }
+}

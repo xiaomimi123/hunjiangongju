@@ -1,0 +1,39 @@
+name: mixcut
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mixcut
+      POSTGRES_PASSWORD: mixcut
+      POSTGRES_DB: mixcut
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mixcut"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  web:
+    build: { context: ., dockerfile: web/Dockerfile }
+    ports: ["3000:3000"]
+    env_file: .env
+    volumes: ["./data:/data"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+  worker:
+    build: { context: ., dockerfile: worker/Dockerfile }
+    env_file: .env
+    volumes: ["./data:/data"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+volumes:
+  pgdata:

@@ -1,0 +1,10 @@
+{
+  "name": "mixcut",
+  "private": true,
+  "workspaces": ["packages/db", "web", "worker"],
+  "scripts": { "test": "vitest run" },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

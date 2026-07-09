@@ -4,12 +4,15 @@ import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 
 export const GET = handler(async (_req, { params }) => {
-  await requireRole()
+  const session = await requireRole()
   const script = await prisma.script.findUnique({
     where: { id: params.id },
     include: { segments: { orderBy: { seqNo: 'asc' }, include: { tags: true } } },
   })
   if (!script) throw new HttpError(404, '文案不存在')
+  if (session.role !== 'operator' && script.status !== 'published') {
+    throw new HttpError(404, '文案不存在')
+  }
   return NextResponse.json(script)
 })
 

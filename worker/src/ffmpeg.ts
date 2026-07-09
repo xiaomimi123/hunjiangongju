@@ -1,0 +1,67 @@
+import ffmpeg from 'fluent-ffmpeg'
+import fs from 'fs/promises'
+import path from 'path'
+
+export function probeHasAudio(file: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(file, (err, data) => {
+      if (err) return reject(err)
+      resolve((data.streams ?? []).some((s) => s.codec_type === 'audio'))
+    })
+  })
+}
+
+export async function normalizeSegment(opts: {
+  input: string; out: string; durationMs: number; w: number; h: number
+}): Promise<void> {
+  const { input, out, durationMs, w, h } = opts
+  const hasAudio = await probeHasAudio(input)
+  const sec = (durationMs / 1000).toFixed(3)
+  await new Promise<void>((resolve, reject) => {
+    const cmd = ffmpeg(input).inputOptions(['-stream_loop', '-1'])
+    if (!hasAudio) cmd.input('anullsrc=r=44100:cl=stereo').inputFormat('lavfi')
+    cmd
+      .complexFilter([
+        `[0:v]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},boxblur=20:5[bg]`,
+        `[0:v]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg]`,
+        `[bg][fg]overlay=(W-w)/2:(H-h)/2,fps=30,format=yuv420p[v]`,
+      ])
+      .outputOptions([
+        '-map', '[v]',
+        '-map', hasAudio ? '0:a:0' : '1:a:0',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+        '-t', sec,
+      ])
+      .output(out)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run()
+  })
+}
+
+export async function concatSegments(files: string[], out: string): Promise<void> {
+  const listPath = path.join(path.dirname(out), 'concat-list.txt')
+  await fs.writeFile(listPath, files.map((f) => `file '${f}'`).join('\n'))
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg(listPath)
+      .inputOptions(['-f', 'concat', '-safe', '0'])
+      .outputOptions(['-c', 'copy'])
+      .output(out)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run()
+  })
+}
+
+export function burnSubtitles(video: string, srtPath: string, out: string): Promise<void> {
+  const style = 'FontName=Noto Sans CJK SC,FontSize=14,Outline=1,MarginV=40'
+  return new Promise((resolve, reject) => {
+    ffmpeg(video)
+      .outputOptions(['-vf', `subtitles=${srtPath}:force_style='${style}'`, '-c:a', 'copy'])
+      .output(out)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run()
+  })
+}

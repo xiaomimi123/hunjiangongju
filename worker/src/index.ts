@@ -2,6 +2,7 @@ import { Worker, type Job } from 'bullmq'
 import { prisma, transitionTask, canTransition, redisConnection } from '@mixcut/db'
 import { segmentScript } from './jobs/segmentScript'
 import { matchMaterials } from './jobs/matchMaterials'
+import { renderDraft } from './jobs/renderDraft'
 
 async function dispatch(job: Job): Promise<void> {
   const { taskId } = job.data as { taskId: string }
@@ -9,7 +10,7 @@ async function dispatch(job: Job): Promise<void> {
   switch (job.name) {
     case 'segment-script': return segmentScript(taskId)
     case 'match-materials': return matchMaterials(taskId)
-    case 'render-draft': throw new Error('render-draft 未实现（Task 11）')
+    case 'render-draft': return renderDraft(taskId)
     case 'run-qc': throw new Error('run-qc 未实现（Task 12）')
     default: throw new Error(`未知 job: ${job.name}`)
   }

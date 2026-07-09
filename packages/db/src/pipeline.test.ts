@@ -70,6 +70,7 @@ describe('状态机转移表', () => {
     expect(canTransition('QC_PASSED', 'EXPORTED')).toBe(true)
     expect(canTransition('FAILED', 'SEGMENTING')).toBe(true)
     expect(canTransition('STORYBOARD_READY', 'FAILED')).toBe(true)
+    expect(canTransition('QC_PASSED', 'FAILED')).toBe(true)
   })
   it('非法转移', () => {
     expect(canTransition('CREATED', 'EXPORTED')).toBe(false)

@@ -50,7 +50,7 @@ export const TRANSITIONS: Record<string, string[]> = {
   REVISING: ['RENDERING'],
   QC_RUNNING: ['QC_PASSED', 'QC_FAILED', 'FAILED'],
   QC_FAILED: ['REVISING', 'QC_RUNNING'],
-  QC_PASSED: ['EXPORTED'],
+  QC_PASSED: ['EXPORTED', 'FAILED'],
   EXPORTED: [],
   FAILED: ['SEGMENTING'],
 }

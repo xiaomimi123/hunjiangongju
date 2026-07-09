@@ -1,0 +1,173 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  account      String      @unique
+  passwordHash String      @map("password_hash")
+  role         String      @default("student")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  accessKeys   AccessKey[]
+  tasks        Task[]
+
+  @@map("users")
+}
+
+model AccessKey {
+  id        String    @id @default(uuid())
+  keyValue  String    @unique @map("key_value")
+  userId    String?   @map("user_id")
+  user      User?     @relation(fields: [userId], references: [id])
+  expiresAt DateTime? @map("expires_at")
+  isActive  Boolean   @default(true) @map("is_active")
+
+  @@map("access_keys")
+}
+
+model Script {
+  id        String          @id @default(uuid())
+  title     String
+  content   String
+  status    String          @default("draft")
+  createdBy String?         @map("created_by")
+  createdAt DateTime        @default(now()) @map("created_at")
+  segments  ScriptSegment[]
+  tasks     Task[]
+
+  @@map("scripts")
+}
+
+model ScriptSegment {
+  id           String        @id @default(uuid())
+  scriptId     String        @map("script_id")
+  script       Script        @relation(fields: [scriptId], references: [id])
+  seqNo        Int           @map("seq_no")
+  text         String
+  tags         SegmentTag[]
+  taskSegments TaskSegment[]
+
+  @@map("script_segments")
+}
+
+model TagCategory {
+  id           String        @id @default(uuid())
+  name         String
+  parentId     String?       @map("parent_id")
+  parent       TagCategory?  @relation("TagTree", fields: [parentId], references: [id])
+  children     TagCategory[] @relation("TagTree")
+  sortOrder    Int           @default(0) @map("sort_order")
+  materialTags MaterialTag[]
+  segmentTags  SegmentTag[]
+
+  @@map("tag_categories")
+}
+
+model Material {
+  id           String        @id @default(uuid())
+  fileUrl      String        @map("file_url")
+  thumbnailUrl String?       @map("thumbnail_url")
+  durationMs   Int?          @map("duration_ms")
+  uploadedBy   String?       @map("uploaded_by")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  tags         MaterialTag[]
+  taskSegments TaskSegment[]
+
+  @@map("materials")
+}
+
+model MaterialTag {
+  materialId String      @map("material_id")
+  material   Material    @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  tagId      String      @map("tag_id")
+  tag        TagCategory @relation(fields: [tagId], references: [id])
+
+  @@id([materialId, tagId])
+  @@map("material_tags")
+}
+
+model SegmentTag {
+  segmentId String        @map("segment_id")
+  segment   ScriptSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  tagId     String        @map("tag_id")
+  tag       TagCategory   @relation(fields: [tagId], references: [id])
+
+  @@id([segmentId, tagId])
+  @@map("segment_tags")
+}
+
+model Task {
+  id          String          @id @default(uuid())
+  userId      String?         @map("user_id")
+  user        User?           @relation(fields: [userId], references: [id])
+  scriptId    String?         @map("script_id")
+  script      Script?         @relation(fields: [scriptId], references: [id])
+  status      String          @default("CREATED")
+  aspectRatio String          @default("9:16") @map("aspect_ratio")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @default(now()) @updatedAt @map("updated_at")
+  segments    TaskSegment[]
+  statusLogs  TaskStatusLog[]
+  qcReports   QcReport[]
+  exports     Export[]
+
+  @@map("tasks")
+}
+
+model TaskSegment {
+  id           String         @id @default(uuid())
+  taskId       String         @map("task_id")
+  task         Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  segmentId    String?        @map("segment_id")
+  segment      ScriptSegment? @relation(fields: [segmentId], references: [id])
+  materialId   String?        @map("material_id")
+  material     Material?      @relation(fields: [materialId], references: [id])
+  orderNo      Int            @map("order_no")
+  startMs      Int            @default(0) @map("start_ms")
+  endMs        Int?           @map("end_ms")
+  subtitleText String?        @map("subtitle_text")
+
+  @@map("task_segments")
+}
+
+model TaskStatusLog {
+  id         String   @id @default(uuid())
+  taskId     String   @map("task_id")
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromStatus String?  @map("from_status")
+  toStatus   String   @map("to_status")
+  note       String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("task_status_logs")
+}
+
+model QcReport {
+  id        String   @id @default(uuid())
+  taskId    String   @map("task_id")
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  checkType String   @map("check_type")
+  result    String
+  detail    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("qc_reports")
+}
+
+model Export {
+  id             String   @id @default(uuid())
+  taskId         String   @map("task_id")
+  task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  videoUrl       String?  @map("video_url")
+  subtitleUrl    String?  @map("subtitle_url")
+  projectJsonUrl String?  @map("project_json_url")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("exports")
+}

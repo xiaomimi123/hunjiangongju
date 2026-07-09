@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import { STATUS_LABELS, isTerminal } from '@/lib/status'
 
@@ -42,6 +43,14 @@ export default function WorkDetailPage() {
     catch (e) { setErr((e as Error).message) }
   }
 
+  if (!task && err) {
+    return (
+      <div className="space-y-4 p-4">
+        <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>
+        <Link href="/works" className="block text-sm text-blue-600">返回作品列表</Link>
+      </div>
+    )
+  }
   if (!task) return <p className="p-4">加载中…</p>
   const exp = task.exports[0]
   const showDraft = ['PREVIEW_PENDING', 'QC_RUNNING', 'QC_PASSED', 'QC_FAILED'].includes(task.status)

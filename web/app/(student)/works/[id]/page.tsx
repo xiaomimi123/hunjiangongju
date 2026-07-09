@@ -17,16 +17,21 @@ export default function WorkDetailPage() {
   const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
-    const t = await api<Task>(`/api/tasks/${id}`)
-    setTask(t)
-    return t
+    try {
+      const t = await api<Task>(`/api/tasks/${id}`)
+      setTask(t)
+      return t
+    } catch (e) {
+      setErr((e as Error).message)
+      return null
+    }
   }, [id])
 
   useEffect(() => {
     load()
     const timer = setInterval(async () => {
       const t = await load()
-      if (isTerminal(t.status)) clearInterval(timer)
+      if (!t || isTerminal(t.status)) clearInterval(timer)
     }, 3000)
     return () => clearInterval(timer)
   }, [load])

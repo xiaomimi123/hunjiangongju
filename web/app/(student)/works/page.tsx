@@ -10,13 +10,15 @@ const TABS = ['全部', '已完成', '处理中', '失败'] as const
 export default function WorksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [tab, setTab] = useState<(typeof TABS)[number]>('全部')
+  const [err, setErr] = useState('')
 
-  useEffect(() => { api<Task[]>('/api/tasks').then(setTasks) }, [])
+  useEffect(() => { api<Task[]>('/api/tasks').then(setTasks).catch((e) => setErr((e as Error).message)) }, [])
   const shown = tasks.filter((t) => tab === '全部' || statusGroup(t.status) === tab)
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">我的作品</h1>
+      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
       <div className="flex gap-1 rounded-lg border bg-white p-1 text-sm">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)}

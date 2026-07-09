@@ -18,8 +18,8 @@ export default function HomePage() {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    api<Script[]>('/api/scripts').then(setScripts)
-    api<Task[]>('/api/tasks').then((t) => setRecent(t.slice(0, 3)))
+    api<Script[]>('/api/scripts').then(setScripts).catch((e) => setErr((e as Error).message))
+    api<Task[]>('/api/tasks').then((t) => setRecent(t.slice(0, 3))).catch((e) => setErr((e as Error).message))
   }, [])
 
   async function create() {

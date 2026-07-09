@@ -10,7 +10,10 @@ export default function TagsPage() {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [err, setErr] = useState('')
 
-  const load = useCallback(async () => setNodes(await api<TagNode[]>('/api/tag-categories')), [])
+  const load = useCallback(async () => {
+    try { setNodes(await api<TagNode[]>('/api/tag-categories')) }
+    catch (e) { setErr((e as Error).message) }
+  }, [])
   useEffect(() => { load() }, [load])
 
   async function run(fn: () => Promise<unknown>) {

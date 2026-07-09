@@ -20,7 +20,8 @@ function MaterialsInner() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
-    setList(await api<Material[]>(`/api/materials${filter ? `?tagId=${filter}` : ''}`))
+    try { setList(await api<Material[]>(`/api/materials${filter ? `?tagId=${filter}` : ''}`)) }
+    catch (e) { setErr((e as Error).message) }
   }, [filter])
   useEffect(() => { load() }, [load])
 
@@ -90,12 +91,18 @@ function MaterialsInner() {
 
 function FilterBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [nodes, setNodes] = useState<{ id: string; name: string; parentId: string | null }[]>([])
-  useEffect(() => { api<typeof nodes>('/api/tag-categories').then(setNodes) }, [])
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    api<typeof nodes>('/api/tag-categories').then(setNodes).catch((e) => setErr((e as Error).message))
+  }, [])
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border px-3 py-2">
-      <option value="">全部标签</option>
-      {nodes.filter((n) => n.parentId).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
-    </select>
+    <div className="space-y-1">
+      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border px-3 py-2">
+        <option value="">全部标签</option>
+        {nodes.filter((n) => n.parentId).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+      </select>
+    </div>
   )
 }
 

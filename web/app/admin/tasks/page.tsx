@@ -10,14 +10,18 @@ const FILTERS = ['', 'MATERIAL_PENDING', 'PREVIEW_PENDING', 'QC_FAILED', 'FAILED
 export default function AdminTasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [filter, setFilter] = useState('')
+  const [err, setErr] = useState('')
 
-  const load = useCallback(async () =>
-    setTasks(await api<Task[]>(`/api/tasks${filter ? `?status=${filter}` : ''}`)), [filter])
+  const load = useCallback(async () => {
+    try { setTasks(await api<Task[]>(`/api/tasks${filter ? `?status=${filter}` : ''}`)) }
+    catch (e) { setErr((e as Error).message) }
+  }, [filter])
   useEffect(() => { load() }, [load])
 
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold">任务队列</h1>
+      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
           <button key={f} onClick={() => setFilter(f)}

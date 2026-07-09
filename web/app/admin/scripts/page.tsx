@@ -11,7 +11,10 @@ export default function ScriptsPage() {
   const [content, setContent] = useState('')
   const [err, setErr] = useState('')
 
-  const load = useCallback(async () => setList(await api<Script[]>('/api/scripts')), [])
+  const load = useCallback(async () => {
+    try { setList(await api<Script[]>('/api/scripts')) }
+    catch (e) { setErr((e as Error).message) }
+  }, [])
   useEffect(() => { load() }, [load])
 
   async function create() {

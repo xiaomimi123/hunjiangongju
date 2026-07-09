@@ -13,7 +13,10 @@ export default function ScriptDetailPage() {
   const [editing, setEditing] = useState<string | null>(null)
   const [err, setErr] = useState('')
 
-  const load = useCallback(async () => setScript(await api<Script>(`/api/scripts/${id}`)), [id])
+  const load = useCallback(async () => {
+    try { setScript(await api<Script>(`/api/scripts/${id}`)) }
+    catch (e) { setErr((e as Error).message) }
+  }, [id])
   useEffect(() => { load() }, [load])
 
   async function run(fn: () => Promise<unknown>) {
@@ -26,6 +29,7 @@ export default function ScriptDetailPage() {
   const saveTags = (segId: string, tagIds: string[]) =>
     run(() => api(`/api/scripts/segments/${segId}/tags`, { method: 'PATCH', body: { tagIds } }))
 
+  if (!script && err) return <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>
   if (!script) return <p>加载中…</p>
   return (
     <div className="space-y-4">

@@ -1,0 +1,104 @@
+'use client'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
+import { api } from '@/lib/fetcher'
+import TagPicker from '@/components/TagPicker'
+
+type Material = {
+  id: string; fileUrl: string; thumbnailUrl: string | null
+  durationMs: number | null; tags: { tagId: string }[]
+}
+
+function MaterialsInner() {
+  const returnTaskId = useSearchParams().get('returnTaskId')
+  const [list, setList] = useState<Material[]>([])
+  const [tagIds, setTagIds] = useState<string[]>([])
+  const [filter, setFilter] = useState('')
+  const [progress, setProgress] = useState(-1)
+  const [err, setErr] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const load = useCallback(async () => {
+    setList(await api<Material[]>(`/api/materials${filter ? `?tagId=${filter}` : ''}`))
+  }, [filter])
+  useEffect(() => { load() }, [load])
+
+  function upload() {
+    const file = fileRef.current?.files?.[0]
+    if (!file) return setErr('请选择视频文件')
+    if (tagIds.length === 0) return setErr('请至少勾选一个标签')
+    setErr('')
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('tagIds', JSON.stringify(tagIds))
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/api/materials')
+    xhr.upload.onprogress = (e) => setProgress(Math.round((e.loaded / e.total) * 100))
+    xhr.onload = () => {
+      setProgress(-1)
+      if (xhr.status >= 400) return setErr(JSON.parse(xhr.responseText).error ?? '上传失败')
+      if (fileRef.current) fileRef.current.value = ''
+      setTagIds([])
+      load()
+    }
+    xhr.onerror = () => { setProgress(-1); setErr('网络错误') }
+    xhr.send(fd)
+  }
+
+  const del = async (id: string) => {
+    if (!confirm('确认删除素材？')) return
+    try { await api(`/api/materials/${id}`, { method: 'DELETE' }); load() } catch (e) { setErr((e as Error).message) }
+  }
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-lg font-semibold">素材库</h1>
+      {returnTaskId && (
+        <Link href={`/admin/tasks/${returnTaskId}`}
+          className="block rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
+          正在为任务补充素材，上传完成后点此返回任务详情 →
+        </Link>
+      )}
+      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
+      <div className="space-y-2 rounded-xl border bg-white p-3">
+        <input ref={fileRef} type="file" accept="video/*" className="w-full text-sm" />
+        <TagPicker value={tagIds} onChange={setTagIds} />
+        {progress >= 0 ? (
+          <div className="h-2 overflow-hidden rounded bg-gray-200">
+            <div className="h-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+          </div>
+        ) : (
+          <button onClick={upload} className="w-full rounded-lg bg-blue-600 py-2 text-white">上传素材</button>
+        )}
+      </div>
+      <FilterBar value={filter} onChange={setFilter} />
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {list.map((m) => (
+          <li key={m.id} className="overflow-hidden rounded-xl border bg-white">
+            {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="aspect-video w-full object-cover" />}
+            <div className="flex items-center justify-between p-2 text-xs text-gray-500">
+              <span>{((m.durationMs ?? 0) / 1000).toFixed(1)}s · {m.tags.length}标签</span>
+              <button onClick={() => del(m.id)} className="text-red-500">删除</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function FilterBar({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [nodes, setNodes] = useState<{ id: string; name: string; parentId: string | null }[]>([])
+  useEffect(() => { api<typeof nodes>('/api/tag-categories').then(setNodes) }, [])
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border px-3 py-2">
+      <option value="">全部标签</option>
+      {nodes.filter((n) => n.parentId).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+    </select>
+  )
+}
+
+export default function MaterialsPage() {
+  return <Suspense><MaterialsInner /></Suspense>
+}

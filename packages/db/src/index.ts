@@ -1,2 +1,5 @@
 export { prisma } from './client'
 export * from './pipeline'
+export { transitionTask } from './stateMachine'
+export { enqueue, redisConnection } from './queue'
+export type { JobName } from './queue'

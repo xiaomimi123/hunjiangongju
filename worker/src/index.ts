@@ -3,6 +3,7 @@ import { prisma, transitionTask, canTransition, redisConnection } from '@mixcut/
 import { segmentScript } from './jobs/segmentScript'
 import { matchMaterials } from './jobs/matchMaterials'
 import { renderDraft } from './jobs/renderDraft'
+import { runQc } from './jobs/runQc'
 
 async function dispatch(job: Job): Promise<void> {
   const { taskId } = job.data as { taskId: string }
@@ -11,7 +12,7 @@ async function dispatch(job: Job): Promise<void> {
     case 'segment-script': return segmentScript(taskId)
     case 'match-materials': return matchMaterials(taskId)
     case 'render-draft': return renderDraft(taskId)
-    case 'run-qc': throw new Error('run-qc 未实现（Task 12）')
+    case 'run-qc': return runQc(taskId)
     default: throw new Error(`未知 job: ${job.name}`)
   }
 }

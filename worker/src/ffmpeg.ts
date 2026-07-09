@@ -65,3 +65,27 @@ export function burnSubtitles(video: string, srtPath: string, out: string): Prom
       .run()
   })
 }
+
+function runDetectFilter(file: string, kind: 'video' | 'audio', filter: string, marker: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const lines: string[] = []
+    const cmd = ffmpeg(file)
+    if (kind === 'video') cmd.outputOptions(['-vf', filter, '-an'])
+    else cmd.outputOptions(['-af', filter, '-vn'])
+    cmd
+      .outputOptions(['-f', 'null'])
+      .output('-')
+      .on('stderr', (line: string) => { if (line.includes(marker)) lines.push(line.trim()) })
+      .on('end', () => resolve(lines))
+      .on('error', reject)
+      .run()
+  })
+}
+
+export function detectBlack(file: string): Promise<string[]> {
+  return runDetectFilter(file, 'video', 'blackdetect=d=0.5:pix_th=0.10', 'black_start')
+}
+
+export function detectSilence(file: string): Promise<string[]> {
+  return runDetectFilter(file, 'audio', 'silencedetect=noise=-50dB:d=1.0', 'silence_start')
+}

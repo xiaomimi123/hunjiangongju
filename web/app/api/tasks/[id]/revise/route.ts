@@ -14,6 +14,17 @@ export const POST = handler(async (req, { params }) => {
     changes?: { taskSegmentId: string; materialId?: string; subtitleText?: string }[]
     order?: string[]
   }
+  const ownSegments = await prisma.taskSegment.findMany({
+    where: { taskId: params.id },
+    select: { id: true },
+  })
+  const ownSegmentIds = new Set(ownSegments.map((s) => s.id))
+  for (const c of changes ?? []) {
+    if (!ownSegmentIds.has(c.taskSegmentId)) throw new HttpError(404, '分镜片段不存在')
+  }
+  for (const segId of order ?? []) {
+    if (!ownSegmentIds.has(segId)) throw new HttpError(404, '分镜片段不存在')
+  }
   const updates = []
   for (const c of changes ?? []) {
     updates.push(prisma.taskSegment.update({

@@ -10,6 +10,7 @@ export const POST = handler(async (req) => {
   const { email } = await req.json()
   if (!isEmail(email)) throw new HttpError(400, '邮箱格式不正确')
   if (!(await emailEnabled())) throw new HttpError(400, '未开启邮件服务')
-  if (await prisma.user.findUnique({ where: { email } })) await sendCode(email, 'reset')
+  const user = await prisma.user.findUnique({ where: { email } })
+  if (user) { void sendCode(email, 'reset').catch((e) => console.error('sendCode(reset) failed:', e)) }
   return NextResponse.json({ ok: true }) // 无论是否存在都 200，防枚举
 })

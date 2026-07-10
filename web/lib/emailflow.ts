@@ -20,6 +20,7 @@ export async function sendCode(email: string, purpose: 'verify' | 'reset'): Prom
 }
 
 export async function consumeCode(email: string, code: string, purpose: 'verify' | 'reset'): Promise<void> {
+  if (!email || !code) throw new HttpError(400, '验证码无效或已过期')
   const row = await prisma.emailCode.findFirst({
     where: { email, purpose, consumedAt: null, expiresAt: { gt: new Date() }, codeHash: hashCode(code) },
     orderBy: { createdAt: 'desc' },

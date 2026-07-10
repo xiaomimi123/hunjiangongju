@@ -30,12 +30,18 @@ export async function consumeCode(email: string, code: string, purpose: 'verify'
   })
   if (!row) throw new HttpError(400, '验证码无效或已过期')
   if (row.codeHash !== hashCode(code)) {
-    const attempts = row.attempts + 1
-    await prisma.emailCode.update({
+    // 原子自增，拿到真实的累计错误次数（并发下不会互相覆盖）
+    const updated = await prisma.emailCode.update({
       where: { id: row.id },
-      // 连续错误达上限即作废该码，防暴力枚举
-      data: { attempts, ...(attempts >= MAX_ATTEMPTS ? { consumedAt: new Date() } : {}) },
+      data: { attempts: { increment: 1 } },
     })
+    if (updated.attempts >= MAX_ATTEMPTS) {
+      // 达上限即作废该码；updateMany + consumedAt:null 幂等，重复调用无害
+      await prisma.emailCode.updateMany({
+        where: { id: row.id, consumedAt: null },
+        data: { consumedAt: new Date() },
+      })
+    }
     throw new HttpError(400, '验证码无效或已过期')
   }
   // 原子消费：只有把 consumedAt 从 null 改成非 null 的那次算成功，防并发双消费

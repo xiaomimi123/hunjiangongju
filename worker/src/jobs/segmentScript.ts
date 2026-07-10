@@ -19,12 +19,26 @@ export async function segmentScript(taskId: string): Promise<void> {
     })
   }
 
+  const priorSegments = await prisma.taskSegment.findMany({ where: { taskId } })
+  const priorBySegmentId = new Map(
+    priorSegments
+      .filter((p) => p.segmentId)
+      .map((p) => [p.segmentId as string, { materialId: p.materialId, subtitleText: p.subtitleText }]),
+  )
+
   await prisma.$transaction([
     prisma.taskSegment.deleteMany({ where: { taskId } }),
     prisma.taskSegment.createMany({
-      data: segments.map((s) => ({
-        taskId, segmentId: s.id, orderNo: s.seqNo, subtitleText: s.text,
-      })),
+      data: segments.map((s) => {
+        const prior = priorBySegmentId.get(s.id)
+        return {
+          taskId,
+          segmentId: s.id,
+          orderNo: s.seqNo,
+          subtitleText: prior?.subtitleText ?? s.text,
+          materialId: prior?.materialId ?? undefined,
+        }
+      }),
     }),
   ])
   await transitionTask(taskId, 'MATCHING', `分段完成，共 ${segments.length} 段`)

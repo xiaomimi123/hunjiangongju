@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import { STATUS_LABELS, isTerminal } from '@/lib/status'
+import { StatusPill, PipelineRail } from '@/components/ui'
 import BottomSheet from '@/components/BottomSheet'
 
 type Seg = {
@@ -108,13 +109,13 @@ export default function AdminTaskDetailPage() {
 
   if (!task && err) {
     return (
-      <div className="space-y-4 p-4">
-        <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>
-        <Link href="/admin/tasks" className="block text-sm text-blue-600">返回任务列表</Link>
+      <div className="space-y-4">
+        <p className="pill pill-bad">{err}</p>
+        <Link href="/admin/tasks" className="text-sm text-flame">← 返回任务列表</Link>
       </div>
     )
   }
-  if (!task) return <p>加载中…</p>
+  if (!task) return <p className="py-16 text-center text-sm text-ink3">加载中…</p>
   const editable = task.status === 'PREVIEW_PENDING' || task.status === 'QC_FAILED'
   const pending = task.status === 'MATERIAL_PENDING'
   const stuckActive = ['CREATED', 'SEGMENTING', 'MATCHING', 'STORYBOARD_READY', 'RENDERING', 'QC_RUNNING', 'REVISING']
@@ -125,10 +126,16 @@ export default function AdminTaskDetailPage() {
     || order.some((sid, i) => task.segments[i]?.id !== sid)
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold">{task.script?.title ?? '任务详情'}</h1>
-      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
-      <p className="text-sm">状态：<span className="font-medium text-blue-600">{STATUS_LABELS[task.status] ?? task.status}</span></p>
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="truncate font-display text-xl font-bold tracking-tight">{task.script?.title ?? '任务详情'}</h1>
+        <StatusPill status={task.status} />
+      </div>
+      {err && <p className="pill pill-bad">{err}</p>}
+
+      <div className="card p-4">
+        <PipelineRail status={task.status} />
+      </div>
 
       {stuckActive && (
         <button
@@ -137,84 +144,98 @@ export default function AdminTaskDetailPage() {
             act(() => api(`/api/tasks/${id}/retry`, { method: 'POST' }))
           }}
           disabled={busy}
-          className="w-full rounded-xl border border-red-400 py-3 text-red-600 disabled:opacity-40"
+          className="btn-danger w-full"
         >
           重置并重试
         </button>
       )}
 
       {['PREVIEW_PENDING', 'QC_RUNNING', 'QC_PASSED', 'QC_FAILED', 'EXPORTED'].includes(task.status) && (
-        <video controls playsInline className="w-full rounded-xl bg-black"
-          src={task.status === 'EXPORTED' && task.exports[0] ? task.exports[0].videoUrl : `/api/files/exports/${task.id}/draft.mp4`} />
+        <div className="overflow-hidden rounded-3xl bg-black shadow-card">
+          <video controls playsInline className="w-full bg-black"
+            src={task.status === 'EXPORTED' && task.exports[0] ? task.exports[0].videoUrl : `/api/files/exports/${task.id}/draft.mp4`} />
+        </div>
       )}
 
       {pending && (
         <Link href={`/admin/materials?returnTaskId=${task.id}`}
-          className="block rounded-xl bg-amber-500 py-3 text-center text-white">
+          className="btn-primary w-full">
           素材不足 → 去素材库上传
         </Link>
       )}
 
       <section className="space-y-3">
-        <h2 className="text-sm text-gray-500">分镜（{orderedSegs.length} 段）</h2>
-        {orderedSegs.map((seg, i) => {
-          const missing = !seg.materialId && !mats[seg.id]
-          const mat = mats[seg.id]
-            ? allMaterials.find((m) => m.id === mats[seg.id])
-            : seg.material
-          return (
-            <div key={seg.id}
-              className={`rounded-xl border bg-white p-3 ${missing && pending ? 'border-amber-400 bg-amber-50' : ''}`}>
-              <div className="flex gap-3">
-                {mat && 'thumbnailUrl' in mat && mat.thumbnailUrl
-                  ? <img src={mat.thumbnailUrl} alt="" className="h-16 w-24 rounded object-cover" />
-                  : <div className="flex h-16 w-24 items-center justify-center rounded bg-gray-100 text-xs text-gray-400">无素材</div>}
-                <div className="flex-1">
-                  <p className="text-xs text-gray-400">#{i + 1}</p>
-                  {editable ? (
-                    <textarea rows={2} defaultValue={seg.subtitleText ?? ''}
-                      onChange={(e) => setSubs((s) => ({ ...s, [seg.id]: e.target.value }))}
-                      className="w-full rounded border px-2 py-1 text-sm" />
-                  ) : (
-                    <p className="text-sm">{seg.subtitleText}</p>
-                  )}
+        <p className="eyebrow">分镜段 · <span className="num">{orderedSegs.length}</span></p>
+        <div className="space-y-2.5">
+          {orderedSegs.map((seg, i) => {
+            const missing = !seg.materialId && !mats[seg.id]
+            const mat = mats[seg.id]
+              ? allMaterials.find((m) => m.id === mats[seg.id])
+              : seg.material
+            const attention = missing && pending
+            return (
+              <div key={seg.id}
+                className={`rounded-3xl border bg-surface p-4 shadow-card transition ${
+                  attention ? 'border-warn bg-warn/5' : 'border-line'
+                }`}>
+                <div className="flex gap-3">
+                  {mat && 'thumbnailUrl' in mat && mat.thumbnailUrl
+                    ? <img src={mat.thumbnailUrl} alt="" className="h-16 w-24 shrink-0 rounded-xl object-cover" />
+                    : <div className="flex h-16 w-24 shrink-0 items-center justify-center rounded-xl bg-surface2 text-xs text-ink3">无素材</div>}
+                  <div className="min-w-0 flex-1">
+                    <p className="num text-xs text-ink3">#{i + 1}</p>
+                    {editable ? (
+                      <textarea rows={2} defaultValue={seg.subtitleText ?? ''}
+                        onChange={(e) => setSubs((s) => ({ ...s, [seg.id]: e.target.value }))}
+                        className="field mt-1 text-sm" />
+                    ) : (
+                      <p className="mt-1 text-sm text-ink2">{seg.subtitleText}</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div className="mt-2 flex gap-2 text-sm">
                 {(editable || pending) && (
-                  <button onClick={() => setPicking(seg)} className="rounded-lg border px-3 py-1">
-                    {pending ? '关联素材' : '换素材'}
-                  </button>
-                )}
-                {editable && (
-                  <>
-                    <button onClick={() => move(seg.id, -1)} className="rounded-lg border px-3 py-1">上移</button>
-                    <button onClick={() => move(seg.id, 1)} className="rounded-lg border px-3 py-1">下移</button>
-                  </>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button onClick={() => setPicking(seg)}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line bg-surface px-3.5 text-sm font-medium text-ink2 transition active:scale-[0.98]">
+                      🔄 {pending ? '关联素材' : '换素材'}
+                    </button>
+                    {editable && (
+                      <>
+                        <button onClick={() => move(seg.id, -1)}
+                          className="inline-flex h-10 items-center gap-1 rounded-xl border border-line bg-surface px-3.5 text-sm font-medium text-ink2 transition active:scale-[0.98]">
+                          ↑ 上移
+                        </button>
+                        <button onClick={() => move(seg.id, 1)}
+                          className="inline-flex h-10 items-center gap-1 rounded-xl border border-line bg-surface px-3.5 text-sm font-medium text-ink2 transition active:scale-[0.98]">
+                          ↓ 下移
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </section>
 
       {editable && (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <button onClick={saveRevise} disabled={!dirty || busy}
-            className="w-full rounded-xl bg-blue-600 py-3 text-white disabled:opacity-40">
+            className="btn-primary w-full">
             保存修改并重新渲染
           </button>
           {task.status === 'PREVIEW_PENDING' && (
             <button onClick={() => act(() => api(`/api/tasks/${id}/confirm-preview`, { method: 'POST' }))}
               disabled={busy || dirty}
-              className="w-full rounded-xl bg-green-600 py-3 text-white disabled:opacity-40">
+              className="btn-ghost w-full">
               确认无误，提交质检
             </button>
           )}
           {task.status === 'QC_FAILED' && (
             <button onClick={() => act(() => api(`/api/tasks/${id}/retry-qc`, { method: 'POST' }))}
               disabled={busy || dirty}
-              className="w-full rounded-xl bg-orange-500 py-3 text-white disabled:opacity-40">
+              className="btn-ghost w-full">
               直接重新质检
             </button>
           )}
@@ -222,13 +243,13 @@ export default function AdminTaskDetailPage() {
       )}
 
       {task.qcReports.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-sm text-gray-500">质检报告（最近一轮）</h2>
-          <ul className="space-y-1 rounded-xl border bg-white p-3 text-sm">
+        <section className="space-y-3">
+          <p className="eyebrow">质检报告 · 最近一轮</p>
+          <ul className="card divide-y divide-line">
             {task.qcReports.slice(0, 3).map((r) => (
-              <li key={r.id} className="flex justify-between">
+              <li key={r.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                 <span>{QC_NAMES[r.checkType] ?? r.checkType}</span>
-                <span className={r.result === 'pass' ? 'text-green-600' : 'text-red-500'}>
+                <span className={r.result === 'pass' ? 'pill pill-ok' : 'pill pill-bad'}>
                   {r.result === 'pass' ? '通过' : `不通过：${r.detail ?? ''}`}
                 </span>
               </li>
@@ -237,17 +258,19 @@ export default function AdminTaskDetailPage() {
         </section>
       )}
 
-      <section>
-        <h2 className="mb-2 text-sm text-gray-500">状态日志</h2>
-        <ul className="space-y-1 rounded-xl border bg-white p-3 text-xs text-gray-600">
+      <section className="space-y-3">
+        <p className="eyebrow">状态日志</p>
+        <ul className="card divide-y divide-line px-4">
           {task.statusLogs.map((l) => (
-            <li key={l.id}>{new Date(l.createdAt).toLocaleTimeString('zh-CN')} → {STATUS_LABELS[l.toStatus] ?? l.toStatus}{l.note ? `（${l.note}）` : ''}</li>
+            <li key={l.id} className="py-2.5 text-xs text-ink2">
+              <span className="num text-ink3">{new Date(l.createdAt).toLocaleTimeString('zh-CN')}</span> → {STATUS_LABELS[l.toStatus] ?? l.toStatus}{l.note ? `（${l.note}）` : ''}
+            </li>
           ))}
         </ul>
       </section>
 
       <BottomSheet open={!!picking} onClose={() => setPicking(null)} title="选择素材">
-        <ul className="grid grid-cols-3 gap-2">
+        <ul className="grid grid-cols-3 gap-2.5">
           {allMaterials
             .slice()
             .sort((a, b) => {
@@ -261,9 +284,9 @@ export default function AdminTaskDetailPage() {
                 if (!picking) return
                 if (pending) linkMaterial(picking, m.id)
                 else { setMats((s) => ({ ...s, [picking.id]: m.id })); setPicking(null) }
-              }} className="overflow-hidden rounded-lg border">
+              }} className="overflow-hidden rounded-2xl border border-line bg-surface transition active:scale-[0.98]">
                 {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="aspect-video w-full object-cover" />}
-                <p className="p-1 text-center text-xs text-gray-500">{((m.durationMs ?? 0) / 1000).toFixed(1)}s</p>
+                <p className="num p-1.5 text-center text-xs text-ink3">{((m.durationMs ?? 0) / 1000).toFixed(1)}s</p>
               </button>
             ))}
         </ul>

@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import { STATUS_LABELS, isTerminal } from '@/lib/status'
+import { StatusPill, PipelineRail } from '@/components/ui'
 
 type Task = {
   id: string; status: string; aspectRatio: string
@@ -45,55 +46,73 @@ export default function WorkDetailPage() {
 
   if (!task && err) {
     return (
-      <div className="space-y-4 p-4">
-        <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>
-        <Link href="/works" className="block text-sm text-blue-600">返回作品列表</Link>
+      <div className="space-y-4">
+        <p className="pill pill-bad">{err}</p>
+        <Link href="/works" className="text-sm text-flame">← 返回作品列表</Link>
       </div>
     )
   }
-  if (!task) return <p className="p-4">加载中…</p>
+  if (!task) return <p className="py-16 text-center text-sm text-ink3">加载中…</p>
   const exp = task.exports[0]
   const showDraft = ['PREVIEW_PENDING', 'QC_RUNNING', 'QC_PASSED', 'QC_FAILED'].includes(task.status)
+  const showVideo = showDraft || task.status === 'EXPORTED'
+  const vertical = task.aspectRatio === '9:16'
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-bold">{task.script?.title ?? '作品详情'}</h1>
-      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
-      <p className="text-sm">
-        状态：<span className="font-medium text-blue-600">{STATUS_LABELS[task.status] ?? task.status}</span>
-        <span className="ml-2 text-xs text-gray-400">{task.aspectRatio === '9:16' ? '竖屏' : '横屏'}</span>
-      </p>
-      {(showDraft || task.status === 'EXPORTED') && (
-        <video controls playsInline className="w-full rounded-xl bg-black"
-          src={task.status === 'EXPORTED' && exp ? exp.videoUrl : `/api/files/exports/${task.id}/draft.mp4`} />
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-bold">{task.script?.title ?? '作品详情'}</h1>
+          <p className="num mt-1 text-xs text-ink3">{vertical ? '竖屏 9:16' : '横屏 16:9'}</p>
+        </div>
+        <StatusPill status={task.status} />
+      </div>
+      {err && <p className="pill pill-bad">{err}</p>}
+
+      <div className="card p-4">
+        <PipelineRail status={task.status} />
+      </div>
+
+      {showVideo && (
+        <div className="overflow-hidden rounded-3xl bg-black shadow-card">
+          <video controls playsInline
+            className={`mx-auto w-full bg-black object-contain ${vertical ? 'max-h-[62vh]' : 'aspect-video'}`}
+            src={task.status === 'EXPORTED' && exp ? exp.videoUrl : `/api/files/exports/${task.id}/draft.mp4`} />
+        </div>
       )}
+
       {task.status === 'PREVIEW_PENDING' && (
-        <button onClick={() => act('confirm-preview')}
-          className="w-full rounded-xl bg-green-600 py-3 text-white">确认无误，提交质检</button>
+        <button onClick={() => act('confirm-preview')} className="btn-primary w-full">确认无误，提交质检</button>
       )}
       {task.status === 'FAILED' && (
-        <button onClick={() => act('retry')}
-          className="w-full rounded-xl bg-orange-500 py-3 text-white">失败重试</button>
+        <button onClick={() => act('retry')} className="btn-ghost w-full">失败重试</button>
       )}
       {task.status === 'EXPORTED' && exp && (
-        <div className="space-y-2">
-          <a href={exp.videoUrl} download className="block rounded-xl bg-blue-600 py-3 text-center text-white">下载成片 MP4</a>
-          <div className="flex gap-2 text-sm">
-            <a href={exp.subtitleUrl} download className="flex-1 rounded-lg border bg-white py-2 text-center">字幕 SRT</a>
-            <a href={exp.projectJsonUrl} download className="flex-1 rounded-lg border bg-white py-2 text-center">项目 JSON</a>
+        <div className="space-y-2.5">
+          <a href={exp.videoUrl} download className="btn-primary w-full">下载成片 MP4</a>
+          <div className="flex gap-2.5 text-sm">
+            <a href={exp.subtitleUrl} download className="btn-ghost flex-1">字幕 SRT</a>
+            <a href={exp.projectJsonUrl} download className="btn-ghost flex-1">项目 JSON</a>
           </div>
         </div>
       )}
-      <section>
-        <h2 className="mb-2 text-sm text-gray-500">处理进度</h2>
-        <ul className="space-y-1 rounded-xl border bg-white p-3 text-sm">
-          {task.statusLogs.map((l) => (
-            <li key={l.id} className="flex justify-between">
-              <span>{STATUS_LABELS[l.toStatus] ?? l.toStatus}{l.note ? `（${l.note}）` : ''}</span>
-              <span className="text-xs text-gray-400">{new Date(l.createdAt).toLocaleTimeString('zh-CN')}</span>
+
+      <section className="space-y-3">
+        <p className="eyebrow">处理进度</p>
+        <ol className="card divide-y divide-line">
+          {[...task.statusLogs].reverse().map((l, i) => (
+            <li key={l.id} className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${i === 0 ? 'grad' : 'bg-line'}`} />
+                <span className="text-sm">
+                  {STATUS_LABELS[l.toStatus] ?? l.toStatus}
+                  {l.note ? <span className="text-ink3">（{l.note}）</span> : null}
+                </span>
+              </div>
+              <span className="num shrink-0 text-xs text-ink3">{new Date(l.createdAt).toLocaleTimeString('zh-CN')}</span>
             </li>
           ))}
-        </ul>
+        </ol>
       </section>
     </div>
   )

@@ -53,34 +53,38 @@ function MaterialsInner() {
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-lg font-semibold">素材库</h1>
+    <div className="space-y-5">
+      <h1 className="font-display text-2xl font-bold tracking-tight">素材库</h1>
       {returnTaskId && (
-        <Link href={`/admin/tasks/${returnTaskId}`}
-          className="block rounded-lg bg-amber-50 p-3 text-sm text-amber-700">
-          正在为任务补充素材，上传完成后点此返回任务详情 →
-        </Link>
+        <div className="card space-y-3 border-l-4 border-l-flame p-4">
+          <p className="text-sm text-ink2">正在为任务补充素材，上传完成后点此返回任务详情</p>
+          <Link href={`/admin/tasks/${returnTaskId}`} className="btn-primary w-full">返回任务详情 →</Link>
+        </div>
       )}
-      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
-      <div className="space-y-2 rounded-xl border bg-white p-3">
-        <input ref={fileRef} type="file" accept="video/*" className="w-full text-sm" />
+      {err && <p className="pill pill-bad">{err}</p>}
+      <div className="card space-y-3 p-4">
+        <p className="eyebrow">上传素材</p>
+        <input ref={fileRef} type="file" accept="video/*" className="field text-sm" />
         <TagPicker value={tagIds} onChange={setTagIds} />
         {progress >= 0 ? (
-          <div className="h-2 overflow-hidden rounded bg-gray-200">
-            <div className="h-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+          <div className="h-2 overflow-hidden rounded-full bg-surface2">
+            <div className="grad h-full transition-all" style={{ width: `${progress}%` }} />
           </div>
         ) : (
-          <button onClick={upload} className="w-full rounded-lg bg-blue-600 py-2 text-white">上传素材</button>
+          <button onClick={upload} className="btn-primary w-full">上传素材</button>
         )}
       </div>
       <FilterBar value={filter} onChange={setFilter} />
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <ul className="grid grid-cols-2 gap-3">
         {list.map((m) => (
-          <li key={m.id} className="overflow-hidden rounded-xl border bg-white">
+          <li key={m.id} className="card overflow-hidden">
             {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="aspect-video w-full object-cover" />}
-            <div className="flex items-center justify-between p-2 text-xs text-gray-500">
-              <span>{((m.durationMs ?? 0) / 1000).toFixed(1)}s · {m.tags.length}标签</span>
-              <button onClick={() => del(m.id)} className="text-red-500">删除</button>
+            <div className="space-y-2 p-3">
+              <span className="chip">
+                <span className="chip-dot bg-ink3" />
+                <span className="num">{((m.durationMs ?? 0) / 1000).toFixed(1)}</span>s · <span className="num">{m.tags.length}</span>标签
+              </span>
+              <button onClick={() => del(m.id)} className="btn-danger w-full text-xs">删除</button>
             </div>
           </li>
         ))}
@@ -97,8 +101,8 @@ function FilterBar({ value, onChange }: { value: string; onChange: (v: string) =
   }, [])
   return (
     <div className="space-y-1">
-      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border px-3 py-2">
+      {err && <p className="pill pill-bad">{err}</p>}
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="field">
         <option value="">全部标签</option>
         {nodes.filter((n) => n.parentId).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
       </select>

@@ -23,3 +23,26 @@ export function statusGroup(status: string): '已完成' | '失败' | '处理中
 export function isTerminal(status: string): boolean {
   return ['EXPORTED', 'FAILED', 'MATERIAL_PENDING', 'PREVIEW_PENDING', 'QC_FAILED'].includes(status)
 }
+
+// 状态胶囊色调：ok=已完成 bad=失败 warn=待人工 run=进行中
+export function statusTone(status: string): 'ok' | 'bad' | 'warn' | 'run' {
+  if (status === 'EXPORTED') return 'ok'
+  if (status === 'FAILED') return 'bad'
+  if (['MATERIAL_PENDING', 'PREVIEW_PENDING', 'QC_FAILED'].includes(status)) return 'warn'
+  return 'run'
+}
+
+// signature：把 13 个状态收敛成 5 段"生产线"
+export const PIPELINE = ['分段', '匹配', '渲染', '质检', '导出'] as const
+
+const STAGE_OF: Record<string, number> = {
+  CREATED: 0, SEGMENTING: 0,
+  MATCHING: 1, MATERIAL_PENDING: 1,
+  STORYBOARD_READY: 2, RENDERING: 2, PREVIEW_PENDING: 2, REVISING: 2,
+  QC_RUNNING: 3, QC_FAILED: 3, QC_PASSED: 3,
+  EXPORTED: 4,
+}
+
+export function stageIndex(status: string): number {
+  return STAGE_OF[status] ?? 0
+}

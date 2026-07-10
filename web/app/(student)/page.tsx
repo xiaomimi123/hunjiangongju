@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
-import { STATUS_LABELS } from '@/lib/status'
+import { StatusPill } from '@/components/ui'
 
 type Script = { id: string; title: string; _count: { segments: number } }
 type Task = { id: string; status: string; createdAt: string; script: { title: string } | null }
@@ -33,45 +33,70 @@ export default function HomePage() {
   }
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-xl font-bold">快速开始</h1>
-      {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
-      <section className="space-y-2">
-        <h2 className="text-sm text-gray-500">1. 选择文案包</h2>
-        {scripts.map((s) => (
-          <button key={s.id} onClick={() => setSelected(s.id)}
-            className={`block w-full rounded-xl border p-4 text-left ${selected === s.id ? 'border-blue-600 bg-blue-50' : 'bg-white'}`}>
-            <p className="font-medium">{s.title}</p>
-            <p className="text-xs text-gray-400">{s._count.segments} 个分镜段</p>
-          </button>
-        ))}
-        {scripts.length === 0 && <p className="text-sm text-gray-400">暂无已发布的文案包</p>}
-      </section>
-      <section className="space-y-2">
-        <h2 className="text-sm text-gray-500">2. 选择输出规格</h2>
-        <div className="flex gap-2">
-          {(['9:16', '16:9'] as const).map((r) => (
-            <button key={r} onClick={() => setRatio(r)}
-              className={`flex-1 rounded-xl border py-3 ${ratio === r ? 'border-blue-600 bg-blue-50' : 'bg-white'}`}>
-              {r === '9:16' ? '竖屏 9:16' : '横屏 16:9'}
-            </button>
-          ))}
+    <div className="space-y-7">
+      <h1 className="font-display text-[2rem] font-bold leading-tight tracking-tight">
+        做一条<span className="grad-text">爆款</span>
+      </h1>
+      {err && <p className="pill pill-bad">{err}</p>}
+
+      <section className="space-y-3">
+        <p className="eyebrow">01 · 选文案包</p>
+        <div className="space-y-2.5">
+          {scripts.map((s) => {
+            const on = selected === s.id
+            return (
+              <button key={s.id} onClick={() => setSelected(s.id)}
+                className={`flex w-full items-center justify-between rounded-3xl border bg-surface p-4 text-left transition ${
+                  on ? 'border-flame shadow-lift ring-4 ring-flame/10' : 'border-line shadow-card'
+                }`}>
+                <div>
+                  <p className="font-medium">{s.title}</p>
+                  <p className="mt-0.5 text-xs text-ink3"><span className="num">{s._count.segments}</span> 个分镜段</p>
+                </div>
+                <span className={`grid h-6 w-6 place-items-center rounded-full text-xs ${on ? 'grad text-white' : 'border border-line text-transparent'}`}>✓</span>
+              </button>
+            )
+          })}
+          {scripts.length === 0 && <p className="card p-5 text-center text-sm text-ink3">暂无已发布的文案包</p>}
         </div>
       </section>
-      <button onClick={create} disabled={!selected || creating}
-        className="w-full rounded-xl bg-blue-600 py-3 text-lg text-white disabled:opacity-40">
-        {creating ? '创建中…' : '一键生成'}
-      </button>
-      <section className="space-y-2">
-        <h2 className="text-sm text-gray-500">最近作品</h2>
-        {recent.map((t) => (
-          <Link key={t.id} href={`/works/${t.id}`}
-            className="flex items-center justify-between rounded-xl border bg-white p-3">
-            <span className="text-sm">{t.script?.title ?? '未知文案'}</span>
-            <span className="text-xs text-gray-400">{STATUS_LABELS[t.status] ?? t.status}</span>
-          </Link>
-        ))}
+
+      <section className="space-y-3">
+        <p className="eyebrow">02 · 输出规格</p>
+        <div className="flex gap-2.5">
+          {(['9:16', '16:9'] as const).map((r) => {
+            const on = ratio === r
+            return (
+              <button key={r} onClick={() => setRatio(r)}
+                className={`flex flex-1 flex-col items-center gap-2 rounded-3xl border py-4 transition ${
+                  on ? 'border-flame bg-surface shadow-lift ring-4 ring-flame/10' : 'border-line bg-surface shadow-card'
+                }`}>
+                <span className={`rounded-md ${on ? 'grad' : 'bg-ink3'} ${r === '9:16' ? 'h-8 w-[18px]' : 'h-[18px] w-8'}`} />
+                <span className="text-sm font-medium">{r === '9:16' ? '竖屏' : '横屏'} <span className="num text-xs text-ink3">{r}</span></span>
+              </button>
+            )
+          })}
+        </div>
       </section>
+
+      <button onClick={create} disabled={!selected || creating} className="btn-primary w-full text-base">
+        {creating ? '生成中…' : '⚡ 一键生成'}
+      </button>
+
+      {recent.length > 0 && (
+        <section className="space-y-3">
+          <p className="eyebrow">最近作品</p>
+          <div className="space-y-2.5">
+            {recent.map((t) => (
+              <Link key={t.id} href={`/works/${t.id}`}
+                className="card flex items-center justify-between p-4">
+                <span className="text-sm font-medium">{t.script?.title ?? '未知文案'}</span>
+                <StatusPill status={t.status} />
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

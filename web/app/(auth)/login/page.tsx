@@ -39,6 +39,23 @@ function PwField({ value, onChange, placeholder }: { value: string; onChange: (v
   )
 }
 
+// 顶层声明，避免每次渲染重建组件导致输入框重挂载/丢焦点
+function CodeRow({ code, onCode, cd, email, busy, onGet }: {
+  code: string; onCode: (v: string) => void; cd: number; email: string; busy: boolean; onGet: () => void
+}) {
+  return (
+    <div className="flex gap-2">
+      <input className="field num flex-1 tracking-widest" value={code}
+        onChange={(e) => onCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+        placeholder="6 位验证码" inputMode="numeric" maxLength={6} />
+      <button type="button" onClick={onGet} disabled={cd > 0 || !email || busy}
+        className="btn-ghost shrink-0 whitespace-nowrap px-4 text-sm disabled:opacity-40">
+        {cd > 0 ? `${cd}s` : '获取验证码'}
+      </button>
+    </div>
+  )
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const [emailEnabled, setEmailEnabled] = useState(false)
@@ -57,16 +74,16 @@ export default function LoginPage() {
   useEffect(() => { if (cd <= 0) return; const t = setTimeout(() => setCd(cd - 1), 1000); return () => clearTimeout(t) }, [cd])
 
   function clear() { setErr(''); setMsg('') }
-  function switchTo(v: View) { setView(v); clear(); setCode(''); setPassword(''); setPassword2('') }
+  function switchTo(v: View) { setView(v); clear(); setCode(''); setPassword(''); setPassword2(''); setCd(0) }
   function go(role: string) { router.replace(role === 'operator' ? '/admin/students' : '/') }
 
   async function getCode(kind: 'register' | 'reset') {
-    clear()
+    clear(); setBusy(true)
     try {
       await api(kind === 'register' ? '/api/auth/send-code' : '/api/auth/forgot', { body: { email } })
       setCd(60)
       setMsg(kind === 'register' ? '验证码已发送至邮箱' : '若邮箱已注册，验证码已发送')
-    } catch (e) { setErr((e as Error).message) }
+    } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
 
   async function login() {
@@ -96,20 +113,9 @@ export default function LoginPage() {
     setBusy(true)
     try {
       await api('/api/auth/reset', { body: { email, code, newPassword: password } })
-      setMsg('密码已重置，请登录'); switchTo('login')
+      switchTo('login'); setMsg('密码已重置，请登录')
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
-
-  const CodeRow = ({ kind }: { kind: 'register' | 'reset' }) => (
-    <div className="flex gap-2">
-      <input className="field num flex-1 tracking-widest" value={code} onChange={(e) => setCode(e.target.value)}
-        placeholder="6 位验证码" inputMode="numeric" maxLength={6} />
-      <button type="button" onClick={() => getCode(kind)} disabled={cd > 0 || !email}
-        className="btn-ghost shrink-0 whitespace-nowrap px-4 text-sm disabled:opacity-40">
-        {cd > 0 ? `${cd}s` : '获取验证码'}
-      </button>
-    </div>
-  )
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center gap-6 px-6">
@@ -146,7 +152,7 @@ export default function LoginPage() {
       {view === 'register' && (
         <div className="space-y-3">
           <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="邮箱" autoCapitalize="none" />
-          {emailEnabled && <CodeRow kind="register" />}
+          {emailEnabled && <CodeRow code={code} onCode={setCode} cd={cd} email={email} busy={busy} onGet={() => getCode('register')} />}
           <input className="field" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="昵称" />
           <PwField value={password} onChange={setPassword} placeholder="密码（至少 6 位）" />
           <PwField value={password2} onChange={setPassword2} placeholder="确认密码" />
@@ -159,7 +165,7 @@ export default function LoginPage() {
       {view === 'reset' && (
         <div className="space-y-3">
           <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="注册邮箱" autoCapitalize="none" />
-          <CodeRow kind="reset" />
+          <CodeRow code={code} onCode={setCode} cd={cd} email={email} busy={busy} onGet={() => getCode('reset')} />
           <PwField value={password} onChange={setPassword} placeholder="新密码（至少 6 位）" />
           <PwField value={password2} onChange={setPassword2} placeholder="确认新密码" />
           {err && <p className="pill pill-bad">{err}</p>}

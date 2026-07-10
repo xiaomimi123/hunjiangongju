@@ -27,7 +27,7 @@ export const PUT = handler(async (req) => {
   const row = await prisma.smtpConfig.upsert({
     where: { id: 1 },
     update: data,
-    create: { id: 1, ...data, passwordEnc: typeof b.password === 'string' && b.password ? encrypt(b.password) : '' },
+    create: { id: 1, ...data },
   })
   return NextResponse.json({ ok: true, hasPassword: !!row.passwordEnc })
 })

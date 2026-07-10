@@ -10,13 +10,19 @@ const PAGE = 20
 export default function StudentsPage() {
   const [data, setData] = useState<Resp | null>(null)
   const [search, setSearch] = useState('')
+  const [debounced, setDebounced] = useState('')
   const [page, setPage] = useState(1)
   const [err, setErr] = useState('')
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
   const load = useCallback(async () => {
-    try { setData(await api<Resp>(`/api/admin/students?search=${encodeURIComponent(search)}&page=${page}&pageSize=${PAGE}`)) }
+    try { setData(await api<Resp>(`/api/admin/students?search=${encodeURIComponent(debounced)}&page=${page}&pageSize=${PAGE}`)) }
     catch (e) { setErr((e as Error).message) }
-  }, [search, page])
+  }, [debounced, page])
   useEffect(() => { load() }, [load])
 
   const stats = data?.stats

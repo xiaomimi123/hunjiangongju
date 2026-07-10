@@ -7,8 +7,10 @@ export const GET = handler(async (req) => {
   await requireRole('operator')
   const url = new URL(req.url)
   const search = (url.searchParams.get('search') ?? '').trim()
-  const page = Math.max(1, Number(url.searchParams.get('page') ?? 1))
-  const pageSize = Math.min(50, Math.max(1, Number(url.searchParams.get('pageSize') ?? 20)))
+  const pageRaw = Number(url.searchParams.get('page'))
+  const page = Number.isFinite(pageRaw) ? Math.max(1, Math.trunc(pageRaw)) : 1
+  const pageSizeRaw = Number(url.searchParams.get('pageSize'))
+  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(50, Math.max(1, Math.trunc(pageSizeRaw))) : 20
 
   const where = {
     role: 'student',

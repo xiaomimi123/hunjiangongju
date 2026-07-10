@@ -18,8 +18,9 @@ export const PUT = handler(async (req) => {
   await requireRole('operator')
   const b = await req.json()
   if (b.enabled && !b.host?.trim()) throw new HttpError(400, '开启前请先填写 SMTP 主机')
+  const port = Number(b.port)
   const data: Record<string, unknown> = {
-    host: String(b.host ?? '').trim(), port: Number(b.port ?? 465), secure: !!b.secure,
+    host: String(b.host ?? '').trim(), port: Number.isFinite(port) ? port : 465, secure: !!b.secure,
     username: String(b.username ?? '').trim(), fromAddress: String(b.fromAddress ?? '').trim(),
     fromName: String(b.fromName ?? '投流工作台').trim(), enabled: !!b.enabled,
   }

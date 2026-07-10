@@ -27,12 +27,12 @@
   body {
     @apply min-h-dvh bg-paper text-ink antialiased;
     font-family: 'PingFang SC', 'HarmonyOS Sans SC', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, sans-serif;
-    /* 右上角带货暖光，克制地暗示"生成"的能量 */
-    background-image: radial-gradient(130% 70% at 100% -10%, rgba(255, 45, 120, 0.07), transparent 55%);
+    /* 右上角品牌红微光 */
+    background-image: radial-gradient(130% 70% at 100% -10%, rgba(230, 0, 18, 0.06), transparent 55%);
     background-attachment: fixed;
   }
   ::selection {
-    background: rgba(255, 45, 120, 0.16);
+    background: rgba(230, 0, 18, 0.14);
   }
   h1, h2, h3 {
     letter-spacing: -0.01em;
@@ -40,12 +40,12 @@
 }
 
 @layer components {
-  /* 带货火焰渐变——只给"行动"与"进行中"用 */
+  /* 品牌红渐变——只给"行动"与"进行中"用 */
   .grad {
-    background-image: linear-gradient(100deg, #ff5a1f 0%, #ff2d78 100%);
+    background-image: linear-gradient(100deg, #ff3b30 0%, #d0021b 100%);
   }
   .grad-text {
-    background-image: linear-gradient(100deg, #ff5a1f 0%, #ff2d78 100%);
+    background-image: linear-gradient(100deg, #ff3b30 0%, #d0021b 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -70,8 +70,8 @@
     @apply text-ink3;
   }
   .field:focus {
-    border-color: #ff2f57;
-    box-shadow: 0 0 0 4px rgba(255, 47, 87, 0.1);
+    border-color: #e60012;
+    box-shadow: 0 0 0 4px rgba(230, 0, 18, 0.12);
   }
 
   .btn {
@@ -113,7 +113,7 @@
   .pill-ok   { @apply text-ok;   background: rgba(15, 183, 126, 0.12); }
   .pill-bad  { @apply text-bad;  background: rgba(245, 51, 79, 0.1); }
   .pill-warn { @apply text-warn; background: rgba(245, 158, 11, 0.12); }
-  .pill-run  { @apply text-flame; background: rgba(255, 47, 87, 0.1); }
+  .pill-run  { @apply text-flame; background: rgba(230, 0, 18, 0.1); }
   .pill-run::before { animation: pulse 1.4s ease-in-out infinite; }
 
   @keyframes pulse {

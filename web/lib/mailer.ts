@@ -7,7 +7,7 @@ type Cfg = { host: string; port: number; secure: boolean; username: string; pass
 
 async function loadCfg(): Promise<{ enabled: boolean; cfg: Cfg }> {
   const row = await prisma.smtpConfig.findUnique({ where: { id: 1 } })
-  if (!row) return { enabled: false, cfg: { host: '', port: 465, secure: true, username: '', password: '', fromAddress: '', fromName: '投流工作台' } }
+  if (!row) return { enabled: false, cfg: { host: '', port: 465, secure: true, username: '', password: '', fromAddress: '', fromName: '东方文澜' } }
   return {
     enabled: !!(row.enabled && row.host),
     cfg: { host: row.host, port: row.port, secure: row.secure, username: row.username, password: decrypt(row.passwordEnc), fromAddress: row.fromAddress, fromName: row.fromName },
@@ -40,7 +40,7 @@ export async function sendTestMail(
   await transport(cfg).sendMail({
     from: `"${cfg.fromName}" <${cfg.fromAddress}>`,
     to,
-    subject: '投流工作台 · SMTP 测试邮件',
+    subject: '东方文澜 · SMTP 测试邮件',
     html: '<p>这是一封测试邮件，收到即表示 SMTP 配置可用。</p>',
   })
 }

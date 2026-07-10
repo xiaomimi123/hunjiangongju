@@ -182,7 +182,7 @@ model SmtpConfig {
   username    String   @default("")
   passwordEnc String   @default("") @map("password_enc")
   fromAddress String   @default("") @map("from_address")
-  fromName    String   @default("投流工作台") @map("from_name")
+  fromName    String   @default("东方文澜") @map("from_name")
   enabled     Boolean  @default(false)
   updatedAt   DateTime @updatedAt @map("updated_at")
 

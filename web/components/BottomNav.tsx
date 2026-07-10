@@ -20,8 +20,8 @@ function Glyph({ d, active }: { d: string; active: boolean }) {
       strokeLinecap="round" strokeLinejoin="round">
       <defs>
         <linearGradient id="flame" x1="0" y1="0" x2="24" y2="24">
-          <stop offset="0" stopColor="#ff5a1f" />
-          <stop offset="1" stopColor="#ff2d78" />
+          <stop offset="0" stopColor="#ff3b30" />
+          <stop offset="1" stopColor="#d0021b" />
         </linearGradient>
       </defs>
       <path d={d} />

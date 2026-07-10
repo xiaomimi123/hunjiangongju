@@ -14,6 +14,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // 排除静态资源（含 /fonts 下自托管字体），避免被鉴权拦截
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|fonts).*)'],
+  // 排除静态资源（/fonts 字体、/brand 品牌图），避免被鉴权拦截
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|fonts|brand).*)'],
 }

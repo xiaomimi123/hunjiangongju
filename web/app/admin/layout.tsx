@@ -9,8 +9,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col justify-between border-r border-line bg-surface p-4 md:flex">
         <div className="space-y-6">
           <div className="flex items-center gap-2 px-2">
-            <span className="grad h-6 w-6 rounded-md shadow-lift" />
-            <span className="font-display text-base font-bold">运营控制台</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/logo-mark.png" alt="东方文澜" className="h-8 w-auto" />
+            <span className="font-display text-base font-bold">东方文澜</span>
           </div>
           <SidebarNav />
         </div>

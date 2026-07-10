@@ -1,7 +1,7 @@
 import './globals.css'
 import type { Metadata, Viewport } from 'next'
 
-export const metadata: Metadata = { title: '投流工作台 · 混剪' }
+export const metadata: Metadata = { title: '东方文澜', icons: { icon: '/brand/logo-mark.png' } }
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,

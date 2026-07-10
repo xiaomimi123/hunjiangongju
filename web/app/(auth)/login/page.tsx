@@ -172,9 +172,9 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center gap-6 px-6">
-      <div className="space-y-3">
-        <span className="grad inline-flex h-11 w-11 items-center justify-center rounded-2xl text-xl shadow-lift">⚡</span>
-        <h1 className="font-display text-[2rem] font-bold leading-none tracking-tight">投流<span className="grad-text">工作台</span></h1>
+      <div className="space-y-3 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/brand/logo-full.png" alt="东方文澜" className="mx-auto w-60" />
         <p className="text-sm text-ink2">一键把素材混成投流爆款。</p>
       </div>
 

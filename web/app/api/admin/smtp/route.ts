@@ -9,7 +9,7 @@ export const GET = handler(async () => {
   const row = await prisma.smtpConfig.findUnique({ where: { id: 1 } })
   return NextResponse.json({
     host: row?.host ?? '', port: row?.port ?? 465, secure: row?.secure ?? true,
-    username: row?.username ?? '', fromAddress: row?.fromAddress ?? '', fromName: row?.fromName ?? '投流工作台',
+    username: row?.username ?? '', fromAddress: row?.fromAddress ?? '', fromName: row?.fromName ?? '东方文澜',
     enabled: row?.enabled ?? false, hasPassword: !!row?.passwordEnc,
   })
 })
@@ -22,7 +22,7 @@ export const PUT = handler(async (req) => {
   const data: Record<string, unknown> = {
     host: String(b.host ?? '').trim(), port: Number.isFinite(port) ? port : 465, secure: !!b.secure,
     username: String(b.username ?? '').trim(), fromAddress: String(b.fromAddress ?? '').trim(),
-    fromName: String(b.fromName ?? '投流工作台').trim(), enabled: !!b.enabled,
+    fromName: String(b.fromName ?? '东方文澜').trim(), enabled: !!b.enabled,
   }
   if (typeof b.password === 'string' && b.password.length > 0) data.passwordEnc = encrypt(b.password)
   const row = await prisma.smtpConfig.upsert({

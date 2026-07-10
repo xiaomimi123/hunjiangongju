@@ -19,7 +19,7 @@ export const POST = handler(async (req) => {
       host, port: Number(b.port ?? row?.port ?? 465),
       secure: b.secure ?? row?.secure ?? true, username: String(b.username ?? row?.username ?? '').trim(),
       password, fromAddress: String(b.fromAddress ?? row?.fromAddress ?? '').trim(),
-      fromName: String(b.fromName ?? row?.fromName ?? '投流工作台').trim(),
+      fromName: String(b.fromName ?? row?.fromName ?? '东方文澜').trim(),
     }
     await sendTestMail(cfg, String(b.to).trim())
   } catch (e) {

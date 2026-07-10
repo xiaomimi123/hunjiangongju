@@ -16,7 +16,7 @@ export async function sendCode(email: string, purpose: 'verify' | 'reset'): Prom
     data: { email, purpose, codeHash: hashCode(code), expiresAt: new Date(Date.now() + TTL_MS) },
   })
   const title = purpose === 'verify' ? '注册验证码' : '重置密码验证码'
-  await sendMail(email, `投流工作台 · ${title}`, `<p>你的${title}是 <b style="font-size:20px">${code}</b>，10 分钟内有效。</p>`)
+  await sendMail(email, `东方文澜 · ${title}`, `<p>你的${title}是 <b style="font-size:20px">${code}</b>，10 分钟内有效。</p>`)
 }
 
 const MAX_ATTEMPTS = 5

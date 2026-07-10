@@ -117,6 +117,8 @@ export default function AdminTaskDetailPage() {
   if (!task) return <p>加载中…</p>
   const editable = task.status === 'PREVIEW_PENDING' || task.status === 'QC_FAILED'
   const pending = task.status === 'MATERIAL_PENDING'
+  const stuckActive = ['CREATED', 'SEGMENTING', 'MATCHING', 'STORYBOARD_READY', 'RENDERING', 'QC_RUNNING', 'REVISING']
+    .includes(task.status)
   const segMap = new Map(task.segments.map((s) => [s.id, s]))
   const orderedSegs = order.map((sid) => segMap.get(sid)!).filter(Boolean)
   const dirty = Object.keys(subs).length + Object.keys(mats).length > 0
@@ -127,6 +129,19 @@ export default function AdminTaskDetailPage() {
       <h1 className="text-lg font-semibold">{task.script?.title ?? '任务详情'}</h1>
       {err && <p className="rounded bg-red-50 p-2 text-sm text-red-600">{err}</p>}
       <p className="text-sm">状态：<span className="font-medium text-blue-600">{STATUS_LABELS[task.status] ?? task.status}</span></p>
+
+      {stuckActive && (
+        <button
+          onClick={() => {
+            if (!confirm('任务可能已卡住（如后台入队失败），是否重置并从头重试？此操作会中断当前进度。')) return
+            act(() => api(`/api/tasks/${id}/retry`, { method: 'POST' }))
+          }}
+          disabled={busy}
+          className="w-full rounded-xl border border-red-400 py-3 text-red-600 disabled:opacity-40"
+        >
+          重置并重试
+        </button>
+      )}
 
       {['PREVIEW_PENDING', 'QC_RUNNING', 'QC_PASSED', 'QC_FAILED', 'EXPORTED'].includes(task.status) && (
         <video controls playsInline className="w-full rounded-xl bg-black"

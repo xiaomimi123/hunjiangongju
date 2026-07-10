@@ -32,21 +32,20 @@ async function makeThumb(video: string, outJpg: string) {
 }
 
 async function main() {
-  // 1. 用户与密钥
-  const [op, stu] = await Promise.all([
-    prisma.user.upsert({
-      where: { account: 'operator' }, update: {},
-      create: { account: 'operator', passwordHash: bcrypt.hashSync('op123456', 10), role: 'operator' },
-    }),
-    prisma.user.upsert({
-      where: { account: 'student' }, update: {},
-      create: { account: 'student', passwordHash: bcrypt.hashSync('stu123456', 10), role: 'student' },
-    }),
-  ])
-  await prisma.accessKey.upsert({
-    where: { keyValue: 'DEMO-KEY-2026' }, update: {},
-    create: { keyValue: 'DEMO-KEY-2026', userId: stu.id },
+  // 1. 用户（邮箱账号）
+  const op = await prisma.user.upsert({
+    where: { email: 'operator@demo.com' },
+    update: {},
+    create: { email: 'operator@demo.com', account: 'operator@demo.com', nickname: '运营小队', passwordHash: bcrypt.hashSync('op123456', 10), role: 'operator' },
   })
+  for (const [n, name] of [['student1', '学员一'], ['student2', '学员二'], ['student3', '学员三']] as const) {
+    await prisma.user.upsert({
+      where: { email: `${n}@demo.com` },
+      update: {},
+      create: { email: `${n}@demo.com`, account: `${n}@demo.com`, nickname: name, passwordHash: bcrypt.hashSync('stu123456', 10), role: 'student' },
+    })
+  }
+  await prisma.smtpConfig.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } })
 
   // 2. 标签树（幂等：已存在则跳过）
   if ((await prisma.tagCategory.count()) === 0) {

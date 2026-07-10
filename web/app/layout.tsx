@@ -1,13 +1,18 @@
 import './globals.css'
 import type { Metadata, Viewport } from 'next'
 
-export const metadata: Metadata = { title: '投流素材混剪工具' }
-export const viewport: Viewport = { width: 'device-width', initialScale: 1, maximumScale: 1 }
+export const metadata: Metadata = { title: '投流工作台 · 混剪' }
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: '#f2f3f5',
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="min-h-dvh bg-gray-50 text-gray-900">{children}</body>
+      <body>{children}</body>
     </html>
   )
 }

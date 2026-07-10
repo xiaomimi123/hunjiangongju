@@ -9,15 +9,30 @@ export default function TagPicker({ value, onChange }: { value: string[]; onChan
   const toggle = (id: string) =>
     onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
   return (
-    <div className="max-h-56 space-y-1 overflow-auto rounded-lg border p-2">
-      {flattenWithDepth(nodes).map((n) => (
-        <label key={n.id} className="flex items-center gap-2 py-1" style={{ paddingLeft: n.depth * 20 }}>
-          <input type="checkbox" checked={value.includes(n.id)} onChange={() => toggle(n.id)}
-            className="h-5 w-5" disabled={n.depth === 0} />
-          <span className={n.depth === 0 ? 'text-sm font-medium text-gray-500' : 'text-sm'}>{n.name}</span>
-        </label>
-      ))}
-      <p className="text-xs text-gray-400">（勾选二级节点；一级为分类名）</p>
+    <div className="max-h-56 overflow-auto rounded-2xl border border-line bg-surface2/50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {flattenWithDepth(nodes).map((n) => {
+          if (n.depth === 0) {
+            return (
+              <span key={n.id} className="eyebrow mt-2 basis-full first:mt-0">
+                {n.name}
+              </span>
+            )
+          }
+          const on = value.includes(n.id)
+          return (
+            <button key={n.id} type="button" onClick={() => toggle(n.id)}
+              className={
+                on
+                  ? 'inline-flex min-h-[40px] items-center rounded-full border border-flame bg-flame/5 px-3 text-sm font-medium text-flame transition'
+                  : 'chip min-h-[40px] border border-transparent px-3 text-sm transition'
+              }>
+              {n.name}
+            </button>
+          )
+        })}
+      </div>
+      <p className="mt-2 text-xs text-ink3">（勾选二级节点；一级为分类名）</p>
     </div>
   )
 }

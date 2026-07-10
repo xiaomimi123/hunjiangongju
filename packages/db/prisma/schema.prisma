@@ -10,7 +10,9 @@ datasource db {
 
 model User {
   id           String      @id @default(uuid())
-  account      String      @unique
+  email        String      @unique
+  nickname     String?
+  account      String?     @map("account")
   passwordHash String      @map("password_hash")
   role         String      @default("student")
   createdAt    DateTime    @default(now()) @map("created_at")
@@ -170,4 +172,32 @@ model Export {
   createdAt      DateTime @default(now()) @map("created_at")
 
   @@map("exports")
+}
+
+model SmtpConfig {
+  id          Int      @id @default(1)
+  host        String   @default("")
+  port        Int      @default(465)
+  secure      Boolean  @default(true)
+  username    String   @default("")
+  passwordEnc String   @default("") @map("password_enc")
+  fromAddress String   @default("") @map("from_address")
+  fromName    String   @default("投流工作台") @map("from_name")
+  enabled     Boolean  @default(false)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("smtp_config")
+}
+
+model EmailCode {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String    @map("code_hash")
+  purpose    String
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([email, purpose])
+  @@map("email_codes")
 }

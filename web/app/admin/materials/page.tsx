@@ -53,16 +53,16 @@ function MaterialsInner() {
   }
 
   return (
-    <div className="space-y-5">
-      <h1 className="font-display text-2xl font-bold tracking-tight">素材库</h1>
+    <div className="space-y-6">
+      <h1 className="font-display text-2xl font-bold">素材库</h1>
       {returnTaskId && (
-        <div className="card space-y-3 border-l-4 border-l-flame p-4">
+        <div className="card max-w-xl space-y-3 border-l-4 border-l-flame p-4">
           <p className="text-sm text-ink2">正在为任务补充素材，上传完成后点此返回任务详情</p>
           <Link href={`/admin/tasks/${returnTaskId}`} className="btn-primary w-full">返回任务详情 →</Link>
         </div>
       )}
       {err && <p className="pill pill-bad">{err}</p>}
-      <div className="card space-y-3 p-4">
+      <div className="card max-w-xl space-y-3 p-4">
         <p className="eyebrow">上传素材</p>
         <input ref={fileRef} type="file" accept="video/*" className="field text-sm" />
         <TagPicker value={tagIds} onChange={setTagIds} />
@@ -75,7 +75,7 @@ function MaterialsInner() {
         )}
       </div>
       <FilterBar value={filter} onChange={setFilter} />
-      <ul className="grid grid-cols-2 gap-3">
+      <ul className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
         {list.map((m) => (
           <li key={m.id} className="card overflow-hidden">
             {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="aspect-video w-full object-cover" />}

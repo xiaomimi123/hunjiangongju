@@ -126,7 +126,7 @@ export default function AdminTaskDetailPage() {
     || order.some((sid, i) => task.segments[i]?.id !== sid)
 
   return (
-    <div className="space-y-5">
+    <div className="max-w-3xl space-y-6">
       <div className="flex items-start justify-between gap-3">
         <h1 className="truncate font-display text-xl font-bold tracking-tight">{task.script?.title ?? '任务详情'}</h1>
         <StatusPill status={task.status} />
@@ -166,7 +166,7 @@ export default function AdminTaskDetailPage() {
 
       <section className="space-y-3">
         <p className="eyebrow">分镜段 · <span className="num">{orderedSegs.length}</span></p>
-        <div className="space-y-2.5">
+        <div className="grid gap-4 md:grid-cols-2">
           {orderedSegs.map((seg, i) => {
             const missing = !seg.materialId && !mats[seg.id]
             const mat = mats[seg.id]

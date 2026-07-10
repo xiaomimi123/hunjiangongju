@@ -35,10 +35,10 @@ export default function TagsPage() {
 
   const tree = buildTree(nodes)
   return (
-    <div className="space-y-5">
-      <h1 className="font-display text-2xl font-bold tracking-tight">标签分类树</h1>
+    <div className="space-y-6">
+      <h1 className="font-display text-2xl font-bold">标签分类树</h1>
       {err && <p className="pill pill-bad">{err}</p>}
-      <div className="card space-y-3 p-4">
+      <div className="card max-w-xl space-y-3 p-4">
         <p className="eyebrow">新建节点</p>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="节点名称"
           className="field" />
@@ -52,19 +52,23 @@ export default function TagsPage() {
       <ul className="card divide-y divide-line">
         {tree.map((r) => (
           <li key={r.id}>
-            <div className="flex items-center gap-2 px-4 py-3">
+            <div className="flex items-center gap-2 px-4 py-3 md:px-6">
               <button onClick={() => setOpen((o) => ({ ...o, [r.id]: !o[r.id] }))} className="w-6 text-ink3">
                 {open[r.id] ? '▾' : '▸'}
               </button>
               <span className="flex-1 font-medium">{r.name}</span>
-              <button onClick={() => rename(r.id, r.name)} className="btn-quiet px-2 text-sm">改名</button>
-              <button onClick={() => del(r.id)} className="btn-quiet px-2 text-sm text-bad">删除</button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button onClick={() => rename(r.id, r.name)} className="btn-quiet px-2 text-sm">改名</button>
+                <button onClick={() => del(r.id)} className="btn-quiet px-2 text-sm text-bad">删除</button>
+              </div>
             </div>
             {open[r.id] && r.children.map((c) => (
-              <div key={c.id} className="flex items-center gap-2 py-2 pl-12 pr-4">
+              <div key={c.id} className="flex items-center gap-2 py-2 pl-12 pr-4 md:pr-6">
                 <span className="flex-1 text-sm text-ink2">{c.name}</span>
-                <button onClick={() => rename(c.id, c.name)} className="btn-quiet px-2 text-sm">改名</button>
-                <button onClick={() => del(c.id)} className="btn-quiet px-2 text-sm text-bad">删除</button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button onClick={() => rename(c.id, c.name)} className="btn-quiet px-2 text-sm">改名</button>
+                  <button onClick={() => del(c.id)} className="btn-quiet px-2 text-sm text-bad">删除</button>
+                </div>
               </div>
             ))}
           </li>

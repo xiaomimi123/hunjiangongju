@@ -27,12 +27,12 @@ export default function ScriptsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold tracking-tight">文案库</h1>
+      <h1 className="font-display text-2xl font-bold">文案库</h1>
       {err && <p className="pill pill-bad">{err}</p>}
 
       <section className="space-y-3">
         <p className="eyebrow">新建文案</p>
-        <div className="card space-y-3 p-4">
+        <div className="card max-w-xl space-y-3 p-4">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="文案标题"
             className="field" />
           <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={5}
@@ -45,20 +45,38 @@ export default function ScriptsPage() {
 
       <section className="space-y-3">
         <p className="eyebrow">全部文案</p>
-        <div className="space-y-2.5">
-          {list.map((s) => (
-            <Link key={s.id} href={`/admin/scripts/${s.id}`}
-              className="card flex items-center gap-3 p-4">
-              <span className="flex-1 truncate font-medium">{s.title}</span>
-              <span className="num shrink-0 text-xs text-ink3">{s._count.segments} 段</span>
-              {s.status === 'published' ? (
-                <span className="pill pill-ok shrink-0">已发布</span>
-              ) : (
-                <span className="chip shrink-0">草稿</span>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-surface2 text-left text-ink3">
+              <tr>
+                <th className="px-4 py-3 font-medium">标题</th>
+                <th className="px-4 py-3 text-right font-medium">段数</th>
+                <th className="px-4 py-3 font-medium">状态</th>
+                <th className="px-4 py-3 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {list.map((s) => (
+                <tr key={s.id}>
+                  <td className="max-w-xs truncate px-4 py-3 font-medium">{s.title}</td>
+                  <td className="num px-4 py-3 text-right text-ink3">{s._count.segments}</td>
+                  <td className="px-4 py-3">
+                    {s.status === 'published' ? (
+                      <span className="pill pill-ok">已发布</span>
+                    ) : (
+                      <span className="chip">草稿</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Link href={`/admin/scripts/${s.id}`} className="btn-quiet px-2 text-sm">查看</Link>
+                  </td>
+                </tr>
+              ))}
+              {list.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">暂无文案，先新建一个吧</td></tr>
               )}
-            </Link>
-          ))}
-          {list.length === 0 && <p className="card p-5 text-center text-sm text-ink3">暂无文案，先新建一个吧</p>}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

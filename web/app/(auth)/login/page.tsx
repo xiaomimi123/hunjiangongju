@@ -39,37 +39,52 @@ function PwField({ value, onChange, placeholder }: { value: string; onChange: (v
   )
 }
 
-// 6 个独立格子的验证码输入：自动跳格、退格回退、粘贴填充、仅数字
+// 6 个独立格子的验证码输入：自动跳格、退格回退、粘贴/自动填充、仅数字。
+// 用定长 6 位数组维护每格，保证按位编辑（改中间格、清中间格）位置不串。
 function OtpInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [cells, setCells] = useState<string[]>(() => Array(6).fill(''))
   const refs = useRef<Array<HTMLInputElement | null>>([])
   const focusAt = (i: number) => refs.current[Math.max(0, Math.min(5, i))]?.focus()
+
+  // 外部清空（切换视图/重置）时同步清空格子
+  useEffect(() => { if (value === '') setCells(Array(6).fill('')) }, [value])
+
+  function emit(next: string[]) { setCells(next); onChange(next.join('')) }
 
   function onCell(i: number, raw: string) {
     const d = raw.replace(/\D/g, '')
     if (!d) return
-    const ch = d[d.length - 1]
-    onChange((value.slice(0, i) + ch + value.slice(i + 1)).slice(0, 6))
-    focusAt(i + 1)
+    const next = [...cells]
+    for (let k = 0; k < d.length && i + k < 6; k++) next[i + k] = d[k] // 支持单格粘贴/短信自动填充多位
+    emit(next)
+    focusAt(i + Math.min(d.length, 6 - i))
   }
   function onKey(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Backspace') {
       e.preventDefault()
-      if (value[i]) onChange(value.slice(0, i) + value.slice(i + 1))
-      else if (i > 0) { onChange(value.slice(0, i - 1) + value.slice(i)); focusAt(i - 1) }
+      const next = [...cells]
+      if (cells[i]) { next[i] = ''; emit(next) }
+      else if (i > 0) { next[i - 1] = ''; emit(next); focusAt(i - 1) }
     } else if (e.key === 'ArrowLeft') focusAt(i - 1)
     else if (e.key === 'ArrowRight') focusAt(i + 1)
   }
   function onPaste(e: React.ClipboardEvent) {
     const p = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
-    if (p) { e.preventDefault(); onChange(p); focusAt(p.length) }
+    if (!p) return
+    e.preventDefault()
+    const next = Array(6).fill('')
+    for (let k = 0; k < p.length; k++) next[k] = p[k]
+    emit(next)
+    focusAt(p.length)
   }
 
   return (
     <div className="flex gap-2" onPaste={onPaste}>
-      {Array.from({ length: 6 }, (_, i) => (
+      {cells.map((c, i) => (
         <input key={i} ref={(el) => { refs.current[i] = el }}
-          value={value[i] ?? ''} onChange={(e) => onCell(i, e.target.value)} onKeyDown={(e) => onKey(i, e)}
-          onFocus={(e) => e.currentTarget.select()} inputMode="numeric" maxLength={1} aria-label={`验证码第 ${i + 1} 位`}
+          value={c} onChange={(e) => onCell(i, e.target.value)} onKeyDown={(e) => onKey(i, e)}
+          onFocus={(e) => e.currentTarget.select()} inputMode="numeric"
+          autoComplete={i === 0 ? 'one-time-code' : 'off'} aria-label={`验证码第 ${i + 1} 位`}
           className="num h-12 w-full min-w-0 rounded-xl border border-line bg-surface text-center text-lg outline-none transition focus:border-flame focus:ring-4 focus:ring-flame/10" />
       ))}
     </div>

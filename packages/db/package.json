@@ -1,0 +1,11 @@
+{
+  "name": "@mixcut/db",
+  "version": "0.0.1",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bullmq": "^5.8.0"
+  },
+  "devDependencies": { "prisma": "^5.22.0" }
+}

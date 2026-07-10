@@ -32,8 +32,8 @@ export default function ScriptDetailPage() {
   if (!script && err) return <p className="pill pill-bad">{err}</p>
   if (!script) return <p className="py-16 text-center text-sm text-ink3">加载中…</p>
   return (
-    <div className="space-y-6">
-      <h1 className="truncate text-xl font-bold">{script.title}</h1>
+    <div className="max-w-3xl space-y-6">
+      <h1 className="truncate font-display text-xl font-bold tracking-tight">{script.title}</h1>
       {err && <p className="pill pill-bad">{err}</p>}
       <div className="flex gap-2.5">
         <button onClick={doSegment} className="btn-ghost flex-1">自动分段</button>

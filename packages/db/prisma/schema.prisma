@@ -196,6 +196,7 @@ model EmailCode {
   purpose    String
   expiresAt  DateTime  @map("expires_at")
   consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
   createdAt  DateTime  @default(now()) @map("created_at")
 
   @@index([email, purpose])

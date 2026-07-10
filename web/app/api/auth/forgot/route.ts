@@ -5,9 +5,11 @@ import { handler } from '@/lib/api'
 import { isEmail } from '@/lib/authcodes'
 import { emailEnabled } from '@/lib/mailer'
 import { sendCode } from '@/lib/emailflow'
+import { checkRate } from '@/lib/ratelimit'
 
 export const POST = handler(async (req) => {
   const { email } = await req.json()
+  checkRate('forgot', String(email ?? '').toLowerCase(), 4)
   if (!isEmail(email)) throw new HttpError(400, '邮箱格式不正确')
   if (!(await emailEnabled())) throw new HttpError(400, '未开启邮件服务')
   const user = await prisma.user.findUnique({ where: { email } })

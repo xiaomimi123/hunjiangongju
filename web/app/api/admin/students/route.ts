@@ -7,8 +7,11 @@ export const GET = handler(async (req) => {
   await requireRole('operator')
   const url = new URL(req.url)
   const search = (url.searchParams.get('search') ?? '').trim()
-  const page = Math.max(1, Number(url.searchParams.get('page') ?? 1))
-  const pageSize = Math.min(50, Math.max(1, Number(url.searchParams.get('pageSize') ?? 20)))
+  // ?? 默认值处理"参数缺失"（get() 返回 null → Number(null)=0 会误判为有效），Number.isFinite 处理"非数字"
+  const pageRaw = Number(url.searchParams.get('page') ?? 1)
+  const page = Number.isFinite(pageRaw) ? Math.max(1, Math.trunc(pageRaw)) : 1
+  const pageSizeRaw = Number(url.searchParams.get('pageSize') ?? 20)
+  const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(50, Math.max(1, Math.trunc(pageSizeRaw))) : 20
 
   const where = {
     role: 'student',

@@ -1,6 +1,14 @@
 import { scryptSync, randomBytes, createCipheriv, createDecipheriv } from 'crypto'
 
-const key = () => scryptSync(process.env.JWT_SECRET ?? 'dev-secret', 'mixcut-smtp-salt', 32)
+let cachedKey: Buffer | null = null
+let cachedSecret: string | null = null
+const key = () => {
+  const secret = process.env.JWT_SECRET ?? 'dev-secret'
+  if (cachedKey && cachedSecret === secret) return cachedKey
+  cachedSecret = secret
+  cachedKey = scryptSync(secret, 'mixcut-smtp-salt', 32)
+  return cachedKey
+}
 
 export function encrypt(plain: string): string {
   if (!plain) return ''

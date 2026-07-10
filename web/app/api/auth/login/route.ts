@@ -4,9 +4,11 @@ import { prisma } from '@mixcut/db'
 import { HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { setSessionCookie } from '@/lib/session'
+import { checkRate } from '@/lib/ratelimit'
 
 export const POST = handler(async (req) => {
   const { email, password } = await req.json()
+  checkRate('login', String(email ?? '').toLowerCase(), 8)
   if (!email || !password) throw new HttpError(400, '请填写邮箱和密码')
   const user = await prisma.user.findUnique({ where: { email } })
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {

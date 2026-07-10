@@ -29,3 +29,7 @@ docker compose exec worker npm run seed   # 首次
 ```bash
 npm install && npx vitest run
 ```
+
+## 运维须知
+- 首次部署迁移会给 `users` 加 `email NOT NULL` 无默认列——只能对**全新/空 users 表**执行；已有真实用户的库需先加一步 backfill 迁移（先加可空列→回填→改 NOT NULL）。
+- SMTP 密码用派生自 `JWT_SECRET` 的密钥加密存储——**轮换 `JWT_SECRET` 会让已存的 SMTP 密码无法解密**（需在后台重新填写），且会使所有登录 cookie 失效。

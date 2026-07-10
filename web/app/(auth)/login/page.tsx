@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/fetcher'
 
@@ -39,19 +39,57 @@ function PwField({ value, onChange, placeholder }: { value: string; onChange: (v
   )
 }
 
+// 6 个独立格子的验证码输入：自动跳格、退格回退、粘贴填充、仅数字
+function OtpInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const refs = useRef<Array<HTMLInputElement | null>>([])
+  const focusAt = (i: number) => refs.current[Math.max(0, Math.min(5, i))]?.focus()
+
+  function onCell(i: number, raw: string) {
+    const d = raw.replace(/\D/g, '')
+    if (!d) return
+    const ch = d[d.length - 1]
+    onChange((value.slice(0, i) + ch + value.slice(i + 1)).slice(0, 6))
+    focusAt(i + 1)
+  }
+  function onKey(i: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Backspace') {
+      e.preventDefault()
+      if (value[i]) onChange(value.slice(0, i) + value.slice(i + 1))
+      else if (i > 0) { onChange(value.slice(0, i - 1) + value.slice(i)); focusAt(i - 1) }
+    } else if (e.key === 'ArrowLeft') focusAt(i - 1)
+    else if (e.key === 'ArrowRight') focusAt(i + 1)
+  }
+  function onPaste(e: React.ClipboardEvent) {
+    const p = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (p) { e.preventDefault(); onChange(p); focusAt(p.length) }
+  }
+
+  return (
+    <div className="flex gap-2" onPaste={onPaste}>
+      {Array.from({ length: 6 }, (_, i) => (
+        <input key={i} ref={(el) => { refs.current[i] = el }}
+          value={value[i] ?? ''} onChange={(e) => onCell(i, e.target.value)} onKeyDown={(e) => onKey(i, e)}
+          onFocus={(e) => e.currentTarget.select()} inputMode="numeric" maxLength={1} aria-label={`验证码第 ${i + 1} 位`}
+          className="num h-12 w-full min-w-0 rounded-xl border border-line bg-surface text-center text-lg outline-none transition focus:border-flame focus:ring-4 focus:ring-flame/10" />
+      ))}
+    </div>
+  )
+}
+
 // 顶层声明，避免每次渲染重建组件导致输入框重挂载/丢焦点
 function CodeRow({ code, onCode, cd, email, busy, onGet }: {
   code: string; onCode: (v: string) => void; cd: number; email: string; busy: boolean; onGet: () => void
 }) {
   return (
-    <div className="flex gap-2">
-      <input className="field num flex-1 tracking-widest" value={code}
-        onChange={(e) => onCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-        placeholder="6 位验证码" inputMode="numeric" maxLength={6} />
-      <button type="button" onClick={onGet} disabled={cd > 0 || !email || busy}
-        className="btn-ghost shrink-0 whitespace-nowrap px-4 text-sm disabled:opacity-40">
-        {cd > 0 ? `${cd}s` : '获取验证码'}
-      </button>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-ink2">验证码</span>
+        <button type="button" onClick={onGet} disabled={cd > 0 || !email || busy}
+          className="text-sm font-medium text-flame disabled:text-ink3">
+          {cd > 0 ? `${cd}s 后重发` : '获取验证码'}
+        </button>
+      </div>
+      <OtpInput value={code} onChange={onCode} />
     </div>
   )
 }

@@ -5,5 +5,7 @@ data/
 *.tsbuildinfo
 .env
 .env.local
+.env.prod
+*.tar.gz
 .superpowers/
 next-env.d.ts

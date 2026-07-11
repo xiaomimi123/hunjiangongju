@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "bootstrap": "tsx src/bootstrap.ts",
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {

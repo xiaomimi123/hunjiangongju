@@ -1,0 +1,13 @@
+# 自动申请并续期 Let's Encrypt 证书，反向代理到 Next.js
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+	# 上传素材可能较大，放开请求体限制
+	request_body {
+		max_size 2GB
+	}
+	reverse_proxy web:3000
+}

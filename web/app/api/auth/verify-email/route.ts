@@ -7,16 +7,18 @@ import { isEmail } from '@/lib/authcodes'
 import { consumeCode } from '@/lib/emailflow'
 import { setSessionCookie } from '@/lib/session'
 import { checkRate } from '@/lib/ratelimit'
+import { assertPassword, nicknameFromEmail } from '@/lib/security'
 
 export const POST = handler(async (req) => {
-  const { email, code, password, nickname } = await req.json()
+  const { email, code, password } = await req.json()
   checkRate('verify', String(email ?? '').toLowerCase(), 10)
-  if (!isEmail(email) || !password || password.length < 6 || !nickname?.trim()) throw new HttpError(400, '参数不完整')
+  if (!isEmail(email)) throw new HttpError(400, '参数不完整')
+  assertPassword(password)
   await consumeCode(email, String(code ?? ''), 'verify')
   if (await prisma.user.findUnique({ where: { email } })) throw new HttpError(409, '该邮箱已注册')
   try {
     const user = await prisma.user.create({
-      data: { email, nickname: nickname.trim(), account: email, passwordHash: await bcrypt.hash(password, 10), role: 'student' },
+      data: { email, nickname: nicknameFromEmail(email), account: email, passwordHash: await bcrypt.hash(password, 10), role: 'student' },
     })
     return setSessionCookie(NextResponse.json({ role: user.role }), { userId: user.id, role: user.role })
   } catch (e) {

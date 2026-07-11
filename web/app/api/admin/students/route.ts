@@ -27,12 +27,12 @@ export const GET = handler(async (req) => {
     prisma.task.count({ where: { status: 'EXPORTED' } }),
     prisma.user.findMany({
       where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, email: true, nickname: true, createdAt: true, tasks: { select: { status: true } } },
+      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true, tasks: { select: { status: true } } },
     }),
   ])
 
   const students = rows.map((u) => ({
-    id: u.id, email: u.email, nickname: u.nickname, createdAt: u.createdAt,
+    id: u.id, email: u.email, nickname: u.nickname, disabled: u.disabled, createdAt: u.createdAt,
     taskCount: u.tasks.length, doneCount: u.tasks.filter((t) => t.status === 'EXPORTED').length,
   }))
   return NextResponse.json({ stats: { totalStudents, todayNew, totalTasks, totalExported }, students, total })

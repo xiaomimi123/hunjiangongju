@@ -15,6 +15,7 @@ model User {
   account      String?     @map("account")
   passwordHash String      @map("password_hash")
   role         String      @default("student")
+  disabled     Boolean     @default(false)
   createdAt    DateTime    @default(now()) @map("created_at")
   accessKeys   AccessKey[]
   tasks        Task[]

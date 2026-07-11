@@ -6,10 +6,12 @@ import { isEmail } from '@/lib/authcodes'
 import { emailEnabled } from '@/lib/mailer'
 import { sendCode } from '@/lib/emailflow'
 import { checkRate } from '@/lib/ratelimit'
+import { clientIp } from '@/lib/security'
 
 // 注册页「获取验证码」：给邮箱发一封注册验证码（与 register 解耦）
 export const POST = handler(async (req) => {
   const { email } = await req.json()
+  checkRate('send-code-ip', clientIp(req), 20, 3600_000) // IP 级：每小时 20 封，防邮件轰炸
   checkRate('send-code', String(email ?? '').toLowerCase(), 4)
   if (!isEmail(email)) throw new HttpError(400, '邮箱格式不正确')
   if (!(await emailEnabled())) throw new HttpError(400, '未开启邮件服务')

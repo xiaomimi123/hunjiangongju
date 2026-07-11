@@ -115,7 +115,6 @@ export default function LoginPage() {
   const [view, setView] = useState<View>('login')
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
-  const [nickname, setNickname] = useState('')
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
   const [cd, setCd] = useState(0)
@@ -151,10 +150,10 @@ export default function LoginPage() {
     setBusy(true)
     try {
       if (emailEnabled) {
-        const r = await api<{ role: string }>('/api/auth/verify-email', { body: { email, code, password, nickname } })
+        const r = await api<{ role: string }>('/api/auth/verify-email', { body: { email, code, password } })
         go(r.role)
       } else {
-        const r = await api<{ role: string }>('/api/auth/register', { body: { email, password, nickname } })
+        const r = await api<{ role: string }>('/api/auth/register', { body: { email, password } })
         go(r.role)
       }
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
@@ -206,8 +205,7 @@ export default function LoginPage() {
         <div className="space-y-3">
           <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="邮箱" autoCapitalize="none" />
           {emailEnabled && <CodeRow code={code} onCode={setCode} cd={cd} email={email} busy={busy} onGet={() => getCode('register')} />}
-          <input className="field" value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="昵称" />
-          <PwField value={password} onChange={setPassword} placeholder="密码（至少 6 位）" />
+          <PwField value={password} onChange={setPassword} placeholder="密码（至少 8 位）" />
           <PwField value={password2} onChange={setPassword2} placeholder="确认密码" />
           {err && <p className="pill pill-bad">{err}</p>}
           {msg && <p className="pill pill-ok">{msg}</p>}
@@ -219,7 +217,7 @@ export default function LoginPage() {
         <div className="space-y-3">
           <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="注册邮箱" autoCapitalize="none" />
           <CodeRow code={code} onCode={setCode} cd={cd} email={email} busy={busy} onGet={() => getCode('reset')} />
-          <PwField value={password} onChange={setPassword} placeholder="新密码（至少 6 位）" />
+          <PwField value={password} onChange={setPassword} placeholder="新密码（至少 8 位）" />
           <PwField value={password2} onChange={setPassword2} placeholder="确认新密码" />
           {err && <p className="pill pill-bad">{err}</p>}
           {msg && <p className="pill pill-ok">{msg}</p>}

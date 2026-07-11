@@ -6,9 +6,11 @@ import { isEmail } from '@/lib/authcodes'
 import { emailEnabled } from '@/lib/mailer'
 import { sendCode } from '@/lib/emailflow'
 import { checkRate } from '@/lib/ratelimit'
+import { clientIp } from '@/lib/security'
 
 export const POST = handler(async (req) => {
   const { email } = await req.json()
+  checkRate('forgot-ip', clientIp(req), 20, 3600_000) // IP 级：每小时 20 封，防邮件轰炸
   checkRate('forgot', String(email ?? '').toLowerCase(), 4)
   if (!isEmail(email)) throw new HttpError(400, '邮箱格式不正确')
   if (!(await emailEnabled())) throw new HttpError(400, '未开启邮件服务')

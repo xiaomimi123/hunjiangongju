@@ -9,6 +9,7 @@ const NAV = [
   { href: '/admin/scripts', label: '文案' },
   { href: '/admin/tasks', label: '任务' },
   { href: '/admin/settings', label: '设置' },
+  { href: '/admin/account', label: '账号' },
 ]
 
 export default function SidebarNav() {

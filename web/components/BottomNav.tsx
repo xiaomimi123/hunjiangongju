@@ -11,6 +11,8 @@ const ICONS = {
   image: 'M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5',
   doc: 'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6',
   layers: 'M12 3 3 8l9 5 9-5zM3 13l9 5 9-5M3 16.5 12 21l9-4.5',
+  grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 21a7 7 0 0 1 14 0',
 } as const
 
 function Glyph({ d, active }: { d: string; active: boolean }) {

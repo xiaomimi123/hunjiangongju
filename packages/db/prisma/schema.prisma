@@ -74,6 +74,7 @@ model TagCategory {
 
 model Material {
   id           String        @id @default(uuid())
+  kind         String        @default("video") // video | image
   fileUrl      String        @map("file_url")
   thumbnailUrl String?       @map("thumbnail_url")
   durationMs   Int?          @map("duration_ms")

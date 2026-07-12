@@ -6,7 +6,10 @@ import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { DATA_DIR } from '@/lib/paths'
-import { probeDurationMs, makeThumbnail } from '@/lib/ffmpeg'
+import { probeDurationMs, makeThumbnail, makeImageThumbnail } from '@/lib/ffmpeg'
+
+const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
+const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.webm', '.avi', '.mkv'])
 
 export const GET = handler(async (req) => {
   await requireRole()
@@ -27,25 +30,37 @@ export const POST = handler(async (req) => {
   const tagIds: string[] = JSON.parse(String(form.get('tagIds') ?? '[]'))
   if (tagIds.length === 0) throw new HttpError(400, '请至少勾选一个标签')
 
+  const extRaw = path.extname(file.name).toLowerCase()
+  const isImage = IMAGE_EXT.has(extRaw) || file.type.startsWith('image/')
+  const isVideo = VIDEO_EXT.has(extRaw) || file.type.startsWith('video/')
+  if (!isImage && !isVideo) throw new HttpError(400, '只支持视频或图片文件')
+  const kind = isVideo ? 'video' : 'image'
+
   const id = randomUUID()
-  const ext = (path.extname(file.name) || '.mp4').toLowerCase()
+  const ext = extRaw || (isVideo ? '.mp4' : '.jpg')
   const base = `materials/${id}`
   const abs = path.join(DATA_DIR, `${base}${ext}`)
   await fs.mkdir(path.dirname(abs), { recursive: true })
   await fs.writeFile(abs, Buffer.from(await file.arrayBuffer()))
 
-  let durationMs = 0
+  // 校验文件确实可用：视频取时长+抽帧，图片直接缩放；任一失败即判为无效文件
+  let durationMs: number | null = null
   try {
-    durationMs = await probeDurationMs(abs)
-    await makeThumbnail(abs, path.join(DATA_DIR, `${base}.jpg`))
+    if (kind === 'video') {
+      durationMs = await probeDurationMs(abs)
+      await makeThumbnail(abs, path.join(DATA_DIR, `${base}.jpg`))
+    } else {
+      await makeImageThumbnail(abs, path.join(DATA_DIR, `${base}.jpg`))
+    }
   } catch {
     await fs.unlink(abs).catch(() => {})
-    throw new HttpError(400, '文件不是可用的视频')
+    throw new HttpError(400, kind === 'video' ? '文件不是可用的视频' : '文件不是可用的图片')
   }
 
   const material = await prisma.material.create({
     data: {
       id,
+      kind,
       fileUrl: `/api/files/${base}${ext}`,
       thumbnailUrl: `/api/files/${base}.jpg`,
       durationMs,

@@ -7,7 +7,7 @@ import TagPicker from '@/components/TagPicker'
 import type { TagNode } from '@/lib/tagTree'
 
 type Material = {
-  id: string; fileUrl: string; thumbnailUrl: string | null
+  id: string; kind: string; fileUrl: string; thumbnailUrl: string | null
   durationMs: number | null; tags: { tagId: string }[]
 }
 type QStatus = 'pending' | 'uploading' | 'done' | 'error'
@@ -23,6 +23,7 @@ function MaterialsInner() {
   const [queue, setQueue] = useState<QItem[]>([])
   const [openTagKey, setOpenTagKey] = useState<string | null>(null) // 队列里展开调标签的项
   const [editId, setEditId] = useState<string | null>(null)          // 网格里正在改标签的素材
+  const [preview, setPreview] = useState<Material | null>(null)      // 点击预览的素材
   const [filter, setFilter] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -41,12 +42,13 @@ function MaterialsInner() {
     setQueue((q) => q.map((it) => (it.key === key ? { ...it, ...patch } : it)))
 
   function addFiles(files: FileList | File[]) {
-    const vids = Array.from(files).filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(f.name))
-    if (vids.length === 0) { setErr('请选择视频文件'); return }
+    const ok = Array.from(files).filter((f) =>
+      f.type.startsWith('video/') || f.type.startsWith('image/') || /\.(mp4|mov|m4v|webm|avi|mkv|jpg|jpeg|png|webp|gif|bmp)$/i.test(f.name))
+    if (ok.length === 0) { setErr('请选择视频或图片文件'); return }
     setErr('')
     setQueue((q) => [
       ...q,
-      ...vids.map((file) => ({ key: `q${seq++}`, file, tags: [...defaultTags], status: 'pending' as QStatus, progress: 0 })),
+      ...ok.map((file) => ({ key: `q${seq++}`, file, tags: [...defaultTags], status: 'pending' as QStatus, progress: 0 })),
     ])
   }
 
@@ -116,8 +118,8 @@ function MaterialsInner() {
         </div>
 
         <div>
-          <p className="eyebrow mb-2">② 添加视频（可一次多选 / 拖拽）</p>
-          <input ref={fileRef} type="file" accept="video/*" multiple hidden
+          <p className="eyebrow mb-2">② 添加素材（视频或图片，可一次多选 / 拖拽）</p>
+          <input ref={fileRef} type="file" accept="video/*,image/*" multiple hidden
             onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
           <div
             onClick={() => fileRef.current?.click()}
@@ -128,8 +130,8 @@ function MaterialsInner() {
               dragOver ? 'border-flame bg-flame/5' : 'border-line bg-surface2/50 hover:border-flame/50'
             }`}>
             <p className="text-3xl">🎬</p>
-            <p className="mt-1 text-sm text-ink2">把视频拖到这里，或<span className="font-medium text-flame">点击选择多个</span></p>
-            <p className="mt-0.5 text-xs text-ink3">支持 mp4 / mov / webm 等</p>
+            <p className="mt-1 text-sm text-ink2">把视频 / 图片拖到这里，或<span className="font-medium text-flame">点击选择多个</span></p>
+            <p className="mt-0.5 text-xs text-ink3">视频 mp4 / mov / webm，图片 jpg / png / webp</p>
           </div>
         </div>
 
@@ -185,11 +187,19 @@ function MaterialsInner() {
       <ul className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
         {list.map((m) => (
           <li key={m.id} className="card overflow-hidden">
-            {m.thumbnailUrl && <img src={m.thumbnailUrl} alt="" className="aspect-video w-full object-cover" />}
+            <button onClick={() => setPreview(m)} className="group relative block aspect-video w-full overflow-hidden bg-surface2">
+              <span className="pointer-events-none absolute inset-0 grid place-items-center text-2xl text-ink3">{m.kind === 'image' ? '🖼️' : '🎬'}</span>
+              {m.thumbnailUrl && (
+                <img src={m.thumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }} />
+              )}
+              <span className="absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 text-[11px] font-medium text-white">{m.kind === 'image' ? '图片' : '视频'}</span>
+              <span className="absolute inset-0 grid place-items-center bg-black/0 text-2xl text-white/0 transition group-hover:bg-black/25 group-hover:text-white/90">▶</span>
+            </button>
             <div className="space-y-2 p-3">
               <span className="chip">
                 <span className="chip-dot bg-ink3" />
-                <span className="num">{((m.durationMs ?? 0) / 1000).toFixed(1)}</span>s
+                {m.kind === 'image' ? '图片' : <><span className="num">{((m.durationMs ?? 0) / 1000).toFixed(1)}</span>s</>}
               </span>
               <div className="flex flex-wrap gap-1">
                 {m.tags.map((t) => <span key={t.tagId} className="rounded-md bg-surface2 px-1.5 py-0.5 text-xs text-ink2">{tagName(t.tagId)}</span>)}
@@ -208,6 +218,16 @@ function MaterialsInner() {
         ))}
         {list.length === 0 && <li className="col-span-full card p-8 text-center text-sm text-ink3">暂无素材，先在上方上传</li>}
       </ul>
+
+      {preview && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/70 p-4" onClick={() => setPreview(null)}>
+          <div className="max-h-[85vh] max-w-3xl" onClick={(e) => e.stopPropagation()}>
+            {preview.kind === 'image'
+              ? <img src={preview.fileUrl} alt="" className="max-h-[85vh] w-auto rounded-2xl" />
+              : <video src={preview.fileUrl} controls autoPlay playsInline className="max-h-[85vh] w-auto rounded-2xl bg-black" />}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

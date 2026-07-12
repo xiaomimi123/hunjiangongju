@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import { flattenWithDepth, type TagNode } from '@/lib/tagTree'
 
-export default function TagPicker({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
-  const [nodes, setNodes] = useState<TagNode[]>([])
-  useEffect(() => { api<TagNode[]>('/api/tag-categories').then(setNodes) }, [])
+export default function TagPicker({ value, onChange, nodes: nodesProp }: { value: string[]; onChange: (ids: string[]) => void; nodes?: TagNode[] }) {
+  const [fetched, setFetched] = useState<TagNode[]>([])
+  useEffect(() => { if (!nodesProp) api<TagNode[]>('/api/tag-categories').then(setFetched) }, [nodesProp])
+  const nodes = nodesProp ?? fetched
   const toggle = (id: string) =>
     onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
   return (

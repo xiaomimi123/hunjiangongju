@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
+import PageHeader from '@/components/admin/PageHeader'
 import { buildTree, type TagNode } from '@/lib/tagTree'
 
 export default function TagsPage() {
@@ -36,7 +37,7 @@ export default function TagsPage() {
   const tree = buildTree(nodes)
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">标签分类树</h1>
+      <PageHeader title="标签分类树" subtitle="维护标签，用于素材与文案分镜的自动匹配" />
       {err && <p className="pill pill-bad">{err}</p>}
       <div className="card max-w-xl space-y-3 p-4">
         <p className="eyebrow">新建节点</p>

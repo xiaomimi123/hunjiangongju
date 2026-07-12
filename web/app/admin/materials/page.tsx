@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import TagPicker from '@/components/TagPicker'
 import type { TagNode } from '@/lib/tagTree'
+import PageHeader from '@/components/admin/PageHeader'
 
 type Material = {
   id: string; kind: string; fileUrl: string; thumbnailUrl: string | null
@@ -100,8 +101,8 @@ function MaterialsInner() {
   const pendingCount = queue.filter((it) => it.status === 'pending' || it.status === 'error').length
 
   return (
-    <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">素材库</h1>
+    <div className="space-y-5">
+      <PageHeader title="素材库" subtitle="上传视频 / 图片并打标签，供混剪自动匹配" />
       {returnTaskId && (
         <div className="card max-w-2xl space-y-3 border-l-4 border-l-flame p-4">
           <p className="text-sm text-ink2">正在为任务补充素材，上传完成后点此返回任务详情</p>

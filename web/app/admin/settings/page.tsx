@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
+import PageHeader from '@/components/admin/PageHeader'
 
 type Cfg = { host: string; port: number; secure: boolean; username: string; fromAddress: string; fromName: string; enabled: boolean; hasPassword: boolean }
 
@@ -39,7 +40,7 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-xl space-y-6">
-      <h1 className="font-display text-2xl font-bold">邮件服务（SMTP）</h1>
+      <PageHeader title="邮件服务（SMTP）" subtitle="学员注册验证码与找回密码依赖邮件服务" />
       {err && <p className="pill pill-bad">{err}</p>}
       {msg && <p className="pill pill-ok">{msg}</p>}
 

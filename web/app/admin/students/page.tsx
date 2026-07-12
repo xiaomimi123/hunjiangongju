@@ -2,6 +2,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import { StatusPill } from '@/components/ui'
+import PageHeader from '@/components/admin/PageHeader'
 
 type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number }
 type Resp = { stats: { totalStudents: number; todayNew: number; totalTasks: number; totalExported: number }; students: Row[]; total: number }
@@ -73,8 +74,8 @@ export default function StudentsPage() {
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE)) : 1
 
   return (
-    <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">注册学员数据</h1>
+    <div className="space-y-5">
+      <PageHeader title="学员数据" subtitle="注册学员的作品与账号管理" />
       {err && <p className="pill pill-bad">{err}</p>}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">

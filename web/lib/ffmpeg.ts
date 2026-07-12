@@ -20,3 +20,15 @@ export function makeThumbnail(video: string, outJpg: string): Promise<void> {
       .run()
   })
 }
+
+// 图片缩略图：直接缩放图片本身（不 seek），也用于校验文件确为有效图片
+export function makeImageThumbnail(image: string, outJpg: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ffmpeg(image)
+      .outputOptions(['-frames:v', '1', '-vf', 'scale=320:-2'])
+      .output(outJpg)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run()
+  })
+}

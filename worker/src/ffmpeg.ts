@@ -12,13 +12,14 @@ export function probeHasAudio(file: string): Promise<boolean> {
 }
 
 export async function normalizeSegment(opts: {
-  input: string; out: string; durationMs: number; w: number; h: number
+  input: string; out: string; durationMs: number; w: number; h: number; isImage?: boolean
 }): Promise<void> {
-  const { input, out, durationMs, w, h } = opts
-  const hasAudio = await probeHasAudio(input)
+  const { input, out, durationMs, w, h, isImage } = opts
+  // 图片没有音轨、用 -loop 1 循环成 N 秒；视频用 -stream_loop -1 循环补足时长
+  const hasAudio = isImage ? false : await probeHasAudio(input)
   const sec = (durationMs / 1000).toFixed(3)
   await new Promise<void>((resolve, reject) => {
-    const cmd = ffmpeg(input).inputOptions(['-stream_loop', '-1'])
+    const cmd = ffmpeg(input).inputOptions(isImage ? ['-loop', '1'] : ['-stream_loop', '-1'])
     if (!hasAudio) cmd.input('anullsrc=r=44100:cl=stereo').inputFormat('lavfi')
     cmd
       .complexFilter([

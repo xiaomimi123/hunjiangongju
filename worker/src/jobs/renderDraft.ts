@@ -45,6 +45,7 @@ export async function renderDraft(taskId: string): Promise<void> {
       durationMs: timeline[i].endMs - timeline[i].startMs,
       w: dims.w,
       h: dims.h,
+      isImage: seg.material!.kind === 'image',
     })
     segFiles.push(out)
   }

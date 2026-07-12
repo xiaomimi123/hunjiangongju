@@ -11,6 +11,8 @@ export default function ScriptsPage() {
   const [content, setContent] = useState('')
   const [err, setErr] = useState('')
 
+  const [busyId, setBusyId] = useState('')
+
   const load = useCallback(async () => {
     try { setList(await api<Script[]>('/api/scripts')) }
     catch (e) { setErr((e as Error).message) }
@@ -23,6 +25,14 @@ export default function ScriptsPage() {
       await api('/api/scripts', { body: { title, content } })
       setTitle(''); setContent(''); load()
     } catch (e) { setErr((e as Error).message) }
+  }
+
+  async function togglePublish(s: Script) {
+    setErr(''); setBusyId(s.id)
+    try {
+      await api(`/api/scripts/${s.id}`, { method: 'PATCH', body: { status: s.status === 'published' ? 'draft' : 'published' } })
+      await load()
+    } catch (e) { setErr((e as Error).message) } finally { setBusyId('') }
   }
 
   return (
@@ -67,8 +77,17 @@ export default function ScriptsPage() {
                       <span className="chip">草稿</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/admin/scripts/${s.id}`} className="btn-quiet px-2 text-sm">查看</Link>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-3 whitespace-nowrap text-sm">
+                      {s.status === 'published' ? (
+                        <button onClick={() => togglePublish(s)} disabled={busyId === s.id} className="text-ink2 hover:text-ink disabled:text-ink3">取消发布</button>
+                      ) : s._count.segments === 0 ? (
+                        <span className="text-ink3" title="发布前请先进入「查看」自动分段">需先分段</span>
+                      ) : (
+                        <button onClick={() => togglePublish(s)} disabled={busyId === s.id} className="font-medium text-flame disabled:text-ink3">发布</button>
+                      )}
+                      <Link href={`/admin/scripts/${s.id}`} className="btn-quiet px-2">查看</Link>
+                    </div>
                   </td>
                 </tr>
               ))}

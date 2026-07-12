@@ -1,16 +1,19 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { api } from '@/lib/fetcher'
 import { STATUS_LABELS } from '@/lib/status'
 import { StatusPill } from '@/components/ui'
+import PageHeader from '@/components/admin/PageHeader'
 
 type Task = { id: string; status: string; createdAt: string; script: { title: string } | null }
 const FILTERS = ['', 'MATERIAL_PENDING', 'PREVIEW_PENDING', 'QC_FAILED', 'FAILED', 'EXPORTED']
 
-export default function AdminTasksPage() {
+function TasksInner() {
+  const initial = useSearchParams().get('status') ?? ''
   const [tasks, setTasks] = useState<Task[]>([])
-  const [filter, setFilter] = useState('')
+  const [filter, setFilter] = useState(FILTERS.includes(initial) ? initial : '')
   const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
@@ -20,11 +23,11 @@ export default function AdminTasksPage() {
   useEffect(() => { load() }, [load])
 
   return (
-    <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">任务队列</h1>
-      {err && <p className="pill pill-bad">{err}</p>}
+    <div>
+      <PageHeader title="任务队列" subtitle="全平台学员的生成任务与状态" />
+      {err && <p className="pill pill-bad mb-4">{err}</p>}
 
-      <div className="flex gap-1 overflow-x-auto no-scrollbar rounded-full bg-surface2 p-1">
+      <div className="mb-4 flex gap-1 overflow-x-auto no-scrollbar rounded-full bg-surface2 p-1">
         {FILTERS.map((f) => (
           <button key={f} onClick={() => setFilter(f)}
             className={`shrink-0 rounded-full px-3.5 py-2 text-sm font-medium transition ${
@@ -47,7 +50,7 @@ export default function AdminTasksPage() {
           </thead>
           <tbody className="divide-y divide-line">
             {tasks.map((t) => (
-              <tr key={t.id}>
+              <tr key={t.id} className="transition hover:bg-surface2/60">
                 <td className="max-w-xs truncate px-4 py-3 font-medium">{t.script?.title ?? '未知文案'}</td>
                 <td className="px-4 py-3"><StatusPill status={t.status} /></td>
                 <td className="num px-4 py-3 text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</td>
@@ -57,11 +60,15 @@ export default function AdminTasksPage() {
               </tr>
             ))}
             {tasks.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">暂无任务</td></tr>
+              <tr><td colSpan={4} className="px-4 py-12 text-center text-ink3">该分类下暂无任务</td></tr>
             )}
           </tbody>
         </table>
       </div>
     </div>
   )
+}
+
+export default function AdminTasksPage() {
+  return <Suspense><TasksInner /></Suspense>
 }

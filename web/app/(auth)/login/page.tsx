@@ -127,7 +127,7 @@ export default function LoginPage() {
 
   function clear() { setErr(''); setMsg('') }
   function switchTo(v: View) { setView(v); clear(); setCode(''); setPassword(''); setPassword2(''); setCd(0) }
-  function go(role: string) { router.replace(role === 'operator' ? '/admin/students' : '/') }
+  function go(role: string) { router.replace(role === 'operator' ? '/admin' : '/') }
 
   async function getCode(kind: 'register' | 'reset') {
     clear(); setBusy(true)

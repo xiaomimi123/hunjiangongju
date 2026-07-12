@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
+import PageHeader from '@/components/admin/PageHeader'
 
 type Me = { email: string; nickname: string | null; role: string }
 
@@ -27,7 +28,7 @@ export default function AccountPage() {
 
   return (
     <div className="max-w-xl space-y-6">
-      <h1 className="font-display text-2xl font-bold">账号</h1>
+      <PageHeader title="账号" subtitle="管理员登录信息与密码" />
 
       <div className="card divide-y divide-line">
         <div className="flex items-center justify-between px-5 py-4">

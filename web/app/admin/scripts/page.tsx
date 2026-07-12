@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import PageHeader from '@/components/admin/PageHeader'
 
 type Script = { id: string; title: string; status: string; _count: { segments: number } }
 
@@ -37,7 +38,7 @@ export default function ScriptsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">文案库</h1>
+      <PageHeader title="文案库" subtitle="创建文案 → 自动分段 → 打标签 → 发布给学员" />
       {err && <p className="pill pill-bad">{err}</p>}
 
       <section className="space-y-3">

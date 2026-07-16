@@ -204,3 +204,137 @@ model EmailCode {
   @@index([email, purpose])
   @@map("email_codes")
 }
+
+model SourceVideo {
+  id             String          @id @default(uuid())
+  douyinShareUrl String          @map("douyin_share_url")
+  videoFileUrl   String?         @map("video_file_url")
+  status         String          @default("CREATED")
+  createdBy      String?         @map("created_by")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  transcripts    Transcript[]
+  sceneCuts      SceneCut[]
+  frameworks     CopyFramework[]
+  @@map("source_videos")
+}
+
+model Transcript {
+  id            String      @id @default(uuid())
+  sourceVideoId String      @map("source_video_id")
+  source        SourceVideo @relation(fields: [sourceVideoId], references: [id], onDelete: Cascade)
+  fullText      String      @map("full_text")
+  sentences     Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+  @@map("transcripts")
+}
+
+model SceneCut {
+  id            String      @id @default(uuid())
+  sourceVideoId String      @map("source_video_id")
+  source        SourceVideo @relation(fields: [sourceVideoId], references: [id], onDelete: Cascade)
+  cutPointsMs   Int[]       @map("cut_points_ms")
+  @@map("scene_cuts")
+}
+
+model CopyFramework {
+  id                    String           @id @default(uuid())
+  sourceVideoId         String?          @map("source_video_id")
+  source                SourceVideo?     @relation(fields: [sourceVideoId], references: [id])
+  name                  String?
+  industryCategory      String?          @map("industry_category")
+  visualStyleType       String           @default("ai_illustration") @map("visual_style_type")
+  renderTemplate        String?          @map("render_template")
+  overlayTemplate       Json?            @map("overlay_template")
+  frameworkText         String           @map("framework_text")
+  suggestedSegmentCount Int?             @map("suggested_segment_count")
+  maxLines              Int?             @map("max_lines")
+  maxTotalChars         Int?             @map("max_total_chars")
+  createdBy             String?          @map("created_by")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  generationTasks       GenerationTask[]
+  @@map("copy_frameworks")
+}
+
+model GenerationTask {
+  id           String             @id @default(uuid())
+  frameworkId  String             @map("framework_id")
+  framework    CopyFramework      @relation(fields: [frameworkId], references: [id])
+  subject      String
+  variables    Json?
+  fullAudioUrl String?            @map("full_audio_url")
+  bodyTimings  Json?              @map("body_timings")
+  status       String             @default("GEN_CREATED")
+  createdBy    String?            @map("created_by")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  segments     GeneratedSegment[]
+  renderTasks  RenderTask[]
+  @@map("generation_tasks")
+}
+
+model GeneratedSegment {
+  id               String         @id @default(uuid())
+  generationTaskId String         @map("generation_task_id")
+  task             GenerationTask @relation(fields: [generationTaskId], references: [id], onDelete: Cascade)
+  seqNo            Int            @map("seq_no")
+  scriptText       String         @map("script_text")
+  imageUrl         String?        @map("image_url")
+  @@map("generated_segments")
+}
+
+model BgmLibrary {
+  id          String       @id @default(uuid())
+  fileUrl     String       @map("file_url")
+  styleTag    String?      @map("style_tag")
+  durationMs  Int?         @map("duration_ms")
+  renderTasks RenderTask[]
+  @@map("bgm_library")
+}
+
+model RenderTask {
+  id               String            @id @default(uuid())
+  generationTaskId String            @map("generation_task_id")
+  task             GenerationTask    @relation(fields: [generationTaskId], references: [id], onDelete: Cascade)
+  bgmId            String?           @map("bgm_id")
+  bgm              BgmLibrary?       @relation(fields: [bgmId], references: [id])
+  status           String            @default("RENDERING")
+  videoUrl         String?           @map("video_url")
+  subtitleUrl      String?           @map("subtitle_url")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  statusLogs       RenderStatusLog[]
+  qcReports        RenderQcReport[]
+  @@map("render_tasks")
+}
+
+model RenderStatusLog {
+  id           String     @id @default(uuid())
+  renderTaskId String     @map("render_task_id")
+  task         RenderTask @relation(fields: [renderTaskId], references: [id], onDelete: Cascade)
+  fromStatus   String?    @map("from_status")
+  toStatus     String     @map("to_status")
+  note         String?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  @@map("render_status_logs")
+}
+
+model RenderQcReport {
+  id           String     @id @default(uuid())
+  renderTaskId String     @map("render_task_id")
+  task         RenderTask @relation(fields: [renderTaskId], references: [id], onDelete: Cascade)
+  checkType    String     @map("check_type")
+  result       String
+  detail       String?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  @@map("render_qc_reports")
+}
+
+model AiCapabilityConfig {
+  capability String   @id
+  baseUrl    String   @default("") @map("base_url")
+  apiKeyEnc  String   @default("") @map("api_key_enc")
+  model      String   @default("")
+  enabled    Boolean  @default(false)
+  extra      Json?
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  @@map("ai_capability_config")
+}

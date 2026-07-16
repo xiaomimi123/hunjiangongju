@@ -1,5 +1,5 @@
 import { Worker, type Job } from 'bullmq'
-import { prisma, redisConnection, setGenerationStatus, transitionRender } from '@mixcut/db'
+import { prisma, redisConnection, setGenerationStatus, setSourceStatus, transitionRender } from '@mixcut/db'
 import { generateScript } from './generateScript'
 import { generateImage } from './generateImage'
 import { generateTts } from './generateTts'
@@ -35,9 +35,10 @@ export function startGenWorker() {
   w.on('completed', (j) => console.log(`[gen] ${j.name} done`))
   w.on('failed', async (j, err) => {
     console.error(`[gen] ${j?.name} failed: ${err.message}`)
-    const d = (j?.data ?? {}) as { genTaskId?: string; renderTaskId?: string }
+    const d = (j?.data ?? {}) as { genTaskId?: string; renderTaskId?: string; sourceVideoId?: string }
     try {
       if (d.renderTaskId) await transitionRender(d.renderTaskId, 'FAILED', `${j?.name}: ${err.message}`).catch(() => {})
+      else if (d.sourceVideoId) await setSourceStatus(d.sourceVideoId, 'FAILED').catch(() => {})
       else if (d.genTaskId) await setGenerationStatus(d.genTaskId, 'FAILED').catch(() => {})
     } catch {}
   })

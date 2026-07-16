@@ -20,6 +20,10 @@ const GROUPS: { label: string; items: { href: string; label: string; icon: strin
     { href: '/admin/scripts', label: '文案', icon: 'doc' },
     { href: '/admin/tags', label: '标签', icon: 'tag' },
   ] },
+  { label: '拆解', items: [
+    { href: '/admin/extract', label: '拆解', icon: 'film' },
+    { href: '/admin/frameworks', label: '框架库', icon: 'tag' },
+  ] },
   { label: '生成', items: [
     { href: '/admin/generate', label: '生成', icon: 'film' },
     { href: '/admin/bgm', label: 'BGM 曲库', icon: 'doc' },

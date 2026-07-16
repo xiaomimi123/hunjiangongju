@@ -20,6 +20,9 @@ const GROUPS: { label: string; items: { href: string; label: string; icon: strin
     { href: '/admin/scripts', label: '文案', icon: 'doc' },
     { href: '/admin/tags', label: '标签', icon: 'tag' },
   ] },
+  { label: '生成', items: [
+    { href: '/admin/generate', label: '生成', icon: 'film' },
+  ] },
   { label: '运营', items: [
     { href: '/admin/students', label: '学员数据', icon: 'users' },
     { href: '/admin/tasks', label: '任务', icon: 'tasks' },

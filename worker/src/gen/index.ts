@@ -1,12 +1,15 @@
 import { Worker, type Job } from 'bullmq'
 import { prisma, redisConnection, setGenerationStatus, transitionRender } from '@mixcut/db'
 import { generateScript } from './generateScript'
+import { generateImage } from './generateImage'
 
 async function dispatch(job: Job): Promise<void> {
   console.log(`[gen] ${job.name}`, job.data)
   switch (job.name) {
     case 'generate-script':
       return generateScript(job.data.genTaskId)
+    case 'generate-image':
+      return generateImage(job.data.genTaskId)
     // 各 job 由后续任务接入；未实现先抛错，避免静默
     default: throw new Error(`未接入 gen job: ${job.name}`)
   }

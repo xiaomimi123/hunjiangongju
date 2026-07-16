@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
-import { GenPill, genIsTerminal } from '../genStatus'
+import { GenPill } from '../genStatus'
 
 type Segment = { seqNo: number; scriptText: string; imageUrl: string | null }
 type RenderTask = { id: string; status: string; videoUrl: string | null; subtitleUrl: string | null }
@@ -17,11 +17,23 @@ type GenTask = {
   renderTasks: RenderTask[]
 }
 
+// 合成阶段终态：最新 RenderTask 处于这些状态时后台已无在途工作。
+const RENDER_TERMINAL = ['EXPORTED', 'QC_FAILED', 'FAILED']
+
+// 是否真正结束（可停轮询）：genTask 失败，或最新 RenderTask 进入终态。
+// 注意：纯 ASSET_READY（无在途 render）不算结束——继续轮询以便单段重生的进度可见。
+function isSettled(t: GenTask): boolean {
+  if (t.status === 'FAILED') return true
+  const latest = t.renderTasks[0]
+  return !!latest && RENDER_TERMINAL.includes(latest.status)
+}
+
 export default function GenerateDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [task, setTask] = useState<GenTask | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState('')
+  const [poll, setPoll] = useState(0) // 递增以重新武装轮询（act 后重启）
 
   const load = useCallback(async () => {
     try { const t = await api<GenTask>(`/api/generate/${id}`); setTask(t); return t }
@@ -29,18 +41,23 @@ export default function GenerateDetailPage() {
   }, [id])
 
   useEffect(() => {
+    let stopped = false
     load()
     const timer = setInterval(async () => {
       const t = await load()
-      if (!t || genIsTerminal(t.status)) clearInterval(timer)
+      if (stopped) return
+      if (!t || isSettled(t)) { stopped = true; clearInterval(timer) }
     }, 3000)
-    return () => clearInterval(timer)
-  }, [load])
+    return () => { stopped = true; clearInterval(timer) }
+  }, [load, poll])
 
   async function act(path: string, key: string) {
     setErr(''); setBusy(key)
-    try { await api(`/api/generate/${id}/${path}`, { method: 'POST' }); await load() }
-    catch (e) { setErr((e as Error).message) }
+    try {
+      await api(`/api/generate/${id}/${path}`, { method: 'POST' })
+      await load()
+      setPoll((p) => p + 1) // 重新武装轮询，实时反映刚触发的后台工作
+    } catch (e) { setErr((e as Error).message) }
     finally { setBusy('') }
   }
 
@@ -56,6 +73,12 @@ export default function GenerateDetailPage() {
 
   const ready = task.status === 'ASSET_READY'
   const rt = task.renderTasks[0]
+  const activeRender = !!rt && !RENDER_TERMINAL.includes(rt.status)
+  // 有 RenderTask 时展示合成阶段状态，否则展示生成阶段状态。
+  const displayStatus = rt ? rt.status : task.status
+  // 仅在素材就绪且当前无在途合成时提供「确认合成」。
+  const canRender = ready && !activeRender
+  const working = !isSettled(task) && displayStatus !== 'ASSET_READY'
   const preview = task.renderTasks.find((r) => r.videoUrl)
 
   return (
@@ -68,10 +91,10 @@ export default function GenerateDetailPage() {
       <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
         <div className="flex items-center gap-3">
           <span className="eyebrow">当前状态</span>
-          <GenPill status={task.status} />
-          {!genIsTerminal(task.status) && <span className="text-xs text-ink3">处理中，自动刷新…</span>}
+          <GenPill status={displayStatus} />
+          {working && <span className="text-xs text-ink3">处理中，自动刷新…</span>}
         </div>
-        {ready && (
+        {canRender && (
           <button onClick={() => act('render', 'render')} disabled={busy === 'render'} className="btn-primary">
             {busy === 'render' ? '提交中…' : '确认合成'}
           </button>
@@ -88,13 +111,6 @@ export default function GenerateDetailPage() {
             <a href={preview.videoUrl!} download className="btn-primary flex-1">下载成片 MP4</a>
             {preview.subtitleUrl && <a href={preview.subtitleUrl} download className="btn-ghost flex-1">字幕 SRT</a>}
           </div>
-        </div>
-      )}
-
-      {rt && !preview && (
-        <div className="card flex items-center gap-3 p-4">
-          <span className="eyebrow">合成进度</span>
-          <GenPill status={rt.status} />
         </div>
       )}
 

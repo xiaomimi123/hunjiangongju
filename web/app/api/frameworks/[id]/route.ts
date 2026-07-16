@@ -14,7 +14,9 @@ export const PATCH = handler(async (req, { params }) => {
   await requireRole('operator')
   const fw = await prisma.copyFramework.findUnique({ where: { id: params.id } })
   if (!fw) throw new HttpError(404, '框架不存在')
-  const b = await req.json()
+  const b = await req.json().catch(() => {
+    throw new HttpError(400, '请求体格式错误')
+  })
   const data: Record<string, unknown> = {}
   if (typeof b.name === 'string') data.name = b.name
   if (typeof b.frameworkText === 'string') {

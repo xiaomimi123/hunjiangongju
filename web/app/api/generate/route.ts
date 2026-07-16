@@ -5,7 +5,9 @@ import { handler } from '@/lib/api'
 
 export const POST = handler(async (req) => {
   const session = await requireRole('operator')
-  const { frameworkId, subject, variables } = await req.json()
+  const { frameworkId, subject, variables } = await req.json().catch(() => {
+    throw new HttpError(400, '请求体格式错误')
+  })
   if (!frameworkId || typeof frameworkId !== 'string') throw new HttpError(400, '请选择框架')
   if (!subject || typeof subject !== 'string' || !subject.trim()) throw new HttpError(400, '选题不能为空')
   const fw = await prisma.copyFramework.findUnique({ where: { id: frameworkId } })

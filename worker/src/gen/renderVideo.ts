@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, buildSrt } from '@mixcut/db'
+import { prisma, transitionRender, buildSrt, enqueueGen } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 
 const WIDTH = 720
@@ -142,6 +142,11 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
 
   console.log(`[gen] render-video ${renderTaskId}: final.mp4 ${probed.width}x${probed.height} +audio ok${bgmAbs ? ' (bgm)' : ''}`)
 
-  // 不自动跑 QC，等运营确认预览后由 API 触发 run-gen-qc
   await transitionRender(renderTaskId, 'PREVIEW_PENDING')
+  if (genTask.autoRender) {
+    // 学员任务：自动进质检，无需运营确认预览。
+    await enqueueGen('run-gen-qc', { renderTaskId })
+    console.log(`[gen] render-video ${renderTaskId}: autoRender → enqueue run-gen-qc`)
+  }
+  // autoRender=false：停在 PREVIEW_PENDING，等运营确认预览后由 API 触发 run-gen-qc
 }

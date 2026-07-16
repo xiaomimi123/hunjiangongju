@@ -35,3 +35,6 @@ worker.on('failed', async (job, err) => {
 })
 
 console.log('[worker] pipeline worker started')
+
+import { startGenWorker } from './gen'
+startGenWorker()

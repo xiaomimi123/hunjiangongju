@@ -249,6 +249,7 @@ model CopyFramework {
   suggestedSegmentCount Int?             @map("suggested_segment_count")
   maxLines              Int?             @map("max_lines")
   maxTotalChars         Int?             @map("max_total_chars")
+  imageStylePrompt      String?          @map("image_style_prompt")
   createdBy             String?          @map("created_by")
   createdAt             DateTime         @default(now()) @map("created_at")
   generationTasks       GenerationTask[]

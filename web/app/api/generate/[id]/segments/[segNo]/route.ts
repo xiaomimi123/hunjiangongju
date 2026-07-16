@@ -36,8 +36,10 @@ export const PATCH = handler(async (req, { params }) => {
 
   const image = form.get('image')
   if (image instanceof File && image.size > 0) {
-    if (!(image.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(image.name))) {
-      throw new HttpError(400, '换图只支持图片文件')
+    // 管线全程用 PNG（generate-image 写 .png，renderVisuals 拷贝 media/<NN>.png），
+    // web 侧无 ffmpeg 无法转码，故换图仅接受 PNG 以保持格式/扩展名/Content-Type 一致。
+    if (image.type !== 'image/png' || !/\.png$/i.test(image.name)) {
+      throw new HttpError(400, '换图请上传 PNG 图片')
     }
     // 覆盖同名 png，保持 image_url 稳定（下游 renderVisuals 用固定路径拷贝）
     const rel = `gen/${task.id}/${seqNo}.png`

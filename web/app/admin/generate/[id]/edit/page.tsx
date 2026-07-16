@@ -108,7 +108,7 @@ export default function GenerateEditPage() {
       <div className="card space-y-2 p-4">
         <p className="eyebrow">合成 BGM</p>
         <div className="flex flex-wrap items-center gap-3">
-          <select value={bgmId} disabled={busy === 'bgm'} onChange={(e) => saveBgm(e.target.value)} className="field max-w-xs">
+          <select value={bgmId} disabled={!editable || busy === 'bgm'} onChange={(e) => saveBgm(e.target.value)} className="field max-w-xs">
             <option value="">不使用 BGM</option>
             {bgms.map((b) => <option key={b.id} value={b.id}>{b.styleTag || '未标注'} · {b.id.slice(0, 8)}</option>)}
           </select>

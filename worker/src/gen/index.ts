@@ -3,6 +3,7 @@ import { prisma, redisConnection, setGenerationStatus, transitionRender } from '
 import { generateScript } from './generateScript'
 import { generateImage } from './generateImage'
 import { generateTts } from './generateTts'
+import { alignCaptions } from './alignCaptions'
 
 async function dispatch(job: Job): Promise<void> {
   console.log(`[gen] ${job.name}`, job.data)
@@ -13,6 +14,8 @@ async function dispatch(job: Job): Promise<void> {
       return generateImage(job.data.genTaskId)
     case 'generate-tts':
       return generateTts(job.data.genTaskId)
+    case 'align-captions':
+      return alignCaptions(job.data.genTaskId)
     // 各 job 由后续任务接入；未实现先抛错，避免静默
     default: throw new Error(`未接入 gen job: ${job.name}`)
   }

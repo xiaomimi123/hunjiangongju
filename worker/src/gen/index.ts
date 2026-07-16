@@ -10,6 +10,7 @@ import { runGenQc } from './runGenQc'
 import { downloadDouyin } from './downloadDouyin'
 import { transcribe } from './transcribe'
 import { detectScenesJob } from './detectScenes'
+import { extractFramework } from './extractFramework'
 
 async function dispatch(job: Job): Promise<void> {
   console.log(`[gen] ${job.name}`, job.data)
@@ -34,6 +35,8 @@ async function dispatch(job: Job): Promise<void> {
       return transcribe(job.data.sourceVideoId)
     case 'detect-scenes':
       return detectScenesJob(job.data.sourceVideoId)
+    case 'extract-framework':
+      return extractFramework(job.data.sourceVideoId)
     // 各 job 由后续任务接入；未实现先抛错，避免静默
     default: throw new Error(`未接入 gen job: ${job.name}`)
   }

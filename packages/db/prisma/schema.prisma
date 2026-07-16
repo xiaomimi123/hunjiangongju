@@ -250,6 +250,7 @@ model CopyFramework {
   maxLines              Int?             @map("max_lines")
   maxTotalChars         Int?             @map("max_total_chars")
   imageStylePrompt      String?          @map("image_style_prompt")
+  published             Boolean          @default(false)
   createdBy             String?          @map("created_by")
   createdAt             DateTime         @default(now()) @map("created_at")
   generationTasks       GenerationTask[]
@@ -265,6 +266,8 @@ model GenerationTask {
   fullAudioUrl String?            @map("full_audio_url")
   bodyTimings  Json?              @map("body_timings")
   status       String             @default("GEN_CREATED")
+  published    Boolean            @default(false)
+  autoRender   Boolean            @default(false) @map("auto_render")
   createdBy    String?            @map("created_by")
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @updatedAt @map("updated_at")

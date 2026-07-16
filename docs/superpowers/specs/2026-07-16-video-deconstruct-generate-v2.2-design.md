@@ -107,6 +107,7 @@ model CopyFramework {
   visualStyleType      String           @default("ai_illustration") @map("visual_style_type")
   renderTemplate       String?          @map("render_template")       // HyperFrames 模板标识
   overlayTemplate      Json?            @map("overlay_template")       // {title_card, watermark} 占位符
+  imageStylePrompt     String?          @map("image_style_prompt")     // 文生图固定风格前后缀（拆解阶段填/LLM 辅助），generate-image 每次自动带上；P1 新增字段
   frameworkText        String           @map("framework_text")
   suggestedSegmentCount Int?            @map("suggested_segment_count")
   maxLines             Int?             @map("max_lines")
@@ -311,10 +312,10 @@ model AiCapabilityConfig {
 ---
 
 ## 15. 待确认/待补（开工前或对应阶段前）
-1. **4 个 AI 能力的接口文档**（各自 端点/请求体/返回格式）——实现适配层 client 必需。P0 需要。
+1. ~~4 个 AI 能力的接口文档~~ —— **已定（2026-07-16）**：全部按 **OpenAI 兼容默认**实现（P0 真实 HTTP 分支即此；接真实服务若发现差异再按端点调整）。
 2. **文案阈值校准**：用客户真实参考视频跑 `extract-framework` 估算逻辑验证（§8）。P2 前。
-3. **文生图风格 prompt 模板**：保证同素材包多图风格统一；是否针对客户品牌调优。P1 前。
+3. ~~文生图风格 prompt 模板~~ —— **已定（2026-07-16）**：MVP 做**固定风格前后缀 prompt**，挂在框架维度新增字段 `copy_frameworks.image_style_prompt`（拆解阶段运营填/LLM 辅助生成，`generate-image` 每次调用自动拼接）。进阶「参考图锚点」（第一张图作风格锚，后续图 img2img 参考）为可选，**取决于所选文生图 API 是否支持传参考图**——P1 前需向服务方确认；不支持则仅用前后缀 prompt。
 4. **BGM 来源**：MVP 固定曲库随机/按 style_tag 选取（本 spec 默认此法）；是否要情绪匹配（否，Phase 3）。
 5. **抖音解析可行性**：自研解析分享链的具体方法/成功率；兜底手动上传已定。P2 前验证。
-6. **HyperFrames 模板**：书单号模板（图片轮播动效+标题卡+水印）来源——套用 book-video 模板还是自建。P1 前。
+6. ~~HyperFrames 模板来源~~ —— **已定（2026-07-16）**：**自研新模板**，仅复用 book-video 的技术骨架（HyperFrames 项目结构 index.html+package.json、CSS/JS 做 crossfade+缓推近、`npx hyperframes@0.7.33 render` 调用方式、`silencedetect` 对齐与 ffmpeg 混音滤镜链），**不 fork 其模板**（其无标题卡/无水印、2-3 张图、有玻璃碎片片头，与客户需求相反）。新模板组件：①标题卡片(书名+副标题, overlay `title_card`, 常驻) ②水印(账号名, overlay `watermark`, 常驻) ③图片轮播容器(可变数量, 按 8-10 张设计, 每张按 body_timings 做 crossfade) ④字幕层(逐句浮现, 对齐 body_timings)。模板存放路径对应 `copy_frameworks.render_template`（一框架一套模板）。book-video 参考：https://github.com/Endless1936/book-video（Apache-2.0）；本地已 clone 到 scratchpad 供实现期查阅。
 7. **产品品牌/命名**：切换上线前定。

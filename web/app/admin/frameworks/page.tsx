@@ -4,7 +4,7 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
 
-type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string }
+type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; createdAt: string }
 type FrameworkFull = {
   id: string; name: string | null; frameworkText: string; industryCategory: string | null
   imageStylePrompt: string | null; overlayTemplate: unknown; renderTemplate: string | null
@@ -25,6 +25,7 @@ export default function FrameworksPage() {
   const [form, setForm] = useState<Form | null>(null)
   const [modalErr, setModalErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pubBusy, setPubBusy] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try { setRows(await api<FrameworkRow[]>('/api/frameworks')) }
@@ -51,6 +52,15 @@ export default function FrameworksPage() {
   }
 
   const setF = (patch: Partial<Form>) => setForm((f) => (f ? { ...f, ...patch } : f))
+
+  async function togglePublish(id: string, published: boolean) {
+    setErr(''); setPubBusy(id)
+    try {
+      await api(`/api/frameworks/${id}`, { method: 'PATCH', body: { published } })
+      await load()
+    } catch (e) { setErr((e as Error).message) }
+    finally { setPubBusy(null) }
+  }
 
   async function save() {
     if (!form || !editId) return
@@ -93,6 +103,7 @@ export default function FrameworksPage() {
               <th className="px-4 py-3 font-medium">名称</th>
               <th className="px-4 py-3 font-medium">行业标签</th>
               <th className="px-4 py-3 font-medium">视觉风格</th>
+              <th className="px-4 py-3 font-medium">成片库</th>
               <th className="px-4 py-3 font-medium">创建时间</th>
               <th className="px-4 py-3 font-medium"></th>
             </tr>
@@ -103,15 +114,24 @@ export default function FrameworksPage() {
                 <td className="px-4 py-3 font-medium text-flame">{f.name ?? f.id.slice(0, 8)}</td>
                 <td className="px-4 py-3 text-ink2">{f.industryCategory ?? '—'}</td>
                 <td className="px-4 py-3 text-ink2">{f.visualStyleType}</td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); togglePublish(f.id, !f.published) }}
+                    disabled={pubBusy === f.id}
+                    className={f.published ? 'btn-primary text-xs' : 'btn-ghost text-xs'}
+                  >
+                    {pubBusy === f.id ? '…' : f.published ? '取消发布' : '发布'}
+                  </button>
+                </td>
                 <td className="num px-4 py-3 text-ink3">{new Date(f.createdAt).toLocaleString('zh-CN')}</td>
                 <td className="px-4 py-3 text-right"><span className="btn-ghost text-xs">编辑</span></td>
               </tr>
             ))}
             {rows && rows.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">暂无框架，去「拆解」发起一个拆解任务</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-ink3">暂无框架，去「拆解」发起一个拆解任务</td></tr>
             )}
             {!rows && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
             )}
           </tbody>
         </table>

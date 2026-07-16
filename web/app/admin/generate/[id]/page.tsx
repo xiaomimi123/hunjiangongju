@@ -11,6 +11,7 @@ type RenderTask = { id: string; status: string; videoUrl: string | null; subtitl
 type Timing = { seqNo: number; startMs: number; endMs: number }
 type GenTask = {
   id: string; subject: string; status: string
+  published: boolean
   framework: { id: string; name: string | null } | null
   segments: Segment[]
   bodyTimings: Timing[] | null
@@ -61,6 +62,15 @@ export default function GenerateDetailPage() {
     finally { setBusy('') }
   }
 
+  async function togglePublish(published: boolean) {
+    setErr(''); setBusy('publish')
+    try {
+      await api(`/api/generate/${id}/publish`, { method: 'POST', body: { published } })
+      await load()
+    } catch (e) { setErr((e as Error).message) }
+    finally { setBusy('') }
+  }
+
   if (!task && err) {
     return (
       <div className="space-y-4">
@@ -82,6 +92,8 @@ export default function GenerateDetailPage() {
   const canConfirmPreview = !!rt && rt.status === 'PREVIEW_PENDING'
   // 合成失败（QC_FAILED/FAILED 或 genTask FAILED）：允许退回 ASSET_READY 重新编辑再合成。
   const canResetToEdit = task.status === 'FAILED' || (!!rt && (rt.status === 'QC_FAILED' || rt.status === 'FAILED'))
+  // 成片库发布：仅当最新 RenderTask 已 EXPORTED 时可发布/取消发布。
+  const canPublish = !!rt && rt.status === 'EXPORTED'
   // PREVIEW_PENDING 非终态（等操作），但不算「后台处理中」——不显示自动刷新提示。
   const working = !isSettled(task) && displayStatus !== 'ASSET_READY' && displayStatus !== 'PREVIEW_PENDING'
   const preview = task.renderTasks.find((r) => r.videoUrl)
@@ -117,6 +129,15 @@ export default function GenerateDetailPage() {
           {canResetToEdit && (
             <button onClick={() => act('reset-to-edit', 'reset')} disabled={busy === 'reset'} className="btn-primary">
               {busy === 'reset' ? '提交中…' : '退回编辑重试'}
+            </button>
+          )}
+          {canPublish && (
+            <button
+              onClick={() => togglePublish(!task.published)}
+              disabled={busy === 'publish'}
+              className={task.published ? 'btn-ghost' : 'btn-primary'}
+            >
+              {busy === 'publish' ? '提交中…' : task.published ? '取消发布' : '发布到成片库'}
             </button>
           )}
         </div>

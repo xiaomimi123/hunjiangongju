@@ -9,6 +9,7 @@ export const GET = handler(async (_req, { params }) => {
     where: { id: params.id },
     include: {
       framework: { select: { id: true, name: true } },
+      // published 供运营详情页反映「发布到成片库」开关状态
       segments: { orderBy: { seqNo: 'asc' }, select: { seqNo: true, scriptText: true, imageUrl: true } },
       renderTasks: {
         orderBy: { createdAt: 'desc' },

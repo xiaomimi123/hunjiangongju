@@ -25,6 +25,7 @@ const GROUPS: { label: string; items: { href: string; label: string; icon: strin
     { href: '/admin/tasks', label: '任务', icon: 'tasks' },
   ] },
   { label: '系统', items: [
+    { href: '/admin/models', label: '模型配置', icon: 'gear' },
     { href: '/admin/settings', label: '设置', icon: 'gear' },
     { href: '/admin/account', label: '账号', icon: 'user' },
   ] },

@@ -115,9 +115,18 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
 
   const { data, images } = buildBodyData(task, segments)
 
+  // 换 BGM：编辑页把选中的 bgmId 存在 variables.__bgmId，此处取出写入 RenderTask.bgmId
+  // （render-video 会据此混入 BGM）。校验 bgm 仍存在，避免陈旧 id 触发 FK 失败。
+  const vars = task.variables as { __bgmId?: string } | null
+  let bgmId: string | null = null
+  if (vars && typeof vars === 'object' && vars.__bgmId) {
+    const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
+    bgmId = bgm?.id ?? null
+  }
+
   // 本 job 创建 RenderTask
   const renderTask = await prisma.renderTask.create({
-    data: { generationTaskId: genTaskId, status: 'VISUAL_RENDERING' },
+    data: { generationTaskId: genTaskId, status: 'VISUAL_RENDERING', bgmId },
   })
 
   try {

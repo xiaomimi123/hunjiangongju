@@ -78,7 +78,10 @@ export default function GenerateDetailPage() {
   const displayStatus = rt ? rt.status : task.status
   // 仅在素材就绪且当前无在途合成时提供「确认合成」。
   const canRender = ready && !activeRender
-  const working = !isSettled(task) && displayStatus !== 'ASSET_READY'
+  // 预览待确认：最新 RenderTask 停在 PREVIEW_PENDING，等运营确认后才进质检。
+  const canConfirmPreview = !!rt && rt.status === 'PREVIEW_PENDING'
+  // PREVIEW_PENDING 非终态（等操作），但不算「后台处理中」——不显示自动刷新提示。
+  const working = !isSettled(task) && displayStatus !== 'ASSET_READY' && displayStatus !== 'PREVIEW_PENDING'
   const preview = task.renderTasks.find((r) => r.videoUrl)
 
   return (
@@ -93,12 +96,23 @@ export default function GenerateDetailPage() {
           <span className="eyebrow">当前状态</span>
           <GenPill status={displayStatus} />
           {working && <span className="text-xs text-ink3">处理中，自动刷新…</span>}
+          {canConfirmPreview && <span className="text-xs text-ink3">草稿已就绪，请预览后提交质检</span>}
         </div>
-        {canRender && (
-          <button onClick={() => act('render', 'render')} disabled={busy === 'render'} className="btn-primary">
-            {busy === 'render' ? '提交中…' : '确认合成'}
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {ready && (
+            <Link href={`/admin/generate/${id}/edit`} className="btn-ghost">编辑素材包</Link>
+          )}
+          {canRender && (
+            <button onClick={() => act('render', 'render')} disabled={busy === 'render'} className="btn-primary">
+              {busy === 'render' ? '提交中…' : '确认合成'}
+            </button>
+          )}
+          {canConfirmPreview && (
+            <button onClick={() => act('confirm-preview', 'confirm')} disabled={busy === 'confirm'} className="btn-primary">
+              {busy === 'confirm' ? '提交中…' : '确认无误，提交质检'}
+            </button>
+          )}
+        </div>
       </div>
 
       {preview && (

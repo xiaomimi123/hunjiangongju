@@ -4,7 +4,8 @@ import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 
 export const GET = handler(async (_req, { params }) => {
-  const session = await requireRole('operator')
+  // 任意登录用户可读；下方 ownership 校验保证学员只看自己的任务（他人 404），运营看自己发起的仍可用
+  const session = await requireRole()
   const task = await prisma.generationTask.findUnique({
     where: { id: params.id },
     include: {
@@ -17,6 +18,6 @@ export const GET = handler(async (_req, { params }) => {
       },
     },
   })
-  if (!task || task.createdBy !== session.userId) throw new HttpError(404, '生成任务不存在')
+  if (!task || (task.createdBy && task.createdBy !== session.userId)) throw new HttpError(404, '生成任务不存在')
   return NextResponse.json(task)
 })

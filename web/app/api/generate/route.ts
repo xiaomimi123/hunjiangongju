@@ -40,6 +40,9 @@ export const GET = handler(async () => {
     select: {
       id: true, subject: true, status: true, createdAt: true, updatedAt: true,
       framework: { select: { name: true } },
+      // 最新合成任务状态：autoRender 任务的 generationTask.status 停在 VISUAL_RENDERING，
+      // 真实进度（EXPORTED/QC_FAILED 等）在 RenderTask 上，列表据此归类「已完成/失败」。
+      renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
     },
   })
   return NextResponse.json(tasks)

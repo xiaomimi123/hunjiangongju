@@ -95,6 +95,20 @@ function runDetectFilter(file: string, kind: 'video' | 'audio', filter: string, 
   })
 }
 
+/** 场景检测：跑 scene filter + showinfo，返回合并的 stdout+stderr（showinfo 走 stderr） */
+export function detectScenes(video: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let out = ''
+    ffmpeg(video)
+      .outputOptions(['-hide_banner', '-filter:v', "select='gt(scene,0.3)',showinfo", '-f', 'null'])
+      .output('-')
+      .on('stderr', (line: string) => { out += line + '\n' })
+      .on('end', (stdout?: string | null) => resolve(out + (stdout ?? '')))
+      .on('error', reject)
+      .run()
+  })
+}
+
 export function detectBlack(file: string): Promise<string[]> {
   return runDetectFilter(file, 'video', 'blackdetect=d=0.5:pix_th=0.10', 'black_start')
 }

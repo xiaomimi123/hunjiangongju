@@ -1,0 +1,169 @@
+'use client'
+import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
+import Link from 'next/link'
+import { api } from '@/lib/fetcher'
+import PageHeader from '@/components/admin/PageHeader'
+import { GenPill } from '../genStatus'
+
+type Segment = { seqNo: number; scriptText: string; imageUrl: string | null }
+type RenderTask = { id: string; status: string; videoUrl: string | null; subtitleUrl: string | null }
+type Timing = { seqNo: number; startMs: number; endMs: number }
+type GenTask = {
+  id: string; subject: string; status: string
+  framework: { id: string; name: string | null } | null
+  segments: Segment[]
+  bodyTimings: Timing[] | null
+  renderTasks: RenderTask[]
+}
+
+// 合成阶段终态：最新 RenderTask 处于这些状态时后台已无在途工作。
+const RENDER_TERMINAL = ['EXPORTED', 'QC_FAILED', 'FAILED']
+
+// 是否真正结束（可停轮询）：genTask 失败，或最新 RenderTask 进入终态。
+// 注意：纯 ASSET_READY（无在途 render）不算结束——继续轮询以便单段重生的进度可见。
+function isSettled(t: GenTask): boolean {
+  if (t.status === 'FAILED') return true
+  const latest = t.renderTasks[0]
+  return !!latest && RENDER_TERMINAL.includes(latest.status)
+}
+
+export default function GenerateDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const [task, setTask] = useState<GenTask | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const [poll, setPoll] = useState(0) // 递增以重新武装轮询（act 后重启）
+
+  const load = useCallback(async () => {
+    try { const t = await api<GenTask>(`/api/generate/${id}`); setTask(t); return t }
+    catch (e) { setErr((e as Error).message); return null }
+  }, [id])
+
+  useEffect(() => {
+    let stopped = false
+    load()
+    const timer = setInterval(async () => {
+      const t = await load()
+      if (stopped) return
+      if (!t || isSettled(t)) { stopped = true; clearInterval(timer) }
+    }, 3000)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [load, poll])
+
+  async function act(path: string, key: string) {
+    setErr(''); setBusy(key)
+    try {
+      await api(`/api/generate/${id}/${path}`, { method: 'POST' })
+      await load()
+      setPoll((p) => p + 1) // 重新武装轮询，实时反映刚触发的后台工作
+    } catch (e) { setErr((e as Error).message) }
+    finally { setBusy('') }
+  }
+
+  if (!task && err) {
+    return (
+      <div className="space-y-4">
+        <p className="pill pill-bad">{err}</p>
+        <Link href="/admin/generate" className="text-sm text-flame">← 返回生成列表</Link>
+      </div>
+    )
+  }
+  if (!task) return <p className="py-16 text-center text-sm text-ink3">加载中…</p>
+
+  const ready = task.status === 'ASSET_READY'
+  const rt = task.renderTasks[0]
+  const activeRender = !!rt && !RENDER_TERMINAL.includes(rt.status)
+  // 有 RenderTask 时展示合成阶段状态，否则展示生成阶段状态。
+  const displayStatus = rt ? rt.status : task.status
+  // 仅在素材就绪且当前无在途合成时提供「确认合成」。
+  const canRender = ready && !activeRender
+  // 预览待确认：最新 RenderTask 停在 PREVIEW_PENDING，等运营确认后才进质检。
+  const canConfirmPreview = !!rt && rt.status === 'PREVIEW_PENDING'
+  // 合成失败（QC_FAILED/FAILED 或 genTask FAILED）：允许退回 ASSET_READY 重新编辑再合成。
+  const canResetToEdit = task.status === 'FAILED' || (!!rt && (rt.status === 'QC_FAILED' || rt.status === 'FAILED'))
+  // PREVIEW_PENDING 非终态（等操作），但不算「后台处理中」——不显示自动刷新提示。
+  const working = !isSettled(task) && displayStatus !== 'ASSET_READY' && displayStatus !== 'PREVIEW_PENDING'
+  const preview = task.renderTasks.find((r) => r.videoUrl)
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title={task.subject} subtitle={task.framework?.name ? `框架：${task.framework.name}` : undefined}>
+        <Link href="/admin/generate" className="btn-ghost">返回列表</Link>
+      </PageHeader>
+      {err && <p className="pill pill-bad">{err}</p>}
+
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
+        <div className="flex items-center gap-3">
+          <span className="eyebrow">当前状态</span>
+          <GenPill status={displayStatus} />
+          {working && <span className="text-xs text-ink3">处理中，自动刷新…</span>}
+          {canConfirmPreview && <span className="text-xs text-ink3">草稿已就绪，请预览后提交质检</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {ready && (
+            <Link href={`/admin/generate/${id}/edit`} className="btn-ghost">编辑素材包</Link>
+          )}
+          {canRender && (
+            <button onClick={() => act('render', 'render')} disabled={busy === 'render'} className="btn-primary">
+              {busy === 'render' ? '提交中…' : '确认合成'}
+            </button>
+          )}
+          {canConfirmPreview && (
+            <button onClick={() => act('confirm-preview', 'confirm')} disabled={busy === 'confirm'} className="btn-primary">
+              {busy === 'confirm' ? '提交中…' : '确认无误，提交质检'}
+            </button>
+          )}
+          {canResetToEdit && (
+            <button onClick={() => act('reset-to-edit', 'reset')} disabled={busy === 'reset'} className="btn-primary">
+              {busy === 'reset' ? '提交中…' : '退回编辑重试'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {preview && (
+        <div className="space-y-3">
+          <p className="eyebrow">成片预览</p>
+          <div className="overflow-hidden rounded-3xl bg-black shadow-card">
+            <video controls playsInline className="mx-auto max-h-[62vh] w-full bg-black object-contain" src={preview.videoUrl!} />
+          </div>
+          <div className="flex gap-2.5 text-sm">
+            <a href={preview.videoUrl!} download className="btn-primary flex-1">下载成片 MP4</a>
+            {preview.subtitleUrl && <a href={preview.subtitleUrl} download className="btn-ghost flex-1">字幕 SRT</a>}
+          </div>
+        </div>
+      )}
+
+      <section className="space-y-3">
+        <p className="eyebrow">分段（{task.segments.length}）</p>
+        {task.segments.length === 0 ? (
+          <p className="card p-6 text-center text-sm text-ink3">文案生成中，分段稍后出现…</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
+            {task.segments.map((s) => (
+              <div key={s.seqNo} className="card overflow-hidden">
+                <div className="relative aspect-[3/4] bg-surface2">
+                  {s.imageUrl
+                    ? <img src={s.imageUrl} alt={`第${s.seqNo}段`} className="h-full w-full object-cover" />
+                    : <div className="grid h-full w-full place-items-center text-xs text-ink3">图片生成中…</div>}
+                  <span className="num absolute left-2 top-2 rounded-md bg-ink/60 px-1.5 py-0.5 text-[11px] text-white">#{s.seqNo}</span>
+                </div>
+                <div className="space-y-2 p-3">
+                  <p className="line-clamp-3 text-sm text-ink2">{s.scriptText}</p>
+                  <button
+                    onClick={() => act(`segments/${s.seqNo}/regenerate`, `seg-${s.seqNo}`)}
+                    disabled={!ready || busy === `seg-${s.seqNo}`}
+                    className="btn-ghost w-full text-xs disabled:opacity-50"
+                  >
+                    {busy === `seg-${s.seqNo}` ? '重生中…' : '重新生成'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}

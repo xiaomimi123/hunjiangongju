@@ -26,7 +26,9 @@ describe('renderIndexHtml', () => {
   it('注册 paused GSAP timeline 于 window.__timelines["main"]', () => {
     expect(html).toContain('gsap.timeline({ paused: true })')
     expect(html).toContain('window.__timelines["main"] = tl;')
-    expect(html).toContain('cdn.jsdelivr.net/npm/gsap@3.14.2')
+    // 本地化 GSAP：离线/CN 主机也能加载，避免运行时依赖外网 CDN。
+    expect(html).toContain('<script src="gsap.min.js"></script>')
+    expect(html).not.toContain('cdn.jsdelivr.net')
   })
 
   it('每段生成场景/字幕/缓推近/crossfade/字幕reveal', () => {

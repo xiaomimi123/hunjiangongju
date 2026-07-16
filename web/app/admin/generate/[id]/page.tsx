@@ -80,6 +80,8 @@ export default function GenerateDetailPage() {
   const canRender = ready && !activeRender
   // 预览待确认：最新 RenderTask 停在 PREVIEW_PENDING，等运营确认后才进质检。
   const canConfirmPreview = !!rt && rt.status === 'PREVIEW_PENDING'
+  // 合成失败（QC_FAILED/FAILED 或 genTask FAILED）：允许退回 ASSET_READY 重新编辑再合成。
+  const canResetToEdit = task.status === 'FAILED' || (!!rt && (rt.status === 'QC_FAILED' || rt.status === 'FAILED'))
   // PREVIEW_PENDING 非终态（等操作），但不算「后台处理中」——不显示自动刷新提示。
   const working = !isSettled(task) && displayStatus !== 'ASSET_READY' && displayStatus !== 'PREVIEW_PENDING'
   const preview = task.renderTasks.find((r) => r.videoUrl)
@@ -110,6 +112,11 @@ export default function GenerateDetailPage() {
           {canConfirmPreview && (
             <button onClick={() => act('confirm-preview', 'confirm')} disabled={busy === 'confirm'} className="btn-primary">
               {busy === 'confirm' ? '提交中…' : '确认无误，提交质检'}
+            </button>
+          )}
+          {canResetToEdit && (
+            <button onClick={() => act('reset-to-edit', 'reset')} disabled={busy === 'reset'} className="btn-primary">
+              {busy === 'reset' ? '提交中…' : '退回编辑重试'}
             </button>
           )}
         </div>

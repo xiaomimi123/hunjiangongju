@@ -139,6 +139,10 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     // 拷模板 package.json
     await fs.copyFile(path.join(TEMPLATE_DIR, 'package.json'), path.join(hfDir, 'package.json'))
 
+    // 拷本地化的 GSAP（index.html 以相对路径 gsap.min.js 引用），离线/CN 主机可用，
+    // 避免渲染时依赖外网 CDN 失败 → 静默产出无动画视频。
+    await fs.copyFile(path.join(TEMPLATE_DIR, 'gsap.min.js'), path.join(hfDir, 'gsap.min.js'))
+
     // 拷各段图片到 media/<NN>.png
     for (const img of images) {
       await fs.copyFile(img.abs, path.join(hfDir, img.rel))

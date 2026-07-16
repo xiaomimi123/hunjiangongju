@@ -41,6 +41,18 @@ export async function normalizeSegment(opts: {
   })
 }
 
+/** 抽单声道 16k WAV 音频，供 ASR 使用 */
+export function extractAudio(videoAbs: string, outWav: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ffmpeg(videoAbs)
+      .outputOptions(['-vn', '-ac', '1', '-ar', '16000', '-y'])
+      .output(outWav)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run()
+  })
+}
+
 export async function concatSegments(files: string[], out: string): Promise<void> {
   const listPath = path.join(path.dirname(out), 'concat-list.txt')
   await fs.writeFile(listPath, files.map((f) => `file '${f}'`).join('\n'))

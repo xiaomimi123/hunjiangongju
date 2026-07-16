@@ -8,6 +8,7 @@ import { renderVisuals } from './renderVisuals'
 import { renderVideo } from './renderVideo'
 import { runGenQc } from './runGenQc'
 import { downloadDouyin } from './downloadDouyin'
+import { transcribe } from './transcribe'
 
 async function dispatch(job: Job): Promise<void> {
   console.log(`[gen] ${job.name}`, job.data)
@@ -28,6 +29,8 @@ async function dispatch(job: Job): Promise<void> {
       return runGenQc(job.data.renderTaskId)
     case 'download-douyin':
       return downloadDouyin(job.data.sourceVideoId)
+    case 'transcribe':
+      return transcribe(job.data.sourceVideoId)
     // 各 job 由后续任务接入；未实现先抛错，避免静默
     default: throw new Error(`未接入 gen job: ${job.name}`)
   }

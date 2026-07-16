@@ -15,8 +15,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       <BottomNav
         items={[
           { href: '/', label: '首页', icon: 'home' },
-          { href: '/templates', label: '模版', icon: 'grid' },
-          { href: '/works', label: '作品', icon: 'film' },
+          { href: '/templates', label: '框架库', icon: 'layers' },
+          { href: '/library', label: '成片库', icon: 'film' },
           { href: '/me', label: '我的', icon: 'user' },
         ]}
       />

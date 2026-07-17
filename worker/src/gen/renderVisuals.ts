@@ -48,6 +48,9 @@ interface SegmentRow {
   seqNo: number
   scriptText: string
   imageUrl: string | null
+  bookTitle?: string | null
+  bookAuthor?: string | null
+  subtitleEn?: string | null
 }
 
 /** 组装 BodyData：segments 由 bodyTimings（按 seqNo）join generated_segments；images 1:1 */
@@ -79,6 +82,9 @@ export function buildBodyData(
       endMs: t.endMs,
       subtitle: seg.scriptText,
       imageIndex,
+      ...(seg.bookTitle ? { bookTitle: seg.bookTitle } : {}),
+      ...(seg.bookAuthor ? { bookAuthor: seg.bookAuthor } : {}),
+      ...(seg.subtitleEn ? { subtitleEn: seg.subtitleEn } : {}),
     })
     imageIndex++
   }

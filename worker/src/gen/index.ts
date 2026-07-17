@@ -43,7 +43,16 @@ async function dispatch(job: Job): Promise<void> {
 }
 
 export function startGenWorker() {
-  const w = new Worker('generation', dispatch, { connection: redisConnection, concurrency: 2 })
+  // 真实出片的单步很重：8+ 张文生图(async)、HyperFrames 渲染与 ffmpeg 合成走 spawnSync 会阻塞事件循环，
+  // 单步可达数分钟，远超 BullMQ 默认 30s 锁；锁一过期就被误判 stalled → 反复重试、产生重复渲染，
+  // 且失败重试会把父 generationTask 置 FAILED（成片其实已 PREVIEW_PENDING，前后端却显示“生成失败”）。
+  // 把锁设足够长以覆盖最长单步（阻塞期间无法续期，只能靠一次锁足够久），并放宽 stalled 容忍次数。
+  const w = new Worker('generation', dispatch, {
+    connection: redisConnection,
+    concurrency: 2,
+    lockDuration: 600_000, // 10 分钟
+    maxStalledCount: 3,
+  })
   w.on('completed', (j) => console.log(`[gen] ${j.name} done`))
   w.on('failed', async (j, err) => {
     console.error(`[gen] ${j?.name} failed: ${err.message}`)

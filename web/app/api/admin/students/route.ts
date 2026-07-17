@@ -23,17 +23,30 @@ export const GET = handler(async (req) => {
     prisma.user.count({ where }),
     prisma.user.count({ where: { role: 'student' } }),
     prisma.user.count({ where: { role: 'student', createdAt: { gte: startOfToday } } }),
-    prisma.task.count(),
-    prisma.task.count({ where: { status: 'EXPORTED' } }),
+    prisma.generationTask.count(),
+    prisma.generationTask.count({ where: { status: 'EXPORTED' } }),
     prisma.user.findMany({
       where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true, tasks: { select: { status: true } } },
+      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true },
     }),
   ])
 
+  // 学员作品 = 该学员发起的生成任务（generationTask.createdBy 为普通字段，非关系，用聚合统计）
+  const ids = rows.map((u) => u.id)
+  const genTasks = ids.length
+    ? await prisma.generationTask.findMany({ where: { createdBy: { in: ids } }, select: { createdBy: true, status: true } })
+    : []
+  const byUser = new Map<string, { total: number; done: number }>()
+  for (const t of genTasks) {
+    if (!t.createdBy) continue
+    const e = byUser.get(t.createdBy) ?? { total: 0, done: 0 }
+    e.total++; if (t.status === 'EXPORTED') e.done++
+    byUser.set(t.createdBy, e)
+  }
+
   const students = rows.map((u) => ({
     id: u.id, email: u.email, nickname: u.nickname, disabled: u.disabled, createdAt: u.createdAt,
-    taskCount: u.tasks.length, doneCount: u.tasks.filter((t) => t.status === 'EXPORTED').length,
+    taskCount: byUser.get(u.id)?.total ?? 0, doneCount: byUser.get(u.id)?.done ?? 0,
   }))
   return NextResponse.json({ stats: { totalStudents, todayNew, totalTasks, totalExported }, students, total })
 })

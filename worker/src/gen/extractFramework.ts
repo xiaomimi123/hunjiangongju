@@ -1,4 +1,6 @@
-import { prisma, llmComplete, setSourceStatus, deriveCharBudget } from '@mixcut/db'
+import { prisma, llmComplete, setSourceStatus, deriveCharBudget, MOCK_VISION_STYLE } from '@mixcut/db'
+import { urlToAbs } from '../paths'
+import { extractStyleFromVideo } from './extractStyle'
 
 /** 已知行业标签，用于从 LLM 输出里做简单启发式命中 */
 const INDUSTRY_LABELS = ['书单号', '好物推荐', '情感语录', '知识科普'] as const
@@ -119,7 +121,20 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
   // 阈值估算（代码侧，spec §8，从参考视频节奏反推，非 LLM）
   const textLen = Array.from(fullText).length
   const { maxLines, maxTotalChars } = deriveCharBudget(segCount, textLen)
-  const imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
+
+  // 源视频画风识别（qwen-vl 抽帧识别，见 extractStyle.ts）：识别成功则用真实画风替换默认值；
+  // extractStyleFromVideo 在 vision 能力 mock/未启用/识别失败时统一返回 MOCK_VISION_STYLE 这个哨兵值，
+  // 借此区分「拿到真实识别结果」与「兜底」——兜底时保留下面的历史默认（水彩插画），拆解绝不因此中断。
+  let imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
+  let visualStyleType = 'ai_illustration'
+  if (source?.videoFileUrl) {
+    const videoAbs = urlToAbs(source.videoFileUrl)
+    const style = await extractStyleFromVideo(sourceVideoId, videoAbs)
+    if (style !== MOCK_VISION_STYLE) {
+      imageStylePrompt = style.imageStylePrompt
+      visualStyleType = style.visualStyleType
+    }
+  }
 
   // 书单号核心：从真实转写中识别源里提到的书目（书名/作者），供后续渲染引用
   const books = extractBooks(fullText)
@@ -141,7 +156,7 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
       imageStylePrompt,
       overlayTemplate,
       renderTemplate: 'booklist',
-      visualStyleType: 'ai_illustration',
+      visualStyleType,
       createdBy: source?.createdBy ?? null,
     },
   })

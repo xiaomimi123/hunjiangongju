@@ -6,6 +6,8 @@ export { imageGenerate } from './image'
 export { ttsSynthesize } from './tts'
 export { asrTranscribe } from './asr'
 export { enrollVoice, parseEnrollResult, listVoices } from './voiceClone'
+export { describeImageStyle, parseVisionStyle, MOCK_VISION_STYLE } from './vision'
+export type { VisualStyleType, VisionStyleResult } from './vision'
 import { llmComplete } from './llm'
 import { imageGenerate } from './image'
 import { ttsSynthesize } from './tts'
@@ -17,6 +19,7 @@ export async function testCapability(cap: Capability): Promise<{ ok: boolean; de
     if (cap === 'llm') { const t = await llmComplete({ prompt: '回复 ok' }); return { ok: true, detail: `LLM 返回 ${t.slice(0, 20)}…` } }
     if (cap === 'image') { const b = await imageGenerate({ prompt: 'test' }); return { ok: true, detail: `图片 ${b.length} 字节` } }
     if (cap === 'tts') { const b = await ttsSynthesize({ text: '测试' }); return { ok: true, detail: `音频 ${b.length} 字节` } }
+    if (cap === 'vision') return { ok: true, detail: '画风识别需图片输入，跳过在线测试（配置已保存）' }
     return { ok: true, detail: 'ASR 需上传音频，跳过在线测试（配置已保存）' }
   } catch (e) {
     return { ok: false, detail: (e as Error).message }

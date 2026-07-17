@@ -177,6 +177,17 @@ model RenderQcReport {
   @@map("render_qc_reports")
 }
 
+model ClonedVoice {
+  id             String   @id @default(uuid())
+  voiceId        String   @unique @map("voice_id")
+  name           String
+  sampleAssetUrl String   @map("sample_asset_url")
+  provider       String   @default("dashscope")
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  @@map("cloned_voices")
+}
+
 model AiCapabilityConfig {
   capability String   @id
   baseUrl    String   @default("") @map("base_url")

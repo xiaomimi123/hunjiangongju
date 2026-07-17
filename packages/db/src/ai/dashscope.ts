@@ -13,6 +13,17 @@ export function dashGenEndpoint(baseUrl: string): string {
   return `${origin}/api/v1/services/aigc/multimodal-generation/generation`
 }
 
+// 声音复刻（CosyVoice/Qwen-Audio 建声）端点：核对自
+// https://help.aliyun.com/zh/model-studio/voice-clone-design-http-api
+// 文档给出的是按 Workspace 分域的 `{WorkspaceId}.cn-beijing.maas.aliyuncs.com` 域名，
+// 但同页注明「legacy dashscope.aliyuncs.com 域名仍可正常使用」；本项目配置里没有单独的
+// WorkspaceId 字段，因此统一走该 legacy 域名（与其余原生能力保持同一 baseUrl 来源）。
+export function dashVoiceEnrollEndpoint(baseUrl: string): string {
+  let origin = 'https://dashscope.aliyuncs.com'
+  try { origin = new URL(baseUrl).origin } catch { /* 用默认 */ }
+  return `${origin}/api/v1/services/audio/tts/customization`
+}
+
 // 下载 DashScope 返回的图片/音频 URL 为 Buffer（带超时，防挂起）
 export async function fetchUrlToBuffer(url: string, timeoutMs = 60_000): Promise<Buffer<ArrayBuffer>> {
   const ctrl = new AbortController()
@@ -26,8 +37,15 @@ export async function fetchUrlToBuffer(url: string, timeoutMs = 60_000): Promise
   }
 }
 
-export async function dashPost(baseUrl: string, apiKey: string, body: unknown): Promise<{ output?: Record<string, unknown> }> {
-  const res = await fetch(dashGenEndpoint(baseUrl), {
+// endpoint 默认走 multimodal-generation（qwen-tts/qwen-image/asr 同步识别都用它）；
+// 声音复刻建声走不同端点，调用方传 dashVoiceEnrollEndpoint(baseUrl) 覆盖。
+export async function dashPost(
+  baseUrl: string,
+  apiKey: string,
+  body: unknown,
+  endpoint: string = dashGenEndpoint(baseUrl),
+): Promise<{ output?: Record<string, unknown> }> {
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),

@@ -50,9 +50,10 @@
 ## 5. 外部能力（已核实，均在北京地域可用）
 
 ### 5.1 录音文件识别（ASR）
-- Paraformer / Fun-ASR **异步**转写：`X-DashScope-Async: enable` 提交 → 得 `task_id` → 轮询取结果，**返回句级时间戳**，支持长音频。
-- 备选 **qwen-asr**（多模态 `multimodal-generation`，同步，形态同现有 `dashPost`）——短音频优先用它更简单。
-- **约束**：DashScope 需能**通过 URL 访问音频**。见 §6 URL 可达性。
+- **要句级时间戳（节奏 D4 依赖）必须走异步**：`paraformer-v2` 或 `qwen3-asr-flash-filetrans`，`X-DashScope-Async: enable` 提交 → 得 `task_id` → 轮询 `/api/v1/tasks/{id}` → 从 `transcription_url` 下载结果 JSON，句子在 `transcripts[0].sentences[].begin_time/end_time`。支持长音频。
+- **同步 `qwen3-asr-flash`（多模态，形态同 `dashPost`）只返回纯文本、无时间戳**，仅够纯转写用；节奏维度不可用它。（M1 实现 Task 3 已核实修正，两种响应形态都已解析。）
+- **部署配置**：`asr.model` 设 `paraformer-v2` 才有时间戳。
+- **约束**：DashScope 需能**通过 URL 访问音频**（签名 URL，Task 2 已实现）。见 §6 URL 可达性。
 
 ### 5.2 CosyVoice 声音复刻
 - 两步：`voice-enrollment` 建音色（`create_voice` + 目标模型如 `cosyvoice-v3.5-plus` + 前缀 + **样本音频 URL**）→ 得 `voice_id`；再用 CosyVoice 合成时传 `voice_id`。

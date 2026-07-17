@@ -1,4 +1,4 @@
-import { prisma, llmComplete, setSourceStatus, deriveCharBudget, MOCK_VISION_STYLE } from '@mixcut/db'
+import { prisma, llmComplete, setSourceStatus, deriveCharBudget, MOCK_VISION_STYLE, derivePace } from '@mixcut/db'
 import { urlToAbs } from '../paths'
 import { extractStyleFromVideo } from './extractStyle'
 
@@ -138,10 +138,22 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
 
   // 书单号核心：从真实转写中识别源里提到的书目（书名/作者），供后续渲染引用
   const books = extractBooks(fullText)
+
+  // 源节奏（Task4）：句时间戳 + 场景切点 → 源均段时长/段数，供 alignCaptions 生成 bodyTimings 时对齐节奏。
+  // 本地 ASR 若只有占位/零时间戳，derivePace 会优雅降级为 avgSegMs=0（下游 applyPace 视为「无源节奏」不做调整）。
+  const sentenceSpans = Array.isArray(transcript.sentences)
+    ? (transcript.sentences as unknown[])
+        .map((s) => s as { startMs?: number; endMs?: number })
+        .filter((s) => typeof s.startMs === 'number' && typeof s.endMs === 'number')
+        .map((s) => ({ startMs: s.startMs as number, endMs: s.endMs as number }))
+    : []
+  const pace = derivePace(sentenceSpans, sceneCut?.cutPointsMs ?? [])
+
   const overlayTemplate = {
     title_card: '{{标题}} {{副标题}}',
     watermark: '{{账号}}',
     ...(books.length > 0 ? { books } : {}),
+    ...(pace.avgSegMs > 0 ? { pace } : {}),
   }
 
   await prisma.copyFramework.create({

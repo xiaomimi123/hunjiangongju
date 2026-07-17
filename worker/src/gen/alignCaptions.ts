@@ -8,7 +8,9 @@ import {
   coalesce,
   buildTimings,
   evenSplit,
+  applyPace,
   type Timing,
+  type PaceInfo,
 } from '@mixcut/db'
 import { urlToAbs } from '../paths'
 
@@ -65,6 +67,18 @@ export async function alignCaptions(genTaskId: string): Promise<void> {
     }
   }
   console.log(`[gen] align-captions ${genTaskId}: ${path}, ${timings.length} 段, 时长 ${Math.round(durationMs)}ms`)
+
+  // Task4 节奏对齐：框架若带有源节奏（overlayTemplate.pace，见 extractFramework.ts），
+  // 把 TTS 实测时长朝源均段时长拉，但绝不短于 TTS 实测时长（applyPace 保证）。
+  // 无 pace（如本地占位时间戳、旧任务）时 applyPace 原样返回，行为不变。
+  const framework = await prisma.copyFramework.findUnique({ where: { id: task.frameworkId } })
+  const overlayTemplate = (framework?.overlayTemplate ?? null) as { pace?: PaceInfo } | null
+  const pace = overlayTemplate?.pace
+  if (pace && typeof pace.avgSegMs === 'number') {
+    const before = timings.length
+    timings = applyPace(timings, pace)
+    console.log(`[gen] align-captions ${genTaskId}: 应用源节奏 avgSegMs=${pace.avgSegMs} (${before} 段)`)
+  }
 
   await prisma.generationTask.update({ where: { id: genTaskId }, data: { bodyTimings: timings } })
   await setGenerationStatus(genTaskId, 'ASSET_READY')

@@ -12,25 +12,24 @@ async function getStudent(id: string) {
   return u
 }
 
-// 学员作品列表
+// 学员作品列表（学员自助生成的任务）
 export const GET = handler(async (_req, { params }) => {
   await requireRole('operator')
   await getStudent(params.id)
-  const tasks = await prisma.task.findMany({
-    where: { userId: params.id },
+  const tasks = await prisma.generationTask.findMany({
+    where: { createdBy: params.id },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, status: true, aspectRatio: true, createdAt: true, script: { select: { title: true } } },
+    select: { id: true, status: true, subject: true, createdAt: true, framework: { select: { name: true } } },
   })
   return NextResponse.json({ tasks })
 })
 
-// 删除学员（连同其任务数据；任务子表已配置级联删除）
+// 删除学员（连同其生成任务；分段/渲染任务子表级联删除）
 export const DELETE = handler(async (_req, { params }) => {
   await requireRole('operator')
   await getStudent(params.id)
   await prisma.$transaction([
-    prisma.accessKey.deleteMany({ where: { userId: params.id } }),
-    prisma.task.deleteMany({ where: { userId: params.id } }),
+    prisma.generationTask.deleteMany({ where: { createdBy: params.id } }),
     prisma.user.delete({ where: { id: params.id } }),
   ])
   return NextResponse.json({ ok: true })

@@ -1,29 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  splitScript, scoreMaterial, estimateDurationMs, checkSubtitleOverflow,
-  msToSrtTime, buildSrt, canTransition, DIMS,
+  estimateDurationMs, checkSubtitleOverflow,
+  msToSrtTime, buildSrt, DIMS,
 } from './pipeline'
-
-describe('splitScript 按自然段切分', () => {
-  it('按换行切段并去掉空段与首尾空白', () => {
-    expect(splitScript('第一段\n第二段\n\n  第三段  \n')).toEqual(['第一段', '第二段', '第三段'])
-  })
-  it('支持 \\r\\n', () => {
-    expect(splitScript('a\r\nb')).toEqual(['a', 'b'])
-  })
-  it('全空内容返回空数组', () => {
-    expect(splitScript('\n  \n')).toEqual([])
-  })
-})
-
-describe('scoreMaterial 标签重合度', () => {
-  it('交集计数', () => {
-    expect(scoreMaterial(['t1', 't2', 't3'], ['t2', 't3', 't9'])).toBe(2)
-  })
-  it('无交集为 0', () => {
-    expect(scoreMaterial(['t1'], ['t2'])).toBe(0)
-  })
-})
 
 describe('estimateDurationMs 语速估时', () => {
   it('12 个字 ÷ 6字/秒 = 2000ms', () => {
@@ -56,28 +35,6 @@ describe('SRT 生成', () => {
     expect(srt).toBe(
       '1\n00:00:00,000 --> 00:00:01,500\n你好\n\n2\n00:00:01,500 --> 00:00:03,000\n世界\n'
     )
-  })
-})
-
-describe('状态机转移表', () => {
-  it('合法转移', () => {
-    expect(canTransition('CREATED', 'SEGMENTING')).toBe(true)
-    expect(canTransition('MATCHING', 'MATERIAL_PENDING')).toBe(true)
-    expect(canTransition('MATERIAL_PENDING', 'MATCHING')).toBe(true)
-    expect(canTransition('PREVIEW_PENDING', 'QC_RUNNING')).toBe(true)
-    expect(canTransition('QC_FAILED', 'REVISING')).toBe(true)
-    expect(canTransition('REVISING', 'RENDERING')).toBe(true)
-    expect(canTransition('QC_PASSED', 'EXPORTED')).toBe(true)
-    expect(canTransition('FAILED', 'SEGMENTING')).toBe(true)
-    expect(canTransition('STORYBOARD_READY', 'FAILED')).toBe(true)
-    expect(canTransition('QC_PASSED', 'FAILED')).toBe(true)
-    expect(canTransition('CREATED', 'FAILED')).toBe(true)
-    expect(canTransition('REVISING', 'FAILED')).toBe(true)
-  })
-  it('非法转移', () => {
-    expect(canTransition('CREATED', 'EXPORTED')).toBe(false)
-    expect(canTransition('EXPORTED', 'RENDERING')).toBe(false)
-    expect(canTransition('不存在', 'CREATED')).toBe(false)
   })
 })
 

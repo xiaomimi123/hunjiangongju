@@ -7,7 +7,7 @@ export const GET = handler(async () => {
   await requireRole('operator')
   const rows = await prisma.copyFramework.findMany({
     orderBy: { createdAt: 'desc' },
-    select: { id: true, name: true, industryCategory: true, visualStyleType: true, createdAt: true },
+    select: { id: true, name: true, industryCategory: true, visualStyleType: true, published: true, createdAt: true },
   })
   return NextResponse.json(rows)
 })

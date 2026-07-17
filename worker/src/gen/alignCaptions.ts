@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process'
 import {
   prisma,
   setGenerationStatus,
+  enqueueGen,
   parseSilence,
   buildSpeech,
   coalesce,
@@ -67,5 +68,11 @@ export async function alignCaptions(genTaskId: string): Promise<void> {
 
   await prisma.generationTask.update({ where: { id: genTaskId }, data: { bodyTimings: timings } })
   await setGenerationStatus(genTaskId, 'ASSET_READY')
-  // 停在 ASSET_READY，等运营确认合成，不 enqueue 下一步
+  if (task.autoRender) {
+    // 学员任务：自动串联，无需运营手工确认合成。与运营 render 路由一致的前置：先置 VISUAL_RENDERING 再入队。
+    await setGenerationStatus(genTaskId, 'VISUAL_RENDERING')
+    await enqueueGen('render-visuals', { genTaskId })
+    console.log(`[gen] align-captions ${genTaskId}: autoRender → enqueue render-visuals`)
+  }
+  // autoRender=false：停在 ASSET_READY，等运营确认合成，不 enqueue 下一步
 }

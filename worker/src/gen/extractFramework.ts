@@ -20,7 +20,25 @@ function parseIndustry(text: string): string {
  * 产 frameworkText + 行业标签 → 代码按节奏估算阈值 → 建 CopyFramework → FRAMEWORK_READY。
  * 这是拆解流水线的终点，不再入队任何后续 job。
  */
+/** 单个拆解 job 的墙钟保护，避免真 LLM 卡死占满并发 */
+const EXTRACT_FRAMEWORK_TIMEOUT_MS = 120000
+
 export async function extractFramework(sourceVideoId: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const work = extractFrameworkInner(sourceVideoId)
+  try {
+    await Promise.race([
+      work,
+      new Promise<never>((_, rej) => {
+        timer = setTimeout(() => rej(new Error('extract-framework 超时')), EXTRACT_FRAMEWORK_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
   const source = await prisma.sourceVideo.findUnique({ where: { id: sourceVideoId } })
 
   const transcript = await prisma.transcript.findFirst({

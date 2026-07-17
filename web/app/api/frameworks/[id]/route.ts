@@ -30,6 +30,7 @@ export const PATCH = handler(async (req, { params }) => {
   if (b.maxLines !== undefined) data.maxLines = b.maxLines === null ? null : Number(b.maxLines)
   if (b.maxTotalChars !== undefined) data.maxTotalChars = b.maxTotalChars === null ? null : Number(b.maxTotalChars)
   if (b.suggestedSegmentCount !== undefined) data.suggestedSegmentCount = b.suggestedSegmentCount === null ? null : Number(b.suggestedSegmentCount)
+  if (typeof b.published === 'boolean') data.published = b.published
   const updated = await prisma.copyFramework.update({ where: { id: params.id }, data })
   return NextResponse.json(updated)
 })

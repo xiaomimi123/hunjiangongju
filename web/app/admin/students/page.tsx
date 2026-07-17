@@ -6,7 +6,7 @@ import PageHeader from '@/components/admin/PageHeader'
 
 type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number }
 type Resp = { stats: { totalStudents: number; todayNew: number; totalTasks: number; totalExported: number }; students: Row[]; total: number }
-type Task = { id: string; status: string; aspectRatio: string; createdAt: string; script: { title: string } | null }
+type Task = { id: string; status: string; subject: string; createdAt: string; framework: { name: string | null } | null }
 
 const PAGE = 20
 
@@ -135,7 +135,7 @@ export default function StudentsPage() {
                           <ul className="space-y-1.5">
                             {works.map((t) => (
                               <li key={t.id} className="flex items-center justify-between rounded-lg bg-surface px-3 py-2">
-                                <span className="min-w-0 truncate">{t.script?.title ?? '未知文案'} <span className="num text-xs text-ink3">{t.aspectRatio}</span></span>
+                                <span className="min-w-0 truncate">{t.subject} <span className="num text-xs text-ink3">{t.framework?.name ?? '框架'}</span></span>
                                 <span className="flex items-center gap-3">
                                   <span className="num text-xs text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</span>
                                   <StatusPill status={t.status} />

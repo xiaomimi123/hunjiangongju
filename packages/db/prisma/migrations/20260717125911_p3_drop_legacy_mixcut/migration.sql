@@ -1,0 +1,13 @@
+-- 拆旧：删除 v1 混剪产品的表（保留 users 及 v2.2 全部表）
+DROP TABLE IF EXISTS "task_segments" CASCADE;
+DROP TABLE IF EXISTS "task_status_logs" CASCADE;
+DROP TABLE IF EXISTS "qc_reports" CASCADE;
+DROP TABLE IF EXISTS "tasks" CASCADE;
+DROP TABLE IF EXISTS "segment_tags" CASCADE;
+DROP TABLE IF EXISTS "script_segments" CASCADE;
+DROP TABLE IF EXISTS "scripts" CASCADE;
+DROP TABLE IF EXISTS "material_tags" CASCADE;
+DROP TABLE IF EXISTS "materials" CASCADE;
+DROP TABLE IF EXISTS "tag_categories" CASCADE;
+DROP TABLE IF EXISTS "access_keys" CASCADE;
+DROP TABLE IF EXISTS "exports" CASCADE;

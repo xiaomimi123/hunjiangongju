@@ -1,4 +1,4 @@
-import { prisma, llmComplete, setSourceStatus } from '@mixcut/db'
+import { prisma, llmComplete, setSourceStatus, deriveCharBudget } from '@mixcut/db'
 
 /** 已知行业标签，用于从 LLM 输出里做简单启发式命中 */
 const INDUSTRY_LABELS = ['书单号', '好物推荐', '情感语录', '知识科普'] as const
@@ -80,9 +80,8 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
   const industryCategory = parseIndustry(llmOut ?? '')
 
   // 阈值估算（代码侧，spec §8，从参考视频节奏反推，非 LLM）
-  const maxLines = segCount + 2
   const textLen = Array.from(fullText).length
-  const maxTotalChars = textLen > 0 ? Math.min(600, Math.max(120, textLen)) : 220
+  const { maxLines, maxTotalChars } = deriveCharBudget(segCount, textLen)
   const imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
 
   await prisma.copyFramework.create({

@@ -87,11 +87,13 @@ export function renderIndexHtml(data: BodyData): string {
       lines.push(
         `  tl.fromTo('.s${n} .photo', { scale: 1.035 }, { scale: 1.105, duration: ${pushDur}, ease: 'sine.inOut' }, ${startSec});`,
       )
-      // crossfade：本段淡入 + 上一段同刻淡出
-      lines.push(
-        `  tl.fromTo('.s${n}', { opacity: 0 }, { opacity: 1, duration: 0.72, ease: 'sine.inOut' }, ${startSec});`,
-      )
-      if (i > 0) {
+      // crossfade：首段从 0s 起直接可见（避免开场淡入露出深色底=黑屏），后续段淡入 + 上一段同刻淡出
+      if (i === 0) {
+        lines.push(`  tl.set('.s${n}', { opacity: 1 }, 0);`)
+      } else {
+        lines.push(
+          `  tl.fromTo('.s${n}', { opacity: 0 }, { opacity: 1, duration: 0.72, ease: 'sine.inOut' }, ${startSec});`,
+        )
         lines.push(`  tl.to('.s${i}', { opacity: 0, duration: 0.72, ease: 'sine.inOut' }, ${startSec});`)
       }
       // 字幕 reveal → hold → 收起

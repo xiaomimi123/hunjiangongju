@@ -4,6 +4,9 @@ services:
     command: sh -c "npm install && (npx prisma generate --schema packages/db/prisma/schema.prisma || true) && npm run dev -w web"
     environment:
       NODE_ENV: development
+      ASSET_URL_SECRET: ${ASSET_URL_SECRET:-dev-asset-secret-change-me}
+      # localhost 不可被 DashScope 访问，本地开发走 mock；真实校验需部署到有公网地址的服务器后再验证
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
     volumes:
       - .:/app
       - web_node_modules:/app/node_modules
@@ -13,6 +16,8 @@ services:
     command: sh -c "npm install && (npx prisma generate --schema packages/db/prisma/schema.prisma || true) && npm run dev -w worker"
     environment:
       NODE_ENV: development
+      ASSET_URL_SECRET: ${ASSET_URL_SECRET:-dev-asset-secret-change-me}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
     volumes:
       - .:/app
       - worker_node_modules:/app/node_modules

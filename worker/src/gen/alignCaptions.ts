@@ -14,10 +14,20 @@ import {
   type Timing,
   type PaceInfo,
 } from '@mixcut/db'
-import { urlToAbs } from '../paths'
+import { DATA_DIR } from '../paths'
 import { retimeAudio } from './retimeAudio'
 
 const SKIP_LEADING = 1 // 跳过开头口播标题段
+
+// 幂等性关键：alignCaptions 的音频来源必须是 generateTts.ts 写出的、从不被改写的原始文件
+// gen/<genTaskId>/full_audio.wav —— 与 task.fullAudioUrl 解耦。task.fullAudioUrl 会在本函数末尾
+// （应用源节奏时）被重新指向 full_audio_paced.wav；若直接从 task.fullAudioUrl 取源，worker
+// 重启/BullMQ 重跑会把上一轮已 pace 过的 full_audio_paced.wav 当成原始音频二次拉伸，
+// 且 retimeAudio 读写路径重叠 → 音频损坏或抛错，父任务被误判 FAILED。
+// 路径拼接与 generateTts.ts 的 `path.join(dir, 'full_audio.wav')`（dir = DATA_DIR/gen/<id>）保持一致。
+export function canonicalFullAudioPath(genTaskId: string): string {
+  return path.join(DATA_DIR, 'gen', genTaskId, 'full_audio.wav')
+}
 
 function probeDurationMs(audioAbs: string): number {
   const r = spawnSync(
@@ -49,7 +59,7 @@ export async function alignCaptions(genTaskId: string): Promise<void> {
   const N = await prisma.generatedSegment.count({ where: { generationTaskId: genTaskId } })
   if (N < 1) throw new Error(`generation_task ${genTaskId} 无 generated_segments`)
 
-  const audioAbs = urlToAbs(task.fullAudioUrl)
+  const audioAbs = canonicalFullAudioPath(genTaskId)
   const durationMs = probeDurationMs(audioAbs)
 
   // 主路径：silencedetect → speech → coalesce(N+skipLeading) → buildTimings(N)

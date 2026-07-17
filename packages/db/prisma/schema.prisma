@@ -128,6 +128,9 @@ model GeneratedSegment {
   seqNo            Int            @map("seq_no")
   scriptText       String         @map("script_text")
   imageUrl         String?        @map("image_url")
+  bookTitle        String?        @map("book_title")
+  bookAuthor       String?        @map("book_author")
+  subtitleEn       String?        @map("subtitle_en")
   @@map("generated_segments")
 }
 

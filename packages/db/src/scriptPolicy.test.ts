@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { countChars, validateScript, deriveCharBudget } from './scriptPolicy'
+import { countChars, validateScript, deriveCharBudget, trimToBudget } from './scriptPolicy'
+
+describe('trimToBudget', () => {
+  it('按整行丢弃末尾使其落在字数预算内', () => {
+    const out = trimToBudget(['一二三四五', '六七八九十', '十一十二十三'], 21, 10)
+    expect(out).toEqual(['一二三四五', '六七八九十'])
+  })
+  it('遵守行数上限', () => {
+    expect(trimToBudget(['a', 'b', 'c', 'd'], 2, 999)).toEqual(['a', 'b'])
+  })
+  it('首行即超预算则截断首行,至少留一行', () => {
+    const out = trimToBudget(['这是一句非常非常长的话'], 21, 5)
+    expect(out.length).toBe(1)
+    expect(Array.from(out[0]).length).toBe(5)
+  })
+})
 
 describe('scriptPolicy', () => {
   it('countChars 按 code point 计 CJK 字数', () => {

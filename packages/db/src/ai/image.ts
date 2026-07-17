@@ -13,7 +13,12 @@ export async function imageGenerate(opts: ImageOpts): Promise<Buffer> {
     const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
       model: cfg.model,
       input: { messages: [{ role: 'user', content: [{ text: opts.prompt }] }] },
-      parameters: { size, watermark: false, prompt_extend: true },
+      parameters: {
+        size,
+        watermark: false,
+        prompt_extend: true,
+        ...(opts.negativePrompt ? { negative_prompt: opts.negativePrompt } : {}),
+      },
     })
     const content = (data.output as { choices?: { message?: { content?: { image?: string }[] } }[] })?.choices?.[0]?.message?.content
     const url = content?.find((c) => c.image)?.image

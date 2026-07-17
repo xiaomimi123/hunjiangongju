@@ -11,6 +11,7 @@ type Framework = { id: string; name: string | null; industryCategory: string | n
 type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null }
 type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
+type Voice = { id: string; voiceId: string; name: string }
 
 const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
@@ -28,6 +29,8 @@ export default function GeneratePage() {
   const [books, setBooks] = useState<BookRow[]>([{ ...EMPTY_BOOK_ROW }])
   const [modalErr, setModalErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [voices, setVoices] = useState<Voice[]>([])
+  const [voiceId, setVoiceId] = useState('')
 
   const load = useCallback(async () => {
     try { setTasks(await api<GenTask[]>('/api/generate')) }
@@ -37,12 +40,13 @@ export default function GeneratePage() {
 
   function openModal() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
-    setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }])
+    setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
       if (fw[0]) setFrameworkId(fw[0].id)
     }).catch((e) => setModalErr((e as Error).message))
+    api<Voice[]>('/api/admin/voices').then(setVoices).catch(() => setVoices([]))
   }
 
   function updateBook(i: number, field: keyof BookRow, value: string) {
@@ -71,6 +75,7 @@ export default function GeneratePage() {
       try { vars = JSON.parse(variables) }
       catch { setModalErr('变量需为合法 JSON（如 {"标题":"测试书"}）'); return }
     }
+    if (voiceId) vars = { ...(vars ?? {}), voiceId }
     setBusy(true)
     try {
       const r = await api<{ id: string }>('/api/generate', { body: { frameworkId, subject: subject.trim(), variables: vars } })
@@ -130,6 +135,15 @@ export default function GeneratePage() {
           <label className="block">
             <span className="eyebrow">选题</span>
             <input className="field mt-1" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="例：活下去的理由" autoFocus />
+          </label>
+          <label className="block">
+            <span className="eyebrow">音色（可选，不选则用通用音色）</span>
+            <select className="field mt-1" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+              <option value="">通用音色</option>
+              {voices.map((v) => (
+                <option key={v.id} value={v.voiceId}>{v.name}</option>
+              ))}
+            </select>
           </label>
 
           <div className="block">

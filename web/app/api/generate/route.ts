@@ -3,38 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma, enqueueGen } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
-
-type BookInput = { title: string; author?: string; points?: string }
-
-// 手填书单模式下，服务端不信任客户端已 trim/校验过的书单，重新做一遍最小校验与清洗。
-function normalizeBooks(input: unknown): BookInput[] {
-  if (!Array.isArray(input)) throw new HttpError(400, '书单格式错误，应为数组')
-  const books: BookInput[] = []
-  for (const raw of input) {
-    if (!raw || typeof raw !== 'object') throw new HttpError(400, '书单格式错误')
-    const title = typeof (raw as Record<string, unknown>).title === 'string' ? (raw as Record<string, unknown>).title as string : ''
-    const t = title.trim()
-    if (!t) continue // 空书名的行直接跳过（前端允许留空行占位）
-    const authorRaw = (raw as Record<string, unknown>).author
-    const pointsRaw = (raw as Record<string, unknown>).points
-    const author = typeof authorRaw === 'string' && authorRaw.trim() ? authorRaw.trim() : undefined
-    const points = typeof pointsRaw === 'string' && pointsRaw.trim() ? pointsRaw.trim() : undefined
-    books.push({ title: t, ...(author ? { author } : {}), ...(points ? { points } : {}) })
-  }
-  if (books.length === 0) throw new HttpError(400, '书单模式下至少需要一本有效书名')
-  return books
-}
-
-// 校验/清洗前端传来的 variables：手填书单模式下 books 需为合法数组，其余字段原样透传。
-function normalizeVariables(variables: unknown): Record<string, unknown> | undefined {
-  if (variables === undefined || variables === null) return undefined
-  if (typeof variables !== 'object' || Array.isArray(variables)) throw new HttpError(400, '变量格式错误')
-  const v = { ...(variables as Record<string, unknown>) }
-  if ('books' in v) {
-    v.books = normalizeBooks(v.books)
-  }
-  return v
-}
+import { normalizeVariables } from './normalize'
 
 export const POST = handler(async (req) => {
   const s = await requireRole()
@@ -51,11 +20,16 @@ export const POST = handler(async (req) => {
     if (!fw.published) throw new HttpError(403, '该框架未发布')
     autoRender = true
   }
+  const normalizedVariables = normalizeVariables(variables)
+  if (normalizedVariables && typeof normalizedVariables.voiceId === 'string') {
+    const voice = await prisma.clonedVoice.findUnique({ where: { voiceId: normalizedVariables.voiceId } })
+    if (!voice) throw new HttpError(400, '所选音色不存在')
+  }
   const task = await prisma.generationTask.create({
     data: {
       frameworkId,
       subject: subject.trim(),
-      variables: (normalizeVariables(variables) as Prisma.InputJsonValue | undefined) ?? undefined,
+      variables: (normalizedVariables as Prisma.InputJsonValue | undefined) ?? undefined,
       status: 'SCRIPT_GENERATING',
       createdBy: s.userId,
       autoRender,

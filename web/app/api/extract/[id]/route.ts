@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@mixcut/db'
+import { prisma, publicAssetUrl } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 
@@ -32,5 +32,8 @@ export const GET = handler(async (_req, { params }) => {
   if (source.createdBy && source.createdBy !== session.userId) throw new HttpError(404, '不存在')
 
   const { transcripts, createdBy: _createdBy, ...rest } = source
-  return NextResponse.json({ ...rest, transcript: transcripts[0] ?? null })
+  // 转写已生成 ⇒ transcribe 步骤中抽取的 source/<id>.wav 必然已落盘，可直接拼出签名地址供
+  // 拆解结果页「用此声音克隆」按钮使用；未生成转写前不给出，避免指向不存在的文件
+  const sourceAudioAssetUrl = transcripts[0] ? publicAssetUrl(`source/${source.id}.wav`) : null
+  return NextResponse.json({ ...rest, transcript: transcripts[0] ?? null, sourceAudioAssetUrl })
 })

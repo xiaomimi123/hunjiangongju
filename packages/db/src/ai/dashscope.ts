@@ -14,7 +14,7 @@ export function dashGenEndpoint(baseUrl: string): string {
 }
 
 // 下载 DashScope 返回的图片/音频 URL 为 Buffer（带超时，防挂起）
-export async function fetchUrlToBuffer(url: string, timeoutMs = 60_000): Promise<Buffer> {
+export async function fetchUrlToBuffer(url: string, timeoutMs = 60_000): Promise<Buffer<ArrayBuffer>> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {

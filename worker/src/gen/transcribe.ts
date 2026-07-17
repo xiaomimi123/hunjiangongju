@@ -1,5 +1,5 @@
 import path from 'path'
-import { prisma, asrTranscribe, setSourceStatus, enqueueGen } from '@mixcut/db'
+import { prisma, asrTranscribe, setSourceStatus, enqueueGen, publicAssetUrl } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { extractAudio } from '../ffmpeg'
 
@@ -14,10 +14,13 @@ export async function transcribe(sourceVideoId: string): Promise<void> {
     if (!source?.videoFileUrl) throw new Error(`SourceVideo ${sourceVideoId} 缺少 videoFileUrl`)
 
     const videoAbs = urlToAbs(source.videoFileUrl)
-    const wavPath = path.join(DATA_DIR, 'source', `${sourceVideoId}.wav`)
+    const wavRelPath = path.join('source', `${sourceVideoId}.wav`)
+    const wavPath = path.join(DATA_DIR, wavRelPath)
     await extractAudio(videoAbs, wavPath)
 
-    const r = await asrTranscribe({ audioPath: wavPath })
+    // ASR（真实 DashScope 调用）需要 DashScope 可达的公网 URL；本地 mock 分支不会真正请求该 URL。
+    const audioUrl = publicAssetUrl(wavRelPath)
+    const r = await asrTranscribe({ audioUrl })
     await prisma.transcript.create({
       data: { sourceVideoId, fullText: r.fullText, sentences: r.sentences },
     })

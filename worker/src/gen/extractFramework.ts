@@ -15,6 +15,43 @@ function parseIndustry(text: string): string {
   return '书单号'
 }
 
+/** 书名号后紧邻的作者标记：`/著`、`著`、`作者：`、`作者:`、`作者是` 等 */
+const AUTHOR_NEAR_TITLE_RE = /^[\s，,、]*([一-龥·A-Za-z.\s]{2,20}?)\s*(?:\/\s*著|著)/
+const AUTHOR_MARKER_RE = /作者[是：:]\s*([一-龥·A-Za-z.\s]{2,20}?)[，,。\s]/
+
+/**
+ * 纯正则从转写全文中识别书目（书名/作者），供「书单号」框架落地展示。
+ * 无 LLM、无 DB 依赖，确定性输出，可单元测试。
+ * - 书名：`《([^》]+)》`
+ * - 作者：优先取书名后紧跟的 `/著`｜`著` 前缀词；否则在书名后一段窗口内找「作者：/作者是」标记。
+ * - 按书名去重，保留首次出现顺序。
+ */
+export function extractBooks(transcript: string): { title: string; author?: string }[] {
+  const results: { title: string; author?: string }[] = []
+  const seen = new Set<string>()
+  const titleRe = /《([^》]+)》/g
+  let match: RegExpExecArray | null
+  while ((match = titleRe.exec(transcript)) !== null) {
+    const title = match[1].trim()
+    if (!title || seen.has(title)) continue
+
+    const after = transcript.slice(match.index + match[0].length, match.index + match[0].length + 40)
+    let author: string | undefined
+
+    const nearMatch = AUTHOR_NEAR_TITLE_RE.exec(after)
+    if (nearMatch) {
+      author = nearMatch[1].trim()
+    } else {
+      const markerMatch = AUTHOR_MARKER_RE.exec(after)
+      if (markerMatch) author = markerMatch[1].trim()
+    }
+
+    seen.add(title)
+    results.push(author ? { title, author } : { title })
+  }
+  return results
+}
+
 /**
  * LLM 提炼可复用文案框架：读最新 transcript + sceneCut → 组 prompt →
  * 产 frameworkText + 行业标签 → 代码按节奏估算阈值 → 建 CopyFramework → FRAMEWORK_READY。
@@ -84,6 +121,14 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
   const { maxLines, maxTotalChars } = deriveCharBudget(segCount, textLen)
   const imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
 
+  // 书单号核心：从真实转写中识别源里提到的书目（书名/作者），供后续渲染引用
+  const books = extractBooks(fullText)
+  const overlayTemplate = {
+    title_card: '{{标题}} {{副标题}}',
+    watermark: '{{账号}}',
+    ...(books.length > 0 ? { books } : {}),
+  }
+
   await prisma.copyFramework.create({
     data: {
       sourceVideoId,
@@ -94,7 +139,7 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
       maxLines,
       maxTotalChars,
       imageStylePrompt,
-      overlayTemplate: { title_card: '{{标题}} {{副标题}}', watermark: '{{账号}}' },
+      overlayTemplate,
       renderTemplate: 'booklist',
       visualStyleType: 'ai_illustration',
       createdBy: source?.createdBy ?? null,

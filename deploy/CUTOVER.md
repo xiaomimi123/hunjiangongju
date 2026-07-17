@@ -80,6 +80,27 @@ $C exec -T postgres psql -U mixcut -d mixcut -c "SELECT tablename FROM pg_tables
 
 ---
 
+## 日常更新到新版本（切换上线后每次发版）
+
+> ⚠️ **关键：`tar -xzf` 只覆盖/新增压缩包里有的文件，不会删除已在新版本里删掉的旧文件。** 直接原地解压会残留旧代码（旧路由/旧模型引用），导致 `next build` 类型检查失败（如 `Property 'taskSegment' does not exist`）。所以更新时必须**先清旧代码再解压**。
+
+```bash
+# 本机：打包最新代码并上传
+cd <项目目录> && git archive --format=tar.gz -o dongfangwenlan.tar.gz HEAD
+scp dongfangwenlan.tar.gz root@101.37.151.152:~/
+
+# 服务器：清掉旧代码（只保留 .env.prod 与 data/，备份在 ~ 里不受影响）再解压
+cd ~/dongfangwenlan
+find . -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
+tar -xzf ~/dongfangwenlan.tar.gz -C ~/dongfangwenlan
+
+# 构建启动（migrate 服务自动应用新增数据库迁移）
+export COMPOSE_BAKE=false
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+```
+- 涉及数据库结构变化的版本，`migrate` 会自动跑新增迁移；重要更新前仍建议先 `pg_dump` 备份。
+- `.env.prod`（密钥）与 `data/`（素材/成片）在清理时被保留，不会丢。
+
 ## 回滚（万一切换后严重异常）
 
 ```bash
@@ -97,4 +118,6 @@ cat ~/backup_before_v2.2_*.sql | $C exec -T postgres psql -U mixcut -d mixcut
 
 - **学员登录说账号不存在？** 检查第 4 步 `users` 学员数是否 > 0；`users` 表不在删除清单，理论上保留。若为 0，说明误删——用第 0 步备份恢复。
 - **构建卡在拉包？** 见 `deploy/README.md` 的国内镜像源配置（apt 阿里云 / npm npmmirror）；worker Dockerfile 已内置。
+- **构建卡在 `npm install` / onnxruntime-node（Failed to download build list, HTTP 302）？** 已在 web+worker Dockerfile 加 `ENV ONNXRUNTIME_NODE_INSTALL=skip` 跳过（hyperframes 的 ONNX 依赖国内下不动；本项目渲染不用它）。若仍报此错，确认服务器代码是最新版（`grep ONNXRUNTIME worker/Dockerfile` 应有该行）。
+- **`next build` 报 `Property 'xxx' does not exist on PrismaClient`（如 taskSegment/material）？** 是原地 tar 解压残留了旧文件。按上面「日常更新」的 `find ... -exec rm -rf` 先清旧代码再解压重建。
 - **生成一直 mock（画面是色块）？** 未在模型配置页启用真实 AI 能力（第 6 步）。

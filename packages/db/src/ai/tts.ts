@@ -3,13 +3,18 @@ import { mockSilentWav } from './mock'
 import { isDashScope, dashPost, fetchUrlToBuffer } from './dashscope'
 import type { TtsOpts } from './types'
 
-// CosyVoice / Qwen-Audio 声音复刻族的可用 target_model（核对自
-// https://help.aliyun.com/zh/model-studio/voice-clone-design-http-api
-// 与 https://help.aliyun.com/zh/model-studio/voice-clone-python-sdk）。
-// 用于判断当前配置的合成模型是否属于「可用克隆音色」的一族。
-function isCosyVoiceModel(model: string): boolean {
-  const m = model.toLowerCase()
-  return m.includes('cosyvoice') || m.includes('audio-3.0-tts') || m.includes('tts-vc')
+// 构造 DashScope 原生 multimodal-generation 的 TTS 请求体（纯函数，便于单测）。
+// 克隆音色合成：文档示例（voice-cloning-user-guide 的 qwen-tts curl 样例）显示克隆得到的
+// voice_id 与预置音色名一样，直接作为同一端点的 input.voice 传入即可，无需换端点、
+// 也无需限定合成模型属于某个「CosyVoice」名族——只要调用方选定了 voiceId 就应当被采用，
+// 否则回退到显式指定的 voice，再否则回退默认 'Cherry'。
+export function buildDashTtsBody(
+  model: string,
+  text: string,
+  voiceId: string | undefined,
+  voice: string | undefined,
+): { model: string; input: { text: string; voice: string } } {
+  return { model, input: { text, voice: voiceId ?? voice ?? 'Cherry' } }
 }
 
 export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
@@ -18,26 +23,12 @@ export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
 
   const voiceId = opts.voiceId ?? (cfg.extra.voiceId as string | undefined)
 
-  // 克隆音色合成：文档示例（voice-cloning-user-guide 的 qwen-tts curl 样例）显示克隆得到的
-  // voice_id 与预置音色名一样，直接作为同一 multimodal-generation 端点的 input.voice 传入即可，
-  // 无需换端点。这里仅在配置的模型属于 CosyVoice/Qwen-Audio 族时启用该分支（按任务约定）。
-  if (isDashScope(cfg.baseUrl) && voiceId && isCosyVoiceModel(cfg.model)) {
-    const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
-      model: cfg.model,
-      input: { text: opts.text, voice: voiceId },
-    })
-    const url = (data.output as { audio?: { url?: string } })?.audio?.url
-    if (typeof url !== 'string') throw new Error(`TTS(克隆音色) 返回格式异常: ${JSON.stringify(data).slice(0, 200)}`)
-    return fetchUrlToBuffer(url)
-  }
-
-  // 百炼 qwen-tts：DashScope 原生 multimodal-generation，返回音频 URL
+  // 百炼 qwen-tts：DashScope 原生 multimodal-generation，返回音频 URL。
+  // voiceId 存在时即视为「克隆音色」并直接使用，与合成模型名无关（见 buildDashTtsBody 注释）。
   if (isDashScope(cfg.baseUrl)) {
-    const voice = opts.voice ?? (cfg.extra.voice as string) ?? 'Cherry'
-    const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
-      model: cfg.model,
-      input: { text: opts.text, voice },
-    })
+    const voice = opts.voice ?? (cfg.extra.voice as string | undefined)
+    const body = buildDashTtsBody(cfg.model, opts.text, voiceId, voice)
+    const data = await dashPost(cfg.baseUrl, cfg.apiKey, body)
     const url = (data.output as { audio?: { url?: string } })?.audio?.url
     if (typeof url !== 'string') throw new Error(`TTS 返回格式异常: ${JSON.stringify(data).slice(0, 200)}`)
     return fetchUrlToBuffer(url)

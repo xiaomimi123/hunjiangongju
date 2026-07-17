@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { derivePace, applyPace } from './pace'
+import { derivePace, applyPace, computeSegmentPads } from './pace'
 
 describe('derivePace（源节奏：句时间戳 + 场景切点 → avgSegMs/segCount）', () => {
   it('从句时间戳算出平均段时长与段数（无切点时）', () => {
@@ -82,5 +82,45 @@ describe('applyPace（TTS 实测时长 ↔ 源节奏 折中，保证不截断音
     for (let i = 1; i < result.length; i++) {
       expect(result[i].startMs).toBe(result[i - 1].endMs)
     }
+  })
+})
+
+describe('computeSegmentPads（每段 pad = pacedDur − origDur，用于音频感知 re-timing 插入静音）', () => {
+  it('逐段算出 pad，且 sum(origDur)+sum(pad) == 总 paced 时长（音画同步的核心不变量）', () => {
+    const orig = [
+      { seqNo: 1, startMs: 0, endMs: 1500 }, // 1500ms
+      { seqNo: 2, startMs: 1500, endMs: 3500 }, // 2000ms
+    ]
+    const paced = applyPace(orig, { avgSegMs: 4000 })
+    const pads = computeSegmentPads(orig, paced)
+
+    expect(pads).toHaveLength(2)
+    pads.forEach((p, i) => {
+      const origDur = orig[i].endMs - orig[i].startMs
+      const pacedDur = paced[i].endMs - paced[i].startMs
+      expect(p).toBe(pacedDur - origDur)
+    })
+
+    const sumOrigDur = orig.reduce((s, t) => s + (t.endMs - t.startMs), 0)
+    const sumPad = pads.reduce((s, p) => s + p, 0)
+    const totalPaced = paced[paced.length - 1].endMs - paced[0].startMs
+    expect(sumOrigDur + sumPad).toBe(totalPaced)
+  })
+
+  it('pad 恒 clamp 到 >=0（即便传入一个比原时长还短的 paced 段，也不产生负 pad）', () => {
+    const orig = [{ seqNo: 1, startMs: 0, endMs: 5000 }]
+    const paced = [{ seqNo: 1, startMs: 0, endMs: 3000 }] // 人为构造：比 orig 短
+    const pads = computeSegmentPads(orig, paced)
+    expect(pads).toEqual([0])
+  })
+
+  it('无 pace（applyPace 原样返回）时，pads 全为 0', () => {
+    const orig = [
+      { seqNo: 1, startMs: 0, endMs: 2000 },
+      { seqNo: 2, startMs: 2000, endMs: 5000 },
+    ]
+    const paced = applyPace(orig, { avgSegMs: 0 })
+    const pads = computeSegmentPads(orig, paced)
+    expect(pads).toEqual([0, 0])
   })
 })

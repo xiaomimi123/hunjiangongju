@@ -64,3 +64,20 @@ export function applyPace(ttsTimings: PaceTiming[], pace: { avgSegMs: number }):
     return { seqNo: t.seqNo, startMs, endMs }
   })
 }
+
+/**
+ * 每段 pad（ms）= paced 时长 − 原始（TTS 实测）时长，逐段按数组下标对齐（两数组同序同长）。
+ * clamp 到 >=0：`applyPace` 已保证 pacedDur >= origDur，这里再兜底一次防御性 clamp。
+ *
+ * 用途：音频感知 re-timing —— 对每段原始音频切片末尾补 pad_i 毫秒静音，使新音频总时长
+ * 与 paced 视觉总时长一致（`sum(origDur) + sum(pad) == 总 paced 时长`），从而消除音画脱轨。
+ */
+export function computeSegmentPads(origTimings: PaceTiming[], pacedTimings: PaceTiming[]): number[] {
+  return origTimings.map((orig, i) => {
+    const pacedT = pacedTimings[i]
+    if (!pacedT) return 0
+    const origDur = orig.endMs - orig.startMs
+    const pacedDur = pacedT.endMs - pacedT.startMs
+    return Math.max(0, pacedDur - origDur)
+  })
+}

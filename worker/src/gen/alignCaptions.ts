@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process'
+import path from 'path'
 import {
   prisma,
   setGenerationStatus,
@@ -9,10 +10,12 @@ import {
   buildTimings,
   evenSplit,
   applyPace,
+  computeSegmentPads,
   type Timing,
   type PaceInfo,
 } from '@mixcut/db'
 import { urlToAbs } from '../paths'
+import { retimeAudio } from './retimeAudio'
 
 const SKIP_LEADING = 1 // 跳过开头口播标题段
 
@@ -53,31 +56,41 @@ export async function alignCaptions(genTaskId: string): Promise<void> {
   // 兜底：mock 全静音（无 speech 段）或段数不符 → 按总时长均分 N 段
   const speech = buildSpeech(durationMs, parseSilence(runSilenceDetect(audioAbs)))
   let timings: Timing[]
-  let path: 'silencedetect' | 'even-split'
+  let timingSource: 'silencedetect' | 'even-split'
   if (speech.length < N) {
     timings = evenSplit(durationMs, N)
-    path = 'even-split'
+    timingSource = 'even-split'
   } else {
     try {
       timings = buildTimings(N, coalesce(speech, N + SKIP_LEADING), SKIP_LEADING)
-      path = 'silencedetect'
+      timingSource = 'silencedetect'
     } catch {
       timings = evenSplit(durationMs, N)
-      path = 'even-split'
+      timingSource = 'even-split'
     }
   }
-  console.log(`[gen] align-captions ${genTaskId}: ${path}, ${timings.length} 段, 时长 ${Math.round(durationMs)}ms`)
+  console.log(`[gen] align-captions ${genTaskId}: ${timingSource}, ${timings.length} 段, 时长 ${Math.round(durationMs)}ms`)
 
   // Task4 节奏对齐：框架若带有源节奏（overlayTemplate.pace，见 extractFramework.ts），
   // 把 TTS 实测时长朝源均段时长拉，但绝不短于 TTS 实测时长（applyPace 保证）。
-  // 无 pace（如本地占位时间戳、旧任务）时 applyPace 原样返回，行为不变。
+  // 无 pace（如本地占位时间戳、旧任务）时 applyPace 原样返回，行为不变——不触发下面的音频 re-timing。
   const framework = await prisma.copyFramework.findUnique({ where: { id: task.frameworkId } })
   const overlayTemplate = (framework?.overlayTemplate ?? null) as { pace?: PaceInfo } | null
   const pace = overlayTemplate?.pace
-  if (pace && typeof pace.avgSegMs === 'number') {
-    const before = timings.length
-    timings = applyPace(timings, pace)
-    console.log(`[gen] align-captions ${genTaskId}: 应用源节奏 avgSegMs=${pace.avgSegMs} (${before} 段)`)
+  if (pace && typeof pace.avgSegMs === 'number' && pace.avgSegMs > 0) {
+    const origTimings = timings
+    timings = applyPace(origTimings, pace)
+    console.log(`[gen] align-captions ${genTaskId}: 应用源节奏 avgSegMs=${pace.avgSegMs} (${origTimings.length} 段)`)
+
+    // 音频感知 re-timing（Task4 返工）：视觉时长被拉长后，若配音轨仍是原样 full_audio.wav，
+    // 后续 renderVideo 的 -shortest 混音会导致音画脱轨/尾部截断。这里对每段原始音频切片
+    // 末尾补 pad_i 毫秒静音再拼接，使新音频总时长 == paced 视觉总时长，从源头保证同步。
+    const pads = computeSegmentPads(origTimings, timings)
+    const pacedAudioAbs = path.join(path.dirname(audioAbs), 'full_audio_paced.wav')
+    retimeAudio({ audioAbs, outAbs: pacedAudioAbs, origTimings, pads })
+    const pacedAudioUrl = `/api/files/gen/${genTaskId}/full_audio_paced.wav`
+    await prisma.generationTask.update({ where: { id: genTaskId }, data: { fullAudioUrl: pacedAudioUrl } })
+    console.log(`[gen] align-captions ${genTaskId}: 音频感知 re-timing → ${pacedAudioUrl} (padSumMs=${pads.reduce((a, b) => a + b, 0)})`)
   }
 
   await prisma.generationTask.update({ where: { id: genTaskId }, data: { bodyTimings: timings } })

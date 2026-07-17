@@ -8,11 +8,18 @@ export interface RetimeSegment {
 
 /**
  * 构造「音频感知 re-timing」的 ffmpeg filter_complex：
- * 对单一音频输入 [0:a]，按 origTimings 逐段切片（atrim + asetpts 归零 PTS），
+ * 若 leadingMs>0（即 origTimings[0].startMs>0，说明开头有一段未纳入 body 分段的口播标题音频），
+ * 先原样（无 apad）切出 [0, leadingMs) 作为首个 concat 输入 —— 否则该标题音频会被丢弃，
+ * 导致 re-timed 音频比视觉时间线整体提前 leadingMs、且总时长少 leadingMs（尾部被 -shortest 截断）。
+ * 随后对单一音频输入 [0:a]，按 origTimings 逐段切片（atrim + asetpts 归零 PTS），
  * 段尾补 pads[i] 毫秒静音（apad），再按序 concat 成一路输出 [out]。
  * 纯函数（不跑 ffmpeg），便于单测；由 retimeAudio() 实际执行。
  */
-export function buildRetimeFilterComplex(origTimings: RetimeSegment[], pads: number[]): string {
+export function buildRetimeFilterComplex(
+  origTimings: RetimeSegment[],
+  pads: number[],
+  leadingMs = 0,
+): string {
   const n = origTimings.length
   if (n === 0) throw new Error('buildRetimeFilterComplex: origTimings 不能为空')
   if (pads.length !== n) {
@@ -21,6 +28,13 @@ export function buildRetimeFilterComplex(origTimings: RetimeSegment[], pads: num
 
   const segFilters: string[] = []
   const labels: string[] = []
+
+  if (leadingMs > 0) {
+    const leadSec = (leadingMs / 1000).toFixed(3)
+    segFilters.push(`[0:a]atrim=start=0.000:end=${leadSec},asetpts=PTS-STARTPTS[lead]`)
+    labels.push('[lead]')
+  }
+
   origTimings.forEach((t, i) => {
     const startSec = (t.startMs / 1000).toFixed(3)
     const endSec = (t.endMs / 1000).toFixed(3)
@@ -31,7 +45,7 @@ export function buildRetimeFilterComplex(origTimings: RetimeSegment[], pads: num
     )
     labels.push(`[${label}]`)
   })
-  segFilters.push(`${labels.join('')}concat=n=${n}:v=0:a=1[out]`)
+  segFilters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[out]`)
   return segFilters.join(';')
 }
 
@@ -47,7 +61,10 @@ export function retimeAudio(opts: {
   pads: number[]
 }): void {
   const { audioAbs, outAbs, origTimings, pads } = opts
-  const filter = buildRetimeFilterComplex(origTimings, pads)
+  // origTimings[0].startMs（即 alignCaptions 里 SKIP_LEADING=1 跳过的开头标题段时长 T0）
+  // 若 >0，须原样保留为 re-timed 音频的开头，否则会被 atrim 丢弃，导致音画偏移+尾部截断。
+  const leadingMs = origTimings.length > 0 ? origTimings[0].startMs : 0
+  const filter = buildRetimeFilterComplex(origTimings, pads, leadingMs)
   const r = spawnSync(
     'ffmpeg',
     ['-y', '-hide_banner', '-i', audioAbs, '-filter_complex', filter, '-map', '[out]', outAbs],

@@ -9,6 +9,10 @@ import { GenPill } from './genStatus'
 
 type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string }
 type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null }
+type BookRow = { title: string; author: string; points: string }
+type Mode = 'subject' | 'books'
+
+const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
 export default function GeneratePage() {
   const router = useRouter()
@@ -20,6 +24,8 @@ export default function GeneratePage() {
   const [frameworkId, setFrameworkId] = useState('')
   const [subject, setSubject] = useState('')
   const [variables, setVariables] = useState('')
+  const [mode, setMode] = useState<Mode>('subject')
+  const [books, setBooks] = useState<BookRow[]>([{ ...EMPTY_BOOK_ROW }])
   const [modalErr, setModalErr] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -31,6 +37,7 @@ export default function GeneratePage() {
 
   function openModal() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
+    setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }])
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
@@ -38,12 +45,29 @@ export default function GeneratePage() {
     }).catch((e) => setModalErr((e as Error).message))
   }
 
+  function updateBook(i: number, field: keyof BookRow, value: string) {
+    setBooks((prev) => prev.map((b, idx) => (idx === i ? { ...b, [field]: value } : b)))
+  }
+  function addBook() {
+    setBooks((prev) => [...prev, { ...EMPTY_BOOK_ROW }])
+  }
+  function removeBook(i: number) {
+    setBooks((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)))
+  }
+
   async function submit() {
     setModalErr('')
     if (!frameworkId) { setModalErr('请选择框架'); return }
     if (!subject.trim()) { setModalErr('请填写选题'); return }
-    let vars: unknown = undefined
-    if (variables.trim()) {
+    let vars: Record<string, unknown> | undefined
+    if (mode === 'books') {
+      const cleaned = books
+        .map((b) => ({ title: b.title.trim(), author: b.author.trim(), points: b.points.trim() }))
+        .filter((b) => b.title)
+        .map((b) => ({ title: b.title, ...(b.author ? { author: b.author } : {}), ...(b.points ? { points: b.points } : {}) }))
+      if (cleaned.length === 0) { setModalErr('手填书单模式下，请至少填写一本书的书名'); return }
+      vars = { books: cleaned }
+    } else if (variables.trim()) {
       try { vars = JSON.parse(variables) }
       catch { setModalErr('变量需为合法 JSON（如 {"标题":"测试书"}）'); return }
     }
@@ -92,7 +116,7 @@ export default function GeneratePage() {
         </table>
       </div>
 
-      <Modal open={open} onClose={() => !busy && setOpen(false)} title="发起生成">
+      <Modal open={open} onClose={() => !busy && setOpen(false)} title="发起生成" wide>
         <div className="space-y-4">
           <label className="block">
             <span className="eyebrow">框架</span>
@@ -107,10 +131,56 @@ export default function GeneratePage() {
             <span className="eyebrow">选题</span>
             <input className="field mt-1" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="例：活下去的理由" autoFocus />
           </label>
-          <label className="block">
-            <span className="eyebrow">变量（可选，JSON）</span>
-            <textarea className="field mt-1 font-mono text-xs" rows={3} value={variables} onChange={(e) => setVariables(e.target.value)} placeholder='{"标题":"测试书","账号":"@测试"}' />
-          </label>
+
+          <div className="block">
+            <span className="eyebrow">生成模式</span>
+            <div className="mt-1 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMode('subject')}
+                className={mode === 'subject' ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+              >
+                选题自选（LLM 自己选书）
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('books')}
+                className={mode === 'books' ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+              >
+                手填书单
+              </button>
+            </div>
+          </div>
+
+          {mode === 'books' ? (
+            <div className="block space-y-2">
+              <span className="eyebrow">书单（书名 / 作者 / 要点，逐本填写）</span>
+              <div className="space-y-2">
+                {books.map((b, i) => (
+                  <div key={i} className="grid grid-cols-[1.1fr_0.9fr_1.3fr_auto] gap-2">
+                    <input className="field" placeholder="书名（必填）" value={b.title} onChange={(e) => updateBook(i, 'title', e.target.value)} />
+                    <input className="field" placeholder="作者（可选）" value={b.author} onChange={(e) => updateBook(i, 'author', e.target.value)} />
+                    <input className="field" placeholder="要点（可选）" value={b.points} onChange={(e) => updateBook(i, 'points', e.target.value)} />
+                    <button
+                      type="button"
+                      onClick={() => removeBook(i)}
+                      disabled={books.length === 1}
+                      className="btn-ghost px-2 text-xs disabled:opacity-40"
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={addBook} className="btn-ghost px-3 py-1 text-xs">+ 添加一本书</button>
+            </div>
+          ) : (
+            <label className="block">
+              <span className="eyebrow">变量（可选，JSON）</span>
+              <textarea className="field mt-1 font-mono text-xs" rows={3} value={variables} onChange={(e) => setVariables(e.target.value)} placeholder='{"标题":"测试书","账号":"@测试"}' />
+            </label>
+          )}
+
           {modalErr && <p className="pill pill-bad">{modalErr}</p>}
           <div className="flex justify-end gap-2">
             <button onClick={() => setOpen(false)} disabled={busy} className="btn-ghost px-4">取消</button>

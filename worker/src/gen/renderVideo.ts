@@ -73,13 +73,18 @@ export function buildFfmpegArgs(opts: {
     "[0:v]zoompan=z='if(lte(on,33),1.12-0.12*on/33,1)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=720x960:fps=30,fade=t=in:st=0:d=0.7,format=yuv420p[v]"
 
   const aformat = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
+  // 人声后处理：把偏平的 TTS/克隆音色处理得更自然、厚实、有磁性——
+  // 去低频隆隆(highpass) + 暖色/胸腔感(250Hz+) + 临场清晰(3.2k+) + 柔化齿音毛刺(7.2k-) +
+  // 动态压缩(声音更稳更"贴脸") + 极轻空间反射(故事感)。
+  const VOICE_FX =
+    'highpass=f=85,equalizer=f=250:width_type=q:w=1.2:g=2.5,equalizer=f=3200:width_type=q:w=1.6:g=1.5,equalizer=f=7200:width_type=q:w=2:g=-3.5,acompressor=threshold=-18dB:ratio=3:attack=20:release=200:makeup=2,aecho=0.9:0.85:18:0.10'
   const afilter = bgmAbs
     ? [
-        '[1:a]aresample=48000,volume=1.0[voice]',
+        `[1:a]aresample=48000,${VOICE_FX},volume=1.0[voice]`,
         `[2:a]atrim=0:${durSec.toFixed(3)},aresample=48000,volume=0.32[bgm]`,
         `[voice][bgm]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`,
       ].join(';')
-    : `[1:a]aresample=48000,loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
+    : `[1:a]aresample=48000,${VOICE_FX},loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
 
   args.push(
     '-filter_complex', `${vfilter};${afilter}`,

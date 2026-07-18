@@ -71,6 +71,52 @@ describe('renderIndexHtml', () => {
     // M1 行为保留：开场标题卡仍然渲染
     expect(html).toContain('class="title-card" data-layout-ignore')
   })
+
+  it('向后兼容：无新增剪辑特效字段时仍能正常渲染，不抛出', () => {
+    // data 未携带任何特效相关的新字段（本模板特效为无条件叠加，不依赖新输入字段）
+    expect(() => renderIndexHtml(data)).not.toThrow()
+    expect(html).toContain('data-composition-id="main"')
+  })
+
+  it('首场景玻璃碎片开场：4×5=20 片碎片覆盖整张图，t=0 起 stagger 归位', () => {
+    expect(html).toContain('class="shatter s1shatter" data-layout-ignore')
+    // 20 片碎片
+    const shardCount = (html.match(/class="shard"/g) ?? []).length
+    expect(shardCount).toBeGreaterThanOrEqual(20)
+    // 碎片背景取自场景 1 的图
+    expect(html).toContain("background-image:url('media/01.png');background-size:720px 960px")
+    // 打散初始态烘焙进内联 transform（避免 function-based 值在 HyperFrames 下失效）；不依赖 Math.random
+    expect(html).toContain('transform:translate(')
+    expect(html).not.toContain('Math.random')
+    // t=0 起用字面量 to 归位
+    expect(html).toContain("tl.to('.s1shatter .shard'")
+    expect(html).toContain("stagger: { amount: 0.45, from: 'center' } }, 0);")
+    // 拼合前隐藏真实 .photo，归位后再淡入接手、碎片层淡出
+    expect(html).toContain("tl.set('.s1 .photo', { opacity: 0 }, 0);")
+    expect(html).toContain("tl.to('.s1shatter', { opacity: 0, duration: 0.25, ease: 'sine.inOut' }, 0.88);")
+  })
+
+  it('场景间碎片/马赛克转场：叠在既有 0.72s crossfade 窗口内，不占用额外时长', () => {
+    // 两段场景只有一个边界（s1→s2）
+    expect(html).toContain('class="tshatter ts2" data-layout-ignore')
+    expect(html).toContain("tl.set('.ts2', { opacity: 1 }, 2);")
+    expect(html).toContain("tl.to('.ts2 .shard'")
+    expect(html).toContain("stagger: { amount: 0.26, from: 'edges' } }, 2);")
+    expect(html).toContain("tl.set('.ts2', { opacity: 0 }, 2.72);")
+  })
+
+  it('末段结尾定格强调：暗角渐入 + 更强缓推近，不改变段时长/总时长', () => {
+    expect(html).toContain('class="vignette" data-layout-ignore')
+    // 末段（s2，2s→4.5s）暗角渐入，时长=段自身长度(2.5s)，起点=段 startSec
+    expect(html).toContain(
+      "tl.fromTo('.vignette', { opacity: 0 }, { opacity: 0.55, duration: 2.5, ease: 'sine.in' }, 2);",
+    )
+    // 末段缓推近目标幅度加大（1.16），首段维持原幅度（1.105）
+    expect(html).toContain("tl.fromTo('.s2 .photo', { scale: 1.035 }, { scale: 1.16")
+    expect(html).toContain("tl.fromTo('.s1 .photo', { scale: 1.035 }, { scale: 1.105")
+    // 总时长未变（仍由最后一段 endMs 决定）
+    expect(html).toContain('data-duration="4.5"')
+  })
 })
 
 // 书单模式：段带 bookTitle/bookAuthor/subtitleEn
@@ -150,5 +196,17 @@ describe('renderIndexHtml — 书单模式（bookTitle/subtitleEn）', () => {
   it('保留水印', () => {
     expect(html).toContain('class="watermark" data-layout-ignore')
     expect(html).toContain('@听页/书评分享')
+  })
+
+  it('书单模式下剪辑特效仍正常叠加：开场碎片 + 两个转场边界 + 末段（s3）定格强调', () => {
+    expect(() => renderIndexHtml(booksData)).not.toThrow()
+    expect(html).toContain('class="shatter s1shatter" data-layout-ignore')
+    // 3 段场景 → 2 个转场边界（s1→s2、s2→s3）
+    expect(html).toContain('class="tshatter ts2" data-layout-ignore')
+    expect(html).toContain('class="tshatter ts3" data-layout-ignore')
+    // 末段是 s3，定格强调应作用于 s3 而非 s1/s2
+    expect(html).toContain("tl.fromTo('.s3 .photo', { scale: 1.035 }, { scale: 1.16")
+    expect(html).toContain("tl.fromTo('.s2 .photo', { scale: 1.035 }, { scale: 1.105")
+    expect(html).toContain('class="vignette" data-layout-ignore')
   })
 })

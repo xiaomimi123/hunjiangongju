@@ -67,8 +67,13 @@ export function buildFfmpegArgs(opts: {
   const args = ['-y', '-i', bodyAbs, '-i', audioAbs]
   if (bgmAbs) args.push('-stream_loop', '-1', '-i', bgmAbs)
 
+  // 开场特效（ffmpeg 层，逐帧滤镜，可靠——HyperFrames 渲不出开场动画，故在合成阶段补）：
+  // 前 ~1.1s 从黑淡入 + 画面由 1.12x 缓缓拉回到 1.0（电影感「揭开」）。on=输出帧号，30fps → 前 33 帧做缩放。
+  const vfilter =
+    "[0:v]zoompan=z='if(lte(on,33),1.12-0.12*on/33,1)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=720x960:fps=30,fade=t=in:st=0:d=0.7,format=yuv420p[v]"
+
   const aformat = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
-  const filter = bgmAbs
+  const afilter = bgmAbs
     ? [
         '[1:a]aresample=48000,volume=1.0[voice]',
         `[2:a]atrim=0:${durSec.toFixed(3)},aresample=48000,volume=0.32[bgm]`,
@@ -77,8 +82,8 @@ export function buildFfmpegArgs(opts: {
     : `[1:a]aresample=48000,loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
 
   args.push(
-    '-filter_complex', filter,
-    '-map', '0:v', '-map', '[a]',
+    '-filter_complex', `${vfilter};${afilter}`,
+    '-map', '[v]', '-map', '[a]',
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'high',
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart', '-shortest',

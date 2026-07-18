@@ -21,7 +21,20 @@ export const POST = handler(async (req) => {
   if (!name) throw new HttpError(400, '请填写音色名称')
   if (!sampleAssetUrl) throw new HttpError(400, '请提供样本音频地址')
 
-  const { voiceId } = await enrollVoice(sampleAssetUrl, name)
+  let voiceId: string
+  try {
+    ;({ voiceId } = await enrollVoice(sampleAssetUrl, name))
+  } catch (e) {
+    const msg = (e as Error).message ?? ''
+    // 百炼云端下载不到样本音频：多为 URL 指向 localhost（本地开发）无法被百炼访问
+    if (/download.*fail|InputDownloadFailed|下载/i.test(msg)) {
+      throw new HttpError(
+        422,
+        '百炼下载不到该样本音频。声音克隆需要「百炼能通过公网访问到音频」——本地 localhost 云端访问不到。请部署到有公网域名的服务器后克隆，或让开发者临时开隧道。',
+      )
+    }
+    throw new HttpError(502, `声音克隆失败：${msg.slice(0, 200)}`)
+  }
   const voice = await prisma.clonedVoice.findUnique({ where: { voiceId } })
   if (!voice) throw new HttpError(500, '声音复刻记录写入失败')
   return NextResponse.json(voice)

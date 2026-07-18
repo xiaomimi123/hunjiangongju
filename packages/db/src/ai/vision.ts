@@ -89,6 +89,7 @@ export async function describeImageStyle(imageUrls: string[]): Promise<VisionSty
     const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
       model: cfg.model,
       input: { messages: [{ role: 'user', content }] },
+      parameters: {}, // qwen-vl multimodal-generation 要求 parameters 字段存在，否则 400 Field required
     })
     return parseVisionStyle(data)
   }

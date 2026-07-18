@@ -34,7 +34,9 @@ export async function enrollVoice(sampleUrl: string, name: string): Promise<{ vo
     // mock 模式：不发起真实网络请求，返回确定性 fake voiceId
     voiceId = `mock-voice-${toPrefix(name)}`
   } else {
-    const targetModel = (cfg.extra?.targetModel as string) || cfg.model || 'cosyvoice-v3-plus'
+    // 声音复刻的 target_model 必须是 CosyVoice 系（合成音色的模型），不能回落到 tts 的合成模型
+    // （如 qwen-tts 会报 "preprocess service not found"）。可用 tts.extra.targetModel 覆盖。
+    const targetModel = (cfg.extra?.targetModel as string) || 'cosyvoice-v2'
     const raw = await dashPost(
       cfg.baseUrl,
       cfg.apiKey,

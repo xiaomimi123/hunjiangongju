@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { deleteFrameworkDeep } from '@/lib/deleteCascade'
 
 export const GET = handler(async (_req, { params }) => {
   await requireRole('operator')
@@ -33,4 +34,14 @@ export const PATCH = handler(async (req, { params }) => {
   if (typeof b.published === 'boolean') data.published = b.published
   const updated = await prisma.copyFramework.update({ where: { id: params.id }, data })
   return NextResponse.json(updated)
+})
+
+// 删除框架：连带删除其下的生成任务及成片文件。
+export const DELETE = handler(async (_req, { params }) => {
+  await requireRole('operator')
+  const fw = await prisma.copyFramework.findUnique({ where: { id: params.id }, select: { id: true } })
+  if (!fw) throw new HttpError(404, '框架不存在')
+  const taskCount = await prisma.generationTask.count({ where: { frameworkId: params.id } })
+  await deleteFrameworkDeep(params.id)
+  return NextResponse.json({ ok: true, deletedTasks: taskCount })
 })

@@ -26,6 +26,15 @@ export default function ExtractPage() {
     catch (e) { setErr((e as Error).message); return null }
   }, [])
 
+  const [deleting, setDeleting] = useState('')
+  async function del(id: string, label: string) {
+    if (!confirm(`确定删除拆解「${label}」？将一并删除其转写、派生框架及框架下的生成任务，不可恢复。`)) return
+    setDeleting(id)
+    try { await api(`/api/extract/${id}`, { method: 'DELETE' }); await load() }
+    catch (e) { setErr((e as Error).message) }
+    finally { setDeleting('') }
+  }
+
   useEffect(() => {
     load()
     const timer = setInterval(async () => {
@@ -77,6 +86,7 @@ export default function ExtractPage() {
               <th className="px-4 py-3 font-medium">状态</th>
               <th className="px-4 py-3 font-medium">产出框架</th>
               <th className="px-4 py-3 font-medium">创建时间</th>
+              <th className="px-4 py-3 font-medium text-right">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -90,13 +100,20 @@ export default function ExtractPage() {
                 <td className="px-4 py-3"><ExtractPill status={s.status} /></td>
                 <td className="num px-4 py-3 text-ink2">{s.frameworkCount}</td>
                 <td className="num px-4 py-3 text-ink3">{new Date(s.createdAt).toLocaleString('zh-CN')}</td>
+                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => del(s.id, s.douyinShareUrl === '(manual-upload)' ? '手动上传' : s.douyinShareUrl)}
+                    disabled={deleting === s.id}
+                    className="text-xs text-ink3 hover:text-flame disabled:opacity-50">
+                    {deleting === s.id ? '删除中…' : '删除'}
+                  </button>
+                </td>
               </tr>
             ))}
             {rows && rows.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">暂无拆解任务，点击右上角「发起拆解」</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">暂无拆解任务，点击右上角「发起拆解」</td></tr>
             )}
             {!rows && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
             )}
           </tbody>
         </table>

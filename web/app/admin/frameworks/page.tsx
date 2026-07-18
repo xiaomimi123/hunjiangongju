@@ -33,6 +33,15 @@ export default function FrameworksPage() {
   }, [])
   useEffect(() => { load() }, [load])
 
+  const [deleting, setDeleting] = useState('')
+  async function del(id: string, name: string) {
+    if (!confirm(`确定删除框架「${name}」？将一并删除其下的生成任务及成片文件，不可恢复。`)) return
+    setDeleting(id)
+    try { await api(`/api/frameworks/${id}`, { method: 'DELETE' }); await load() }
+    catch (e) { setErr((e as Error).message) }
+    finally { setDeleting('') }
+  }
+
   async function openEdit(id: string) {
     setEditId(id); setForm(null); setModalErr('')
     try {
@@ -124,7 +133,14 @@ export default function FrameworksPage() {
                   </button>
                 </td>
                 <td className="num px-4 py-3 text-ink3">{new Date(f.createdAt).toLocaleString('zh-CN')}</td>
-                <td className="px-4 py-3 text-right"><span className="btn-ghost text-xs">编辑</span></td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <span className="btn-ghost text-xs">编辑</span>
+                  <button onClick={(e) => { e.stopPropagation(); del(f.id, f.name ?? f.id.slice(0, 8)) }}
+                    disabled={deleting === f.id}
+                    className="ml-3 text-xs text-ink3 hover:text-flame disabled:opacity-50">
+                    {deleting === f.id ? '删除中…' : '删除'}
+                  </button>
+                </td>
               </tr>
             ))}
             {rows && rows.length === 0 && (

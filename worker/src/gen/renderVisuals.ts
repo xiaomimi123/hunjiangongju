@@ -129,6 +129,15 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
     bgmId = bgm?.id ?? null
   }
+  // 未指定 BGM → 从曲库自动选一首（对齐竞品：无指定则配乐，不留白）。
+  // 用 genTaskId 派生的稳定索引，避免同任务重跑换曲。
+  if (!bgmId) {
+    const pool = await prisma.bgmLibrary.findMany({ where: { fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' } })
+    if (pool.length > 0) {
+      const idx = Array.from(genTaskId).reduce((a, c) => a + c.charCodeAt(0), 0) % pool.length
+      bgmId = pool[idx].id
+    }
+  }
 
   // 本 job 创建 RenderTask
   const renderTask = await prisma.renderTask.create({

@@ -47,6 +47,15 @@ function formatBookLine(b: BookInput, i: number): string {
  * - `subject` 模式：只给选题，指示 LLM 先选书（不输出选书过程/书单），再逐句写文案。
  * 字数/行数上限直接复用框架已推导的 `maxLines`/`maxTotalChars`（deriveCharBudget 产出），不在此重新计算。
  */
+// 书单号爆款文案风格准则（对齐优质书单号：口语化、情绪优先、无营销腔）。
+const STYLE_RULES = [
+  '文案风格准则（务必遵守）：',
+  '- 开篇第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。',
+  '- 短句、口语化、像跟朋友说话；多用具体细节，少用抽象大词。',
+  '- 严禁"你是不是……"式营销开头、"不是……而是……"的对仗论证、机械排比。',
+  '- 结尾留余味、给一句能被记住的话；严禁任何 CTA（买它/点购物车/关注/链接）。',
+].join('\n')
+
 export function buildScriptPrompt(args: {
   mode: 'books' | 'subject'
   subject: string
@@ -70,6 +79,8 @@ export function buildScriptPrompt(args: {
       '2. 只输出文案正文，不要编号、不要额外标题、不要任何解释说明。',
       `3. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行，请依书目数量合理分配每本书的篇幅。`,
       '4. 严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
+      '',
+      STYLE_RULES,
     ].join('\n')
   }
 
@@ -85,6 +96,8 @@ export function buildScriptPrompt(args: {
     '3. 只输出文案正文，不要编号、不要标题、不要选书清单、不要任何解释说明。',
     `4. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
     '5. 严禁照搬原文或框架示例，必须围绕选题原创改写。',
+    '',
+    STYLE_RULES,
   ].join('\n')
 }
 

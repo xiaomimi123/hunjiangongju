@@ -43,7 +43,8 @@ describe('renderIndexHtml', () => {
     expect(html).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.72")
     expect(html).toContain("tl.to('.s1', { opacity: 0, duration: 0.72")
     // 字幕 reveal + 收起（位置用 startMs/1000、endMs/1000）
-    expect(html).toContain("tl.fromTo('.cap2', { opacity: 0, y: 18 }")
+    // 无 captionBeats 时回退整段一条字幕(每段一个 cap 单元)，用更快的节拍 reveal
+    expect(html).toContain("tl.fromTo('.cap2', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.22, ease: 'power2.out' }, 2)")
     expect(html).toContain("tl.set('.cap2', { opacity: 0 }, 4.5)")
   })
 

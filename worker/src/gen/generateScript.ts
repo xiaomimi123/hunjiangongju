@@ -3,6 +3,7 @@ import {
   llmComplete,
   validateScript,
   trimToBudget,
+  splitCaptionPhrases,
   setGenerationStatus,
   enqueueGen,
   getCapabilityConfig,
@@ -217,7 +218,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
 
   const assigned = assignBooksToSegments(clean, books ?? [])
 
-  // 逐段中译英字幕：顺序执行，保持简单（mock 下免费、无网络调用）
+  // 每段拆成「字幕短句节拍」并逐拍中译英：图片停住、字幕短句快速跳（对齐优质书单号节奏）。
   const segments: {
     generationTaskId: string
     seqNo: number
@@ -225,17 +226,21 @@ export async function generateScript(genTaskId: string): Promise<void> {
     bookTitle?: string
     bookAuthor?: string
     subtitleEn: string
+    captionBeats: { zh: string; en: string }[]
   }[] = []
   for (let i = 0; i < assigned.length; i++) {
     const { scriptText, bookTitle, bookAuthor } = assigned[i]
-    const subtitleEn = await translateLine(scriptText)
+    const phrases = splitCaptionPhrases(scriptText)
+    const beats: { zh: string; en: string }[] = []
+    for (const zh of phrases) beats.push({ zh, en: await translateLine(zh) })
     segments.push({
       generationTaskId: genTaskId,
       seqNo: i + 1,
       scriptText,
       ...(bookTitle ? { bookTitle } : {}),
       ...(bookAuthor ? { bookAuthor } : {}),
-      subtitleEn,
+      subtitleEn: beats.map((b) => b.en).join(' '), // 整段英文=各拍拼接，供回退单条字幕用
+      captionBeats: beats,
     })
   }
 

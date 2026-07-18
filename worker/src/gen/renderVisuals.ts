@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, enqueueGen } from '@mixcut/db'
+import { prisma, transitionRender, enqueueGen, timeCaptionBeats } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { renderIndexHtml, type BodyData, type BodyOverlay } from '../../templates/booklist/indexHtml'
 
@@ -51,6 +51,7 @@ interface SegmentRow {
   bookTitle?: string | null
   bookAuthor?: string | null
   subtitleEn?: string | null
+  captionBeats?: unknown
 }
 
 /** 组装 BodyData：segments 由 bodyTimings（按 seqNo）join generated_segments；images 1:1 */
@@ -76,6 +77,14 @@ export function buildBodyData(
     const nn = String(imageIndex + 1).padStart(2, '0')
     const rel = `media/${nn}.png`
     images.push({ seqNo: seg.seqNo, abs: urlToAbs(seg.imageUrl), rel })
+    // 字幕节拍：本段口播短句在段时间窗内快速逐拍切换（图片保持）。缺省则回退整段单条字幕。
+    const rawBeats = Array.isArray(seg.captionBeats)
+      ? (seg.captionBeats as { zh?: string; en?: string }[]).filter((b) => b && typeof b.zh === 'string' && b.zh.trim())
+      : []
+    const timedBeats =
+      rawBeats.length > 1
+        ? timeCaptionBeats(rawBeats.map((b) => ({ zh: b.zh as string, en: b.en })), t.startMs, t.endMs)
+        : []
     bodySegments.push({
       seqNo: seg.seqNo,
       startMs: t.startMs,
@@ -85,6 +94,7 @@ export function buildBodyData(
       ...(seg.bookTitle ? { bookTitle: seg.bookTitle } : {}),
       ...(seg.bookAuthor ? { bookAuthor: seg.bookAuthor } : {}),
       ...(seg.subtitleEn ? { subtitleEn: seg.subtitleEn } : {}),
+      ...(timedBeats.length ? { captionBeats: timedBeats } : {}),
     })
     imageIndex++
   }

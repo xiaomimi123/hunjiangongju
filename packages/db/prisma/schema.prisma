@@ -131,6 +131,9 @@ model GeneratedSegment {
   bookTitle        String?        @map("book_title")
   bookAuthor       String?        @map("book_author")
   subtitleEn       String?        @map("subtitle_en")
+  // 字幕节拍：把本段口播拆成短句 [{zh, en}]，渲染时在本段时间窗内快速逐拍切换（图片保持不动）。
+  // 缺省(旧任务)则回退整段单条字幕。
+  captionBeats     Json?          @map("caption_beats")
   @@map("generated_segments")
 }
 

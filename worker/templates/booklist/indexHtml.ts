@@ -31,6 +31,9 @@ export interface BodySegment {
   bookAuthor?: string
   /** 双语字幕：该段字幕的英文翻译行，缺省时只渲染中文字幕（M1 行为） */
   subtitleEn?: string
+  /** 字幕节拍：本段口播拆成的短句，各带在段时间窗内的绝对起止（图片停住、字幕短句快跳）。
+   * 缺省则回退整段单条字幕（subtitle/subtitleEn）。 */
+  captionBeats?: { zh: string; en?: string; startMs: number; endMs: number }[]
 }
 
 export interface BodyData {
@@ -149,16 +152,32 @@ export function renderIndexHtml(data: BodyData): string {
   // 结尾定格强调：常驻暗角层，仅末段窗口内淡入
   const vignetteHtml = `    <div class="vignette" data-layout-ignore></div>`
 
-  // 双语字幕：subtitleEn 存在时中文 + 英文两行；缺省时只渲染中文（M1 行为）
-  const capsHtml = segs
-    .map((s, i) => {
-      const n = i + 1
-      const en = (s.subtitleEn ?? '').trim()
+  // 字幕单元：有节拍(captionBeats)则逐拍展开(图片停住、短句快跳)，否则整段一条(向后兼容)。
+  interface CapUnit { zh: string; en?: string; startMs: number; endMs: number }
+  const capUnits: CapUnit[] = []
+  for (const s of segs) {
+    const beats = Array.isArray(s.captionBeats) ? s.captionBeats : []
+    if (beats.length) for (const b of beats) capUnits.push({ zh: b.zh, en: b.en, startMs: b.startMs, endMs: b.endMs })
+    else capUnits.push({ zh: s.subtitle, en: s.subtitleEn, startMs: s.startMs, endMs: s.endMs })
+  }
+  const capsHtml = capUnits
+    .map((u, k) => {
+      const en = (u.en ?? '').trim()
       const enLine = en ? `\n      <div class="cap-en">${esc(en)}</div>` : ''
       return (
-        `    <div class="cap cap${n}" data-layout-ignore>\n` +
-        `      <div class="cap-zh">${esc(s.subtitle)}</div>${enLine}\n` +
+        `    <div class="cap cap${k + 1}" data-layout-ignore>\n` +
+        `      <div class="cap-zh">${esc(u.zh)}</div>${enLine}\n` +
         `    </div>`
+      )
+    })
+    .join('\n')
+  // 字幕节拍 GSAP：每拍快速 reveal → 到该拍 endMs 收起（比整段更快、更有节奏）。
+  const capTweens = capUnits
+    .map((u, k) => {
+      const n = k + 1
+      return (
+        `  tl.fromTo('.cap${n}', { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.22, ease: 'power2.out' }, ${sec(u.startMs)});\n` +
+        `  tl.set('.cap${n}', { opacity: 0 }, ${sec(u.endMs)});`
       )
     })
     .join('\n')
@@ -210,11 +229,7 @@ export function renderIndexHtml(data: BodyData): string {
         )
         lines.push(`  tl.set('.ts${n}', { opacity: 0 }, ${hideAtSec});`)
       }
-      // 字幕 reveal → hold → 收起
-      lines.push(
-        `  tl.fromTo('.cap${n}', { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.3 }, ${startSec});`,
-      )
-      lines.push(`  tl.set('.cap${n}', { opacity: 0 }, ${endSec});`)
+      // 字幕不在此处理：改由 capUnits/capTweens 按「字幕节拍」逐拍展开（图片停住、短句快跳）。
       // 结尾定格强调：末段窗口内暗角渐入，衬托金句收尾（时长=段自身长度，不外溢）
       if (isLast) {
         lines.push(
@@ -283,7 +298,7 @@ export function renderIndexHtml(data: BodyData): string {
     })
     .join('\n')
 
-  const allTweens = bookHeaderTweens ? `${tweens}\n${bookHeaderTweens}` : tweens
+  const allTweens = [tweens, bookHeaderTweens, capTweens].filter(Boolean).join('\n')
 
   const hasSubtitle = data.overlay.subtitle && data.overlay.subtitle.trim().length > 0
   // M1 兼容：仅当没有任何段落带 bookTitle 时才渲染开场标题卡；书单模式由常驻书名头取代

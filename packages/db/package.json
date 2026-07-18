@@ -5,7 +5,8 @@
   "types": "src/index.ts",
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "bullmq": "^5.8.0"
+    "bullmq": "^5.8.0",
+    "ws": "^8.18.0"
   },
-  "devDependencies": { "prisma": "^5.22.0" }
+  "devDependencies": { "prisma": "^5.22.0", "@types/ws": "^8.5.13" }
 }

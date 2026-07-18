@@ -1,6 +1,7 @@
 import { getCapabilityConfig, isMockMode } from './config'
 import { mockSilentWav } from './mock'
 import { isDashScope, dashPost, fetchUrlToBuffer } from './dashscope'
+import { isCosyvoiceVoiceId, resolveCosyvoiceModel, cosyvoiceSynthesize } from './cosyvoiceSynth'
 import type { TtsOpts } from './types'
 
 // 构造 DashScope 原生 multimodal-generation 的 TTS 请求体（纯函数，便于单测）。
@@ -22,6 +23,15 @@ export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
   if (isMockMode(cfg)) return mockSilentWav(Math.max(1, Math.round(opts.text.length / 5)))
 
   const voiceId = opts.voiceId ?? (cfg.extra.voiceId as string | undefined)
+
+  // CosyVoice 克隆音色：DashScope 上 CosyVoice 系模型没有 HTTP REST 合成接口，只能走
+  // WebSocket 协议（见 cosyvoiceSynth.ts）。建声时 target_model 与合成时 model 必须一致，
+  // 因此优先从 voiceId 前缀反推模型名，而不是盲目套用 tts 能力配置里可能填的 qwen-tts。
+  if (isCosyvoiceVoiceId(voiceId) || /^cosyvoice-/i.test(cfg.model)) {
+    const model = resolveCosyvoiceModel(voiceId, cfg.model)
+    if (!voiceId) throw new Error('CosyVoice 合成模型需要指定克隆音色 voiceId')
+    return cosyvoiceSynthesize(cfg.baseUrl, cfg.apiKey, model, voiceId, opts.text)
+  }
 
   // 百炼 qwen-tts：DashScope 原生 multimodal-generation，返回音频 URL。
   // voiceId 存在时即视为「克隆音色」并直接使用，与合成模型名无关（见 buildDashTtsBody 注释）。

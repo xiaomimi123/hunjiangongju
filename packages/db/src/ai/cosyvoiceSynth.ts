@@ -162,6 +162,11 @@ export async function cosyvoiceSynthesize(
       settle(() => reject(new Error(`CosyVoice WebSocket 连接失败: ${err.message}`)))
     })
 
+    // 握手期 HTTP 层被拒（401/403 key无效/无权限等）→ 立即快失败，不必等 60s 超时。
+    ws.on('unexpected-response', (_req: unknown, res: { statusCode?: number; statusMessage?: string }) => {
+      settle(() => reject(new Error(`CosyVoice WebSocket 握手被拒 HTTP ${res?.statusCode ?? '?'} ${res?.statusMessage ?? ''}（检查 key/权限/model）`)))
+    })
+
     ws.on('close', (code: number, reason: Buffer) => {
       settle(() => reject(new Error(`CosyVoice WebSocket 提前关闭 code=${code} reason=${reason?.toString() ?? ''}`)))
     })

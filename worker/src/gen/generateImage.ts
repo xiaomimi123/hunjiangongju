@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, imageGenerate, setGenerationStatus, enqueueGen } from '@mixcut/db'
+import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
 
 export async function generateImage(genTaskId: string): Promise<void> {
@@ -24,11 +24,21 @@ export async function generateImage(genTaskId: string): Promise<void> {
     const prompt = [stylePrompt, `一个能烘托这种情绪的安静场景：${seg.scriptText}`, '干净的纯画面场景，画面里不出现任何文字、书本上的字、招牌、字幕或水印']
       .filter(Boolean)
       .join('，')
-    const png = await imageGenerate({
-      prompt,
-      size: '720x960',
-      negativePrompt: '文字, 字, 汉字, 字母, 单词, 书法, 标题, 字幕, 水印, text, letters, words, caption, watermark, signature',
-    })
+    // 单张文生图偶发 504/超时是瞬时错误，逐图重试而非让整任务失败。
+    const png = await withRetry(
+      () =>
+        imageGenerate({
+          prompt,
+          size: '720x960',
+          negativePrompt: '文字, 字, 汉字, 字母, 单词, 书法, 标题, 字幕, 水印, text, letters, words, caption, watermark, signature',
+        }),
+      {
+        attempts: 3,
+        delayMs: 3000,
+        onRetry: (err, i) =>
+          console.warn(`[gen] generate-image ${genTaskId} seg#${seg.seqNo} 第${i}次失败,重试: ${(err as Error).message?.slice(0, 100)}`),
+      },
+    )
 
     const abs = path.join(dir, `${seg.seqNo}.png`)
     await fs.writeFile(abs, png)

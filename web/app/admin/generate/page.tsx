@@ -38,6 +38,15 @@ export default function GeneratePage() {
   }, [])
   useEffect(() => { load() }, [load])
 
+  const [deleting, setDeleting] = useState('')
+  async function del(id: string, subject: string) {
+    if (!confirm(`确定删除「${subject}」？将一并删除其分镜与成片文件，不可恢复。`)) return
+    setDeleting(id)
+    try { await api(`/api/generate/${id}`, { method: 'DELETE' }); await load() }
+    catch (e) { setErr((e as Error).message) }
+    finally { setDeleting('') }
+  }
+
   function openModal() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
     setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
@@ -98,6 +107,7 @@ export default function GeneratePage() {
               <th className="px-4 py-3 font-medium">框架</th>
               <th className="px-4 py-3 font-medium">状态</th>
               <th className="px-4 py-3 font-medium">创建时间</th>
+              <th className="px-4 py-3 font-medium text-right">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -109,13 +119,19 @@ export default function GeneratePage() {
                 <td className="px-4 py-3 text-ink2">{t.framework?.name ?? '—'}</td>
                 <td className="px-4 py-3"><GenPill status={t.status} /></td>
                 <td className="num px-4 py-3 text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</td>
+                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => del(t.id, t.subject)} disabled={deleting === t.id}
+                    className="text-ink3 hover:text-flame disabled:opacity-50">
+                    {deleting === t.id ? '删除中…' : '删除'}
+                  </button>
+                </td>
               </tr>
             ))}
             {tasks && tasks.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
             )}
             {!tasks && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
             )}
           </tbody>
         </table>

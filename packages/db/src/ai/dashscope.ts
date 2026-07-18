@@ -44,12 +44,26 @@ export async function dashPost(
   apiKey: string,
   body: unknown,
   endpoint: string = dashGenEndpoint(baseUrl),
+  timeoutMs = 150_000,
 ): Promise<{ output?: Record<string, unknown> }> {
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(body),
-  })
+  // 客户端超时：文生图等偶发挂起时 DashScope 网关要 ~298s 才 504，太久拖垮上层重试。
+  // 提前在 150s 主动中止 → 抛错 → 由调用方(如 generate-image withRetry)更快重试。
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  let res: Response
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    })
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new Error(`DashScope 请求超时（${timeoutMs}ms）`)
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
   const text = await res.text().catch(() => '')
   if (!res.ok) throw new Error(`DashScope 请求失败 ${res.status}: ${text.slice(0, 300)}`)
   try { return JSON.parse(text) } catch { throw new Error(`DashScope 返回非 JSON: ${text.slice(0, 200)}`) }

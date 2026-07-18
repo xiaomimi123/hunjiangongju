@@ -2,6 +2,7 @@ import {
   prisma,
   llmComplete,
   validateScript,
+  trimToBudget,
   setGenerationStatus,
   enqueueGen,
   getCapabilityConfig,
@@ -172,12 +173,14 @@ export async function generateScript(genTaskId: string): Promise<void> {
 
   let prompt = basePrompt
   let lastErrors: string[] = []
+  let lastClean: string[] = []
   let clean: string[] | null = null
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const raw = await llmComplete({ prompt, maxTokens: 1200 })
     const lines = raw.split('\n')
     const result = validateScript(lines, maxLines, maxTotalChars)
+    lastClean = result.clean
 
     if (result.errors.length === 0) {
       clean = result.clean
@@ -190,8 +193,13 @@ export async function generateScript(genTaskId: string): Promise<void> {
   }
 
   if (!clean) {
-    await setGenerationStatus(genTaskId, 'FAILED')
-    throw new Error(`文案校验失败（已重试 ${MAX_ATTEMPTS} 次）：${lastErrors.join('；')}`)
+    // 兜底：多次重试仍略超预算（真实 books 模式书评常见）→ 整行裁剪到预算内，不硬失败。
+    if (lastClean.length === 0) {
+      await setGenerationStatus(genTaskId, 'FAILED')
+      throw new Error(`文案生成为空（已重试 ${MAX_ATTEMPTS} 次）：${lastErrors.join('；')}`)
+    }
+    clean = trimToBudget(lastClean, maxLines, maxTotalChars)
+    console.warn(`[gen] generate-script ${genTaskId}: 超预算兜底裁剪 (${lastErrors.join('；')}) → ${clean.length} 行`)
   }
 
   const assigned = assignBooksToSegments(clean, books ?? [])

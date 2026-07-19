@@ -1,4 +1,4 @@
-import { prisma, llmComplete, setSourceStatus, deriveCharBudget, MOCK_VISION_STYLE, derivePace } from '@mixcut/db'
+import { prisma, llmComplete, setSourceStatus, deriveCharBudget, MOCK_VISION_STYLE, derivePace, getCapabilityConfig, isMockMode } from '@mixcut/db'
 import { urlToAbs } from '../paths'
 import { extractStyleFromVideo } from './extractStyle'
 
@@ -127,17 +127,29 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
   // 借此区分「拿到真实识别结果」与「兜底」——兜底时保留下面的历史默认（水彩插画），拆解绝不因此中断。
   let imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
   let visualStyleType = 'ai_illustration'
+  let visionBooks: { title: string; author?: string }[] = []
+  let visionDegraded = true // 默认视为降级；识别到真实画风才置 false
   if (source?.videoFileUrl) {
     const videoAbs = urlToAbs(source.videoFileUrl)
-    const style = await extractStyleFromVideo(sourceVideoId, videoAbs)
+    const { style, books: vb } = await extractStyleFromVideo(sourceVideoId, videoAbs)
     if (style !== MOCK_VISION_STYLE) {
       imageStylePrompt = style.imageStylePrompt
       visualStyleType = style.visualStyleType
+      visionDegraded = false
     }
+    visionBooks = vb
   }
 
-  // 书单号核心：从真实转写中识别源里提到的书目（书名/作者），供后续渲染引用
-  const books = extractBooks(fullText)
+  // 书目（改进2）：书名是画面上的字、口播里没有 → 优先用 vision OCR 结果，识别不到才回退口播正则。
+  const books = visionBooks.length > 0 ? visionBooks : extractBooks(fullText)
+
+  // 降级检测（改进1）：ASR 或 vision 走 mock 时，转写/画风为占位，框架内容不可信 → 明确标注，
+  // 避免"静默造假框架"让用户以为拆解成功了。
+  const asrDegraded = isMockMode(await getCapabilityConfig('asr'))
+  const degradedNote =
+    asrDegraded || visionDegraded
+      ? `⚠️ 拆解降级：${[asrDegraded ? 'ASR 转写为占位' : '', visionDegraded ? '画风未识别(用默认水彩)' : ''].filter(Boolean).join('、')}。内容不可信，请启用 ASR/vision（需百炼能访问到源文件）后重新拆解。`
+      : null
 
   // 源节奏（Task4）：句时间戳 + 场景切点 → 源均段时长/段数，供 alignCaptions 生成 bodyTimings 时对齐节奏。
   // 本地 ASR 若只有占位/零时间戳，derivePace 会优雅降级为 avgSegMs=0（下游 applyPace 视为「无源节奏」不做调整）。
@@ -169,6 +181,7 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
       overlayTemplate,
       renderTemplate: 'booklist',
       visualStyleType,
+      degradedNote,
       createdBy: source?.createdBy ?? null,
     },
   })

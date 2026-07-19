@@ -116,3 +116,69 @@ export async function describeImageStyle(imageUrls: string[]): Promise<VisionSty
   const text = data?.choices?.[0]?.message?.content
   return parseVisionStyle({ output: { choices: [{ message: { content: text } }] } })
 }
+
+const BOOKS_INSTRUCTION =
+  '这些是一个「书单号」短视频的截图。请识别画面中作为主视觉/标题出现的书名与作者' +
+  '（通常是顶部的《书名》和作者名——这是画面上的字，不是口播说的）。只输出一个 JSON 数组，' +
+  '每项形如 {"title":"书名","author":"作者"}，作者识别不到就省略 author；一本书都没有就输出 []。' +
+  '不要输出 JSON 以外的任何解释文字。'
+
+// 从画面文本解析书目：模型可能输出带解释的文本，抠出其中的 JSON 数组。纯函数、绝不抛错。
+export function parseBooksResult(raw: unknown): { title: string; author?: string }[] {
+  try {
+    const message = (raw as { output?: { choices?: { message?: { content?: unknown } }[] } })?.output?.choices?.[0]?.message
+    const content = message?.content
+    const text: string =
+      typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+          ? (content as { text?: string }[]).map((c) => c?.text ?? '').join('')
+          : ''
+    const m = text.match(/\[[\s\S]*\]/)
+    if (!m) return []
+    const arr = JSON.parse(m[0]) as unknown
+    if (!Array.isArray(arr)) return []
+    const seen = new Set<string>()
+    const out: { title: string; author?: string }[] = []
+    for (const it of arr as { title?: unknown; author?: unknown }[]) {
+      const title = typeof it?.title === 'string' ? it.title.replace(/[《》]/g, '').trim() : ''
+      if (!title || seen.has(title)) continue
+      seen.add(title)
+      const author = typeof it?.author === 'string' && it.author.trim() ? it.author.trim() : undefined
+      out.push(author ? { title, author } : { title })
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
+// qwen-vl 从截图识别「书单号」主视觉里的书名/作者（画面文本，非口播）。mock/失败 → []。
+export async function describeBooksFromImages(imageUrls: string[]): Promise<{ title: string; author?: string }[]> {
+  const cfg = await getCapabilityConfig('vision')
+  if (isMockMode(cfg)) return []
+  try {
+    if (isDashScope(cfg.baseUrl)) {
+      const content = [...imageUrls.map((url) => ({ image: url })), { text: BOOKS_INSTRUCTION }]
+      const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
+        model: cfg.model,
+        input: { messages: [{ role: 'user', content }] },
+        parameters: {},
+      })
+      return parseBooksResult(data)
+    }
+    const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [{ role: 'user', content: [...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } })), { type: 'text', text: BOOKS_INSTRUCTION }] }],
+      }),
+    })
+    if (!res.ok) return []
+    const data = await res.json()
+    return parseBooksResult({ output: { choices: [{ message: { content: data?.choices?.[0]?.message?.content } }] } })
+  } catch {
+    return []
+  }
+}

@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { parseVisionStyle } from './vision'
+import { parseVisionStyle, parseBooksResult } from './vision'
+
+describe('parseBooksResult', () => {
+  const wrap = (text: string) => ({ output: { choices: [{ message: { content: text } }] } })
+  it('从含解释的文本里抠出 JSON 书目并去书名号', () => {
+    const r = parseBooksResult(wrap('识别到：[{"title":"《活下去的理由》","author":"马特·海格"}]'))
+    expect(r).toEqual([{ title: '活下去的理由', author: '马特·海格' }])
+  })
+  it('作者缺省则省略 author；按书名去重', () => {
+    const r = parseBooksResult(wrap('[{"title":"活着"},{"title":"活着","author":"余华"}]'))
+    expect(r).toEqual([{ title: '活着' }])
+  })
+  it('无 JSON / 非数组 → 空', () => {
+    expect(parseBooksResult(wrap('画面里没有书'))).toEqual([])
+    expect(parseBooksResult(wrap('{"title":"x"}'))).toEqual([])
+  })
+})
 
 // DashScope 原生多模态响应结构（核对自 https://help.aliyun.com/zh/model-studio/vision）：
 // { output: { choices: [{ message: { content: [{ text }] } }] } }

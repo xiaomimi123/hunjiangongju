@@ -95,6 +95,8 @@ model CopyFramework {
   maxLines              Int?             @map("max_lines")
   maxTotalChars         Int?             @map("max_total_chars")
   imageStylePrompt      String?          @map("image_style_prompt")
+  // 拆解降级警告：ASR/vision 走 mock 时置提示，内容不可信；正常为 null。防止"静默造假框架"。
+  degradedNote          String?          @map("degraded_note")
   published             Boolean          @default(false)
   createdBy             String?          @map("created_by")
   createdAt             DateTime         @default(now()) @map("created_at")

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import {
   buildScriptPrompt,
   resolveScriptMode,
+  frameworkBooks,
   allocateBookIndexes,
   assignBooksToSegments,
   buildTranslatePrompt,
@@ -141,5 +142,18 @@ describe('translateLine（mock 模式：不得走通用 llm mock，需返回自�
     const en = await translateLine('这是一句需要翻译的中文文案。')
     expect(en.length).toBeGreaterThan(0)
     expect(/[一-龥]/.test(en)).toBe(false)
+  })
+})
+
+describe('frameworkBooks', () => {
+  it('从 overlayTemplate.books 读出书目', () => {
+    expect(frameworkBooks({ watermark: '@x', books: [{ title: '活下去的理由', author: '马特·海格' }] })).toEqual([
+      { title: '活下去的理由', author: '马特·海格' },
+    ])
+  })
+  it('无 books / 非法 → 空', () => {
+    expect(frameworkBooks({ watermark: '@x' })).toEqual([])
+    expect(frameworkBooks(null)).toEqual([])
+    expect(frameworkBooks({ books: 'x' })).toEqual([])
   })
 })

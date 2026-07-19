@@ -25,6 +25,19 @@ export type ScriptFrameworkInput = {
  * 从生成任务的 variables（Json）判定入口模式：
  * `variables.books` 为非空数组 → 「手填书单」模式，透传书单；否则 → 「选题自选」模式。
  */
+// 从拆解框架的 overlayTemplate.books 读出识别到的书目，供生成时自动带上（改进3）。
+export function frameworkBooks(overlayTemplate: unknown): BookInput[] {
+  const ot = overlayTemplate && typeof overlayTemplate === 'object' ? (overlayTemplate as Record<string, unknown>) : null
+  const raw = ot?.books
+  if (!Array.isArray(raw)) return []
+  return (raw as { title?: unknown; author?: unknown }[])
+    .filter((b) => b && typeof b.title === 'string' && b.title.trim())
+    .map((b) => {
+      const title = (b.title as string).trim()
+      return typeof b.author === 'string' && b.author.trim() ? { title, author: (b.author as string).trim() } : { title }
+    })
+}
+
 export function resolveScriptMode(variables: unknown): { mode: 'books' | 'subject'; books?: BookInput[] } {
   if (variables && typeof variables === 'object' && !Array.isArray(variables)) {
     const raw = (variables as Record<string, unknown>).books
@@ -170,7 +183,18 @@ export async function generateScript(genTaskId: string): Promise<void> {
   const maxLines = fw.maxLines ?? 21
   const maxTotalChars = fw.maxTotalChars ?? 220
 
-  const { mode, books } = resolveScriptMode(task.variables)
+  const resolved = resolveScriptMode(task.variables)
+  let mode = resolved.mode
+  let books = resolved.books
+  // 改进3：从拆解框架生成时，若未手填书单但框架带有识别到的书目（overlayTemplate.books），
+  // 自动采用 → 渲染《书名》头，无需运营每次手填。
+  if (mode === 'subject') {
+    const fwBooks = frameworkBooks(fw.overlayTemplate)
+    if (fwBooks.length > 0) {
+      mode = 'books'
+      books = fwBooks
+    }
+  }
 
   const variablesText =
     task.variables && Object.keys(task.variables as object).length > 0

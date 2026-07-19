@@ -4,7 +4,7 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
 
-type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; createdAt: string }
+type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; degradedNote?: string | null; createdAt: string }
 type FrameworkFull = {
   id: string; name: string | null; frameworkText: string; industryCategory: string | null
   imageStylePrompt: string | null; overlayTemplate: unknown; renderTemplate: string | null
@@ -120,7 +120,14 @@ export default function FrameworksPage() {
           <tbody className="divide-y divide-line">
             {rows?.map((f) => (
               <tr key={f.id} className="cursor-pointer hover:bg-surface2" onClick={() => openEdit(f.id)}>
-                <td className="px-4 py-3 font-medium text-flame">{f.name ?? f.id.slice(0, 8)}</td>
+                <td className="px-4 py-3 font-medium text-flame">
+                  {f.name ?? f.id.slice(0, 8)}
+                  {f.degradedNote && (
+                    <span title={f.degradedNote} className="ml-2 cursor-help rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-600">
+                      ⚠️ 降级
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-ink2">{f.industryCategory ?? '—'}</td>
                 <td className="px-4 py-3 text-ink2">{f.visualStyleType}</td>
                 <td className="px-4 py-3">

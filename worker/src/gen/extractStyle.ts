@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { publicAssetUrl, describeImageStyle, MOCK_VISION_STYLE, type VisionStyleResult } from '@mixcut/db'
+import { publicAssetUrl, describeImageStyle, describeBooksFromImages, MOCK_VISION_STYLE, type VisionStyleResult } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
 
 // 抽 3~5 帧做画风识别；帧数不影响识别质量太多，取中间值 4 帧
@@ -23,7 +23,10 @@ function probeDurationSec(mediaAbs: string): number {
  * mock 模式下 describeImageStyle 内部直接返回固定 mock 值；ffmpeg/网络任何一步失败都
  * 兜底返回 mock 默认值，绝不向上抛错（拆解流程不能因画风识别失败而中断）。
  */
-export async function extractStyleFromVideo(sourceVideoId: string, videoAbs: string): Promise<VisionStyleResult> {
+export async function extractStyleFromVideo(
+  sourceVideoId: string,
+  videoAbs: string,
+): Promise<{ style: VisionStyleResult; books: { title: string; author?: string }[] }> {
   try {
     const framesDir = path.join(DATA_DIR, 'source', `${sourceVideoId}-frames`)
     await fs.mkdir(framesDir, { recursive: true })
@@ -43,11 +46,16 @@ export async function extractStyleFromVideo(sourceVideoId: string, videoAbs: str
       if (r.status !== 0) continue // 单帧失败跳过，凑够剩余帧即可
       relPaths.push(path.join('source', `${sourceVideoId}-frames`, fileName))
     }
-    if (relPaths.length === 0) return MOCK_VISION_STYLE
+    if (relPaths.length === 0) return { style: MOCK_VISION_STYLE, books: [] }
 
     const imageUrls = relPaths.map((rel) => publicAssetUrl(rel))
-    return await describeImageStyle(imageUrls)
+    // 画风识别 + 书名 OCR（书名是画面上的字，口播里没有，须从帧识别）
+    const [style, books] = await Promise.all([
+      describeImageStyle(imageUrls),
+      describeBooksFromImages(imageUrls),
+    ])
+    return { style, books }
   } catch {
-    return MOCK_VISION_STYLE
+    return { style: MOCK_VISION_STYLE, books: [] }
   }
 }

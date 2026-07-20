@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { prisma } from '@mixcut/db'
+import { ensureBgm } from './ensureBgm'
 
 // 生产环境初始化：仅创建一个管理员（来自环境变量）与 SMTP 配置行。
 // 不创建任何演示学员/演示数据。幂等，可重复执行。
@@ -22,6 +23,9 @@ async function main() {
 
   // 后台 SMTP 开关所需的配置行
   await prisma.smtpConfig.upsert({ where: { id: 1 }, update: {}, create: { id: 1 } })
+
+  // 内置默认 BGM 曲库（无指定时自动配乐）
+  await ensureBgm()
 
   console.log('[bootstrap] 完成')
 }

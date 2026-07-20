@@ -95,6 +95,8 @@ model CopyFramework {
   maxLines              Int?             @map("max_lines")
   maxTotalChars         Int?             @map("max_total_chars")
   imageStylePrompt      String?          @map("image_style_prompt")
+  // 拆解降级警告：ASR/vision 走 mock 时置提示，内容不可信；正常为 null。防止"静默造假框架"。
+  degradedNote          String?          @map("degraded_note")
   published             Boolean          @default(false)
   createdBy             String?          @map("created_by")
   createdAt             DateTime         @default(now()) @map("created_at")
@@ -128,6 +130,12 @@ model GeneratedSegment {
   seqNo            Int            @map("seq_no")
   scriptText       String         @map("script_text")
   imageUrl         String?        @map("image_url")
+  bookTitle        String?        @map("book_title")
+  bookAuthor       String?        @map("book_author")
+  subtitleEn       String?        @map("subtitle_en")
+  // 字幕节拍：把本段口播拆成短句 [{zh, en}]，渲染时在本段时间窗内快速逐拍切换（图片保持不动）。
+  // 缺省(旧任务)则回退整段单条字幕。
+  captionBeats     Json?          @map("caption_beats")
   @@map("generated_segments")
 }
 
@@ -175,6 +183,17 @@ model RenderQcReport {
   detail       String?
   createdAt    DateTime   @default(now()) @map("created_at")
   @@map("render_qc_reports")
+}
+
+model ClonedVoice {
+  id             String   @id @default(uuid())
+  voiceId        String   @unique @map("voice_id")
+  name           String
+  sampleAssetUrl String   @map("sample_asset_url")
+  provider       String   @default("dashscope")
+  createdBy      String?  @map("created_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  @@map("cloned_voices")
 }
 
 model AiCapabilityConfig {

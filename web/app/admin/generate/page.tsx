@@ -9,6 +9,11 @@ import { GenPill } from './genStatus'
 
 type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string }
 type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null }
+type BookRow = { title: string; author: string; points: string }
+type Mode = 'subject' | 'books'
+type Voice = { id: string; voiceId: string; name: string }
+
+const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
 export default function GeneratePage() {
   const router = useRouter()
@@ -20,8 +25,12 @@ export default function GeneratePage() {
   const [frameworkId, setFrameworkId] = useState('')
   const [subject, setSubject] = useState('')
   const [variables, setVariables] = useState('')
+  const [mode, setMode] = useState<Mode>('subject')
+  const [books, setBooks] = useState<BookRow[]>([{ ...EMPTY_BOOK_ROW }])
   const [modalErr, setModalErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [voices, setVoices] = useState<Voice[]>([])
+  const [voiceId, setVoiceId] = useState('')
 
   const load = useCallback(async () => {
     try { setTasks(await api<GenTask[]>('/api/generate')) }
@@ -29,24 +38,53 @@ export default function GeneratePage() {
   }, [])
   useEffect(() => { load() }, [load])
 
+  const [deleting, setDeleting] = useState('')
+  async function del(id: string, subject: string) {
+    if (!confirm(`确定删除「${subject}」？将一并删除其分镜与成片文件，不可恢复。`)) return
+    setDeleting(id)
+    try { await api(`/api/generate/${id}`, { method: 'DELETE' }); await load() }
+    catch (e) { setErr((e as Error).message) }
+    finally { setDeleting('') }
+  }
+
   function openModal() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
+    setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
       if (fw[0]) setFrameworkId(fw[0].id)
     }).catch((e) => setModalErr((e as Error).message))
+    api<Voice[]>('/api/admin/voices').then(setVoices).catch(() => setVoices([]))
+  }
+
+  function updateBook(i: number, field: keyof BookRow, value: string) {
+    setBooks((prev) => prev.map((b, idx) => (idx === i ? { ...b, [field]: value } : b)))
+  }
+  function addBook() {
+    setBooks((prev) => [...prev, { ...EMPTY_BOOK_ROW }])
+  }
+  function removeBook(i: number) {
+    setBooks((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)))
   }
 
   async function submit() {
     setModalErr('')
     if (!frameworkId) { setModalErr('请选择框架'); return }
     if (!subject.trim()) { setModalErr('请填写选题'); return }
-    let vars: unknown = undefined
-    if (variables.trim()) {
+    let vars: Record<string, unknown> | undefined
+    if (mode === 'books') {
+      const cleaned = books
+        .map((b) => ({ title: b.title.trim(), author: b.author.trim(), points: b.points.trim() }))
+        .filter((b) => b.title)
+        .map((b) => ({ title: b.title, ...(b.author ? { author: b.author } : {}), ...(b.points ? { points: b.points } : {}) }))
+      if (cleaned.length === 0) { setModalErr('手填书单模式下，请至少填写一本书的书名'); return }
+      vars = { books: cleaned }
+    } else if (variables.trim()) {
       try { vars = JSON.parse(variables) }
       catch { setModalErr('变量需为合法 JSON（如 {"标题":"测试书"}）'); return }
     }
+    if (voiceId) vars = { ...(vars ?? {}), voiceId }
     setBusy(true)
     try {
       const r = await api<{ id: string }>('/api/generate', { body: { frameworkId, subject: subject.trim(), variables: vars } })
@@ -69,6 +107,7 @@ export default function GeneratePage() {
               <th className="px-4 py-3 font-medium">框架</th>
               <th className="px-4 py-3 font-medium">状态</th>
               <th className="px-4 py-3 font-medium">创建时间</th>
+              <th className="px-4 py-3 font-medium text-right">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -80,19 +119,25 @@ export default function GeneratePage() {
                 <td className="px-4 py-3 text-ink2">{t.framework?.name ?? '—'}</td>
                 <td className="px-4 py-3"><GenPill status={t.status} /></td>
                 <td className="num px-4 py-3 text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</td>
+                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={() => del(t.id, t.subject)} disabled={deleting === t.id}
+                    className="text-ink3 hover:text-flame disabled:opacity-50">
+                    {deleting === t.id ? '删除中…' : '删除'}
+                  </button>
+                </td>
               </tr>
             ))}
             {tasks && tasks.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
             )}
             {!tasks && (
-              <tr><td colSpan={4} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <Modal open={open} onClose={() => !busy && setOpen(false)} title="发起生成">
+      <Modal open={open} onClose={() => !busy && setOpen(false)} title="发起生成" wide>
         <div className="space-y-4">
           <label className="block">
             <span className="eyebrow">框架</span>
@@ -108,9 +153,64 @@ export default function GeneratePage() {
             <input className="field mt-1" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="例：活下去的理由" autoFocus />
           </label>
           <label className="block">
-            <span className="eyebrow">变量（可选，JSON）</span>
-            <textarea className="field mt-1 font-mono text-xs" rows={3} value={variables} onChange={(e) => setVariables(e.target.value)} placeholder='{"标题":"测试书","账号":"@测试"}' />
+            <span className="eyebrow">音色（可选，不选则用通用音色）</span>
+            <select className="field mt-1" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+              <option value="">通用音色</option>
+              {voices.map((v) => (
+                <option key={v.id} value={v.voiceId}>{v.name}</option>
+              ))}
+            </select>
           </label>
+
+          <div className="block">
+            <span className="eyebrow">生成模式</span>
+            <div className="mt-1 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMode('subject')}
+                className={mode === 'subject' ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+              >
+                选题自选（LLM 自己选书）
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('books')}
+                className={mode === 'books' ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+              >
+                手填书单
+              </button>
+            </div>
+          </div>
+
+          {mode === 'books' ? (
+            <div className="block space-y-2">
+              <span className="eyebrow">书单（书名 / 作者 / 要点，逐本填写）</span>
+              <div className="space-y-2">
+                {books.map((b, i) => (
+                  <div key={i} className="grid grid-cols-[1.1fr_0.9fr_1.3fr_auto] gap-2">
+                    <input className="field" placeholder="书名（必填）" value={b.title} onChange={(e) => updateBook(i, 'title', e.target.value)} />
+                    <input className="field" placeholder="作者（可选）" value={b.author} onChange={(e) => updateBook(i, 'author', e.target.value)} />
+                    <input className="field" placeholder="要点（可选）" value={b.points} onChange={(e) => updateBook(i, 'points', e.target.value)} />
+                    <button
+                      type="button"
+                      onClick={() => removeBook(i)}
+                      disabled={books.length === 1}
+                      className="btn-ghost px-2 text-xs disabled:opacity-40"
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={addBook} className="btn-ghost px-3 py-1 text-xs">+ 添加一本书</button>
+            </div>
+          ) : (
+            <label className="block">
+              <span className="eyebrow">变量（可选，JSON）</span>
+              <textarea className="field mt-1 font-mono text-xs" rows={3} value={variables} onChange={(e) => setVariables(e.target.value)} placeholder='{"标题":"测试书","账号":"@测试"}' />
+            </label>
+          )}
+
           {modalErr && <p className="pill pill-bad">{modalErr}</p>}
           <div className="flex justify-end gap-2">
             <button onClick={() => setOpen(false)} disabled={busy} className="btn-ghost px-4">取消</button>

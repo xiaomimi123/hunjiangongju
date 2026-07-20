@@ -1,4 +1,6 @@
-import { prisma, llmComplete, setSourceStatus } from '@mixcut/db'
+import { prisma, llmComplete, setSourceStatus, deriveCharBudget, MOCK_VISION_STYLE, derivePace, getCapabilityConfig, isMockMode } from '@mixcut/db'
+import { urlToAbs } from '../paths'
+import { extractStyleFromVideo } from './extractStyle'
 
 /** 已知行业标签，用于从 LLM 输出里做简单启发式命中 */
 const INDUSTRY_LABELS = ['书单号', '好物推荐', '情感语录', '知识科普'] as const
@@ -13,6 +15,43 @@ function parseIndustry(text: string): string {
     /* 解析失败静默兜底 */
   }
   return '书单号'
+}
+
+/** 书名号后紧邻的作者标记：`/著`、`著`、`作者：`、`作者:`、`作者是` 等 */
+const AUTHOR_NEAR_TITLE_RE = /^[\s，,、]*([一-龥·A-Za-z.\s]{2,20}?)\s*(?:\/\s*著|著)/
+const AUTHOR_MARKER_RE = /作者[是：:]\s*([一-龥·A-Za-z.\s]{2,20}?)[，,。\s]/
+
+/**
+ * 纯正则从转写全文中识别书目（书名/作者），供「书单号」框架落地展示。
+ * 无 LLM、无 DB 依赖，确定性输出，可单元测试。
+ * - 书名：`《([^》]+)》`
+ * - 作者：优先取书名后紧跟的 `/著`｜`著` 前缀词；否则在书名后一段窗口内找「作者：/作者是」标记。
+ * - 按书名去重，保留首次出现顺序。
+ */
+export function extractBooks(transcript: string): { title: string; author?: string }[] {
+  const results: { title: string; author?: string }[] = []
+  const seen = new Set<string>()
+  const titleRe = /《([^》]+)》/g
+  let match: RegExpExecArray | null
+  while ((match = titleRe.exec(transcript)) !== null) {
+    const title = match[1].trim()
+    if (!title || seen.has(title)) continue
+
+    const after = transcript.slice(match.index + match[0].length, match.index + match[0].length + 40)
+    let author: string | undefined
+
+    const nearMatch = AUTHOR_NEAR_TITLE_RE.exec(after)
+    if (nearMatch) {
+      author = nearMatch[1].trim()
+    } else {
+      const markerMatch = AUTHOR_MARKER_RE.exec(after)
+      if (markerMatch) author = markerMatch[1].trim()
+    }
+
+    seen.add(title)
+    results.push(author ? { title, author } : { title })
+  }
+  return results
 }
 
 /**
@@ -80,10 +119,54 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
   const industryCategory = parseIndustry(llmOut ?? '')
 
   // 阈值估算（代码侧，spec §8，从参考视频节奏反推，非 LLM）
-  const maxLines = segCount + 2
   const textLen = Array.from(fullText).length
-  const maxTotalChars = textLen > 0 ? Math.min(600, Math.max(120, textLen)) : 220
-  const imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
+  const { maxLines, maxTotalChars } = deriveCharBudget(segCount, textLen)
+
+  // 源视频画风识别（qwen-vl 抽帧识别，见 extractStyle.ts）：识别成功则用真实画风替换默认值；
+  // extractStyleFromVideo 在 vision 能力 mock/未启用/识别失败时统一返回 MOCK_VISION_STYLE 这个哨兵值，
+  // 借此区分「拿到真实识别结果」与「兜底」——兜底时保留下面的历史默认（水彩插画），拆解绝不因此中断。
+  let imageStylePrompt = '治愈系水彩插画，暖色调，柔和光线，统一画风'
+  let visualStyleType = 'ai_illustration'
+  let visionBooks: { title: string; author?: string }[] = []
+  let visionDegraded = true // 默认视为降级；识别到真实画风才置 false
+  if (source?.videoFileUrl) {
+    const videoAbs = urlToAbs(source.videoFileUrl)
+    const { style, books: vb } = await extractStyleFromVideo(sourceVideoId, videoAbs)
+    if (style !== MOCK_VISION_STYLE) {
+      imageStylePrompt = style.imageStylePrompt
+      visualStyleType = style.visualStyleType
+      visionDegraded = false
+    }
+    visionBooks = vb
+  }
+
+  // 书目（改进2）：书名是画面上的字、口播里没有 → 优先用 vision OCR 结果，识别不到才回退口播正则。
+  const books = visionBooks.length > 0 ? visionBooks : extractBooks(fullText)
+
+  // 降级检测（改进1）：ASR 或 vision 走 mock 时，转写/画风为占位，框架内容不可信 → 明确标注，
+  // 避免"静默造假框架"让用户以为拆解成功了。
+  const asrDegraded = isMockMode(await getCapabilityConfig('asr'))
+  const degradedNote =
+    asrDegraded || visionDegraded
+      ? `⚠️ 拆解降级：${[asrDegraded ? 'ASR 转写为占位' : '', visionDegraded ? '画风未识别(用默认水彩)' : ''].filter(Boolean).join('、')}。内容不可信，请启用 ASR/vision（需百炼能访问到源文件）后重新拆解。`
+      : null
+
+  // 源节奏（Task4）：句时间戳 + 场景切点 → 源均段时长/段数，供 alignCaptions 生成 bodyTimings 时对齐节奏。
+  // 本地 ASR 若只有占位/零时间戳，derivePace 会优雅降级为 avgSegMs=0（下游 applyPace 视为「无源节奏」不做调整）。
+  const sentenceSpans = Array.isArray(transcript.sentences)
+    ? (transcript.sentences as unknown[])
+        .map((s) => s as { startMs?: number; endMs?: number })
+        .filter((s) => typeof s.startMs === 'number' && typeof s.endMs === 'number')
+        .map((s) => ({ startMs: s.startMs as number, endMs: s.endMs as number }))
+    : []
+  const pace = derivePace(sentenceSpans, sceneCut?.cutPointsMs ?? [])
+
+  const overlayTemplate = {
+    title_card: '{{标题}} {{副标题}}',
+    watermark: '{{账号}}',
+    ...(books.length > 0 ? { books } : {}),
+    ...(pace.avgSegMs > 0 ? { pace } : {}),
+  }
 
   await prisma.copyFramework.create({
     data: {
@@ -95,9 +178,10 @@ async function extractFrameworkInner(sourceVideoId: string): Promise<void> {
       maxLines,
       maxTotalChars,
       imageStylePrompt,
-      overlayTemplate: { title_card: '{{标题}} {{副标题}}', watermark: '{{账号}}' },
+      overlayTemplate,
       renderTemplate: 'booklist',
-      visualStyleType: 'ai_illustration',
+      visualStyleType,
+      degradedNote,
       createdBy: source?.createdBy ?? null,
     },
   })

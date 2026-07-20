@@ -4,7 +4,7 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
 
-type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; createdAt: string }
+type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; degradedNote?: string | null; createdAt: string }
 type FrameworkFull = {
   id: string; name: string | null; frameworkText: string; industryCategory: string | null
   imageStylePrompt: string | null; overlayTemplate: unknown; renderTemplate: string | null
@@ -32,6 +32,15 @@ export default function FrameworksPage() {
     catch (e) { setErr((e as Error).message) }
   }, [])
   useEffect(() => { load() }, [load])
+
+  const [deleting, setDeleting] = useState('')
+  async function del(id: string, name: string) {
+    if (!confirm(`确定删除框架「${name}」？将一并删除其下的生成任务及成片文件，不可恢复。`)) return
+    setDeleting(id)
+    try { await api(`/api/frameworks/${id}`, { method: 'DELETE' }); await load() }
+    catch (e) { setErr((e as Error).message) }
+    finally { setDeleting('') }
+  }
 
   async function openEdit(id: string) {
     setEditId(id); setForm(null); setModalErr('')
@@ -111,7 +120,14 @@ export default function FrameworksPage() {
           <tbody className="divide-y divide-line">
             {rows?.map((f) => (
               <tr key={f.id} className="cursor-pointer hover:bg-surface2" onClick={() => openEdit(f.id)}>
-                <td className="px-4 py-3 font-medium text-flame">{f.name ?? f.id.slice(0, 8)}</td>
+                <td className="px-4 py-3 font-medium text-flame">
+                  {f.name ?? f.id.slice(0, 8)}
+                  {f.degradedNote && (
+                    <span title={f.degradedNote} className="ml-2 cursor-help rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-600">
+                      ⚠️ 降级
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-ink2">{f.industryCategory ?? '—'}</td>
                 <td className="px-4 py-3 text-ink2">{f.visualStyleType}</td>
                 <td className="px-4 py-3">
@@ -124,7 +140,14 @@ export default function FrameworksPage() {
                   </button>
                 </td>
                 <td className="num px-4 py-3 text-ink3">{new Date(f.createdAt).toLocaleString('zh-CN')}</td>
-                <td className="px-4 py-3 text-right"><span className="btn-ghost text-xs">编辑</span></td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <span className="btn-ghost text-xs">编辑</span>
+                  <button onClick={(e) => { e.stopPropagation(); del(f.id, f.name ?? f.id.slice(0, 8)) }}
+                    disabled={deleting === f.id}
+                    className="ml-3 text-xs text-ink3 hover:text-flame disabled:opacity-50">
+                    {deleting === f.id ? '删除中…' : '删除'}
+                  </button>
+                </td>
               </tr>
             ))}
             {rows && rows.length === 0 && (

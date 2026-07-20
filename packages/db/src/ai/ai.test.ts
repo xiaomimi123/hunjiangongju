@@ -19,7 +19,7 @@ describe('AI 适配层 mock', () => {
     expect(b.subarray(8, 12).toString('ascii')).toBe('WAVE')
   })
   it('asr 返回全文与分句', async () => {
-    const r = await asrTranscribe({ audioPath: '/nonexistent-in-mock.wav' })
+    const r = await asrTranscribe({ audioUrl: 'http://nonexistent-in-mock.local/x.wav' })
     expect(r.fullText.length).toBeGreaterThan(0)
     expect(r.sentences.length).toBe(3)
     expect(r.sentences[0]).toHaveProperty('startMs')

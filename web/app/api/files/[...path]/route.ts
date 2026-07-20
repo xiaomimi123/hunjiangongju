@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { getSession } from '@/lib/auth'
 import { DATA_DIR } from '@/lib/paths'
+import { verifyAssetToken } from '@mixcut/db'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.srt': 'text/plain; charset=utf-8',
@@ -11,8 +12,16 @@ const MIME: Record<string, string> = {
 }
 
 export async function GET(req: NextRequest, { params }: { params: { path: string[] } }) {
-  if (!(await getSession())) return new Response('未登录', { status: 401 })
   const rel = params.path.join('/')
+  // 若带 sig（供外部服务/DashScope 拉取），用签名校验替代登录态；无 sig 走原有内部鉴权
+  const sig = req.nextUrl.searchParams.get('sig')
+  if (sig) {
+    if (!verifyAssetToken(rel, sig, Date.now())) {
+      return new Response('invalid or expired signature', { status: 403 })
+    }
+  } else if (!(await getSession())) {
+    return new Response('未登录', { status: 401 })
+  }
   const abs = path.normalize(path.join(DATA_DIR, rel))
   const root = path.resolve(DATA_DIR)
   if (abs !== root && !abs.startsWith(root + path.sep)) return new Response('非法路径', { status: 400 })

@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, enqueueGen } from '@mixcut/db'
+import { prisma, transitionRender, enqueueGen, timeCaptionBeats } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { renderIndexHtml, type BodyData, type BodyOverlay } from '../../templates/booklist/indexHtml'
 
@@ -48,6 +48,10 @@ interface SegmentRow {
   seqNo: number
   scriptText: string
   imageUrl: string | null
+  bookTitle?: string | null
+  bookAuthor?: string | null
+  subtitleEn?: string | null
+  captionBeats?: unknown
 }
 
 /** 组装 BodyData：segments 由 bodyTimings（按 seqNo）join generated_segments；images 1:1 */
@@ -73,12 +77,24 @@ export function buildBodyData(
     const nn = String(imageIndex + 1).padStart(2, '0')
     const rel = `media/${nn}.png`
     images.push({ seqNo: seg.seqNo, abs: urlToAbs(seg.imageUrl), rel })
+    // 字幕节拍：本段口播短句在段时间窗内快速逐拍切换（图片保持）。缺省则回退整段单条字幕。
+    const rawBeats = Array.isArray(seg.captionBeats)
+      ? (seg.captionBeats as { zh?: string; en?: string }[]).filter((b) => b && typeof b.zh === 'string' && b.zh.trim())
+      : []
+    const timedBeats =
+      rawBeats.length > 1
+        ? timeCaptionBeats(rawBeats.map((b) => ({ zh: b.zh as string, en: b.en })), t.startMs, t.endMs)
+        : []
     bodySegments.push({
       seqNo: seg.seqNo,
       startMs: t.startMs,
       endMs: t.endMs,
       subtitle: seg.scriptText,
       imageIndex,
+      ...(seg.bookTitle ? { bookTitle: seg.bookTitle } : {}),
+      ...(seg.bookAuthor ? { bookAuthor: seg.bookAuthor } : {}),
+      ...(seg.subtitleEn ? { subtitleEn: seg.subtitleEn } : {}),
+      ...(timedBeats.length ? { captionBeats: timedBeats } : {}),
     })
     imageIndex++
   }
@@ -122,6 +138,15 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
   if (vars && typeof vars === 'object' && vars.__bgmId) {
     const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
     bgmId = bgm?.id ?? null
+  }
+  // 未指定 BGM → 从曲库自动选一首（对齐竞品：无指定则配乐，不留白）。
+  // 用 genTaskId 派生的稳定索引，避免同任务重跑换曲。
+  if (!bgmId) {
+    const pool = await prisma.bgmLibrary.findMany({ where: { fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' } })
+    if (pool.length > 0) {
+      const idx = Array.from(genTaskId).reduce((a, c) => a + c.charCodeAt(0), 0) % pool.length
+      bgmId = pool[idx].id
+    }
   }
 
   // 本 job 创建 RenderTask

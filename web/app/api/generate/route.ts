@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { prisma, enqueueGen } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { normalizeVariables } from './normalize'
 
 export const POST = handler(async (req) => {
   const s = await requireRole()
@@ -18,11 +20,16 @@ export const POST = handler(async (req) => {
     if (!fw.published) throw new HttpError(403, '该框架未发布')
     autoRender = true
   }
+  const normalizedVariables = normalizeVariables(variables)
+  if (normalizedVariables && typeof normalizedVariables.voiceId === 'string') {
+    const voice = await prisma.clonedVoice.findUnique({ where: { voiceId: normalizedVariables.voiceId } })
+    if (!voice) throw new HttpError(400, '所选音色不存在')
+  }
   const task = await prisma.generationTask.create({
     data: {
       frameworkId,
       subject: subject.trim(),
-      variables: variables ?? undefined,
+      variables: (normalizedVariables as Prisma.InputJsonValue | undefined) ?? undefined,
       status: 'SCRIPT_GENERATING',
       createdBy: s.userId,
       autoRender,

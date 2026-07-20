@@ -12,6 +12,7 @@ type Framework = { id: string; name: string | null; industryCategory: string | n
 type Detail = {
   id: string; douyinShareUrl: string; videoFileUrl: string | null; status: string; createdAt: string
   transcript: Transcript; sceneCuts: SceneCut[]; frameworks: Framework[]
+  sourceAudioAssetUrl: string | null
 }
 
 export default function ExtractDetailPage() {
@@ -87,7 +88,20 @@ export default function ExtractDetailPage() {
 
       {/* 转写全文 */}
       <section className="space-y-2">
-        <p className="eyebrow">原始转写</p>
+        <div className="flex items-center justify-between">
+          <p className="eyebrow">原始转写</p>
+          {d.sourceAudioAssetUrl && (
+            <Link
+              href={`/admin/voices?${new URLSearchParams({
+                sampleAssetUrl: d.sourceAudioAssetUrl,
+                name: `拆解-${d.id.slice(0, 8)}`,
+              }).toString()}`}
+              className="btn-ghost text-xs"
+            >
+              用此声音克隆
+            </Link>
+          )}
+        </div>
         <div className="card p-4 text-sm leading-relaxed text-ink2">
           {d.transcript?.fullText
             ? <p className="whitespace-pre-wrap">{d.transcript.fullText}</p>

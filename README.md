@@ -60,9 +60,27 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml exec worker npm r
 
 ## 测试
 
+多数用例是纯函数、不需要外部依赖；但 `renderState` / `ai` / `voiceClone` / `generateScript`
+等用例会真连数据库（读能力配置、写状态日志），**没有库时这几个会失败**。跑全量前先起一个测试库：
+
 ```bash
-npm install && npx vitest run
+# 1) 起库（dev override 已把 postgres 暴露到宿主机 55433）
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+
+# 2) 建一个独立的测试库并应用迁移（与开发库 mixcut 隔离，测试用例会写数据）
+docker compose exec postgres psql -U mixcut -d postgres -c "CREATE DATABASE mixcut_test OWNER mixcut;"
+DATABASE_URL="postgresql://mixcut:mixcut@127.0.0.1:55433/mixcut_test" \
+  npx prisma migrate deploy --schema packages/db/prisma/schema.prisma
+
+# 3) 跑全量
+npm install
+DATABASE_URL="postgresql://mixcut:mixcut@127.0.0.1:55433/mixcut_test" npx vitest run
 ```
+
+只跑纯函数用例（不需要库）：`npx vitest run worker packages/db/src/captions.test.ts` 之类按路径挑选即可。
+
+> 用 `mixcut_test` 而非开发库 `mixcut`：测试会真实写入表数据；且长期使用的开发库容易与迁移记录
+> 产生漂移（曾出现列已存在但迁移未登记，导致 `migrate deploy` 报 P3018）。测试库随时可删重建。
 
 ## 生产部署
 

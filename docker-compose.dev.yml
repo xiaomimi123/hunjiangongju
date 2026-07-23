@@ -1,4 +1,8 @@
 services:
+  # 把库暴露到宿主机 55433，供宿主机直接 npx vitest run 连接（见 README「测试」）。
+  # 不用 5432 是避免和宿主机上其他项目的 postgres 抢端口。
+  postgres:
+    ports: ["55433:5432"]
   web:
     build: { context: ., dockerfile: web/Dockerfile, target: base }
     command: sh -c "npm install && (npx prisma generate --schema packages/db/prisma/schema.prisma || true) && npm run dev -w web"

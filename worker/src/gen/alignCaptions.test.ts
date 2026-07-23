@@ -1,6 +1,6 @@
 import path from 'path'
 import { describe, it, expect } from 'vitest'
-import { canonicalFullAudioPath } from './alignCaptions'
+import { canonicalFullAudioPath, hasExactTimings } from './alignCaptions'
 import { DATA_DIR } from '../paths'
 
 describe('canonicalFullAudioPath（幂等性关键：alignCaptions 音频源路径）', () => {
@@ -27,5 +27,34 @@ describe('canonicalFullAudioPath（幂等性关键：alignCaptions 音频源路�
 
   it('不同 genTaskId → 不同路径，互不干扰', () => {
     expect(canonicalFullAudioPath('a')).not.toBe(canonicalFullAudioPath('b'))
+  })
+})
+
+describe('hasExactTimings（是否跳过 silencedetect 猜段）', () => {
+  const timings = [{ seqNo: 0, startMs: 0, endMs: 3200 }]
+  const exactSeg = { captionBeats: [{ zh: '一句', startMs: 0, endMs: 1500 }] }
+
+  it('bodyTimings 已写 + 某段节拍带 startMs → true（走逐段配音的精确时长）', () => {
+    expect(hasExactTimings(timings, [exactSeg])).toBe(true)
+  })
+
+  it('只要有一段带精确 startMs 即可 → true（其余段可能是单句无节拍）', () => {
+    expect(hasExactTimings(timings, [{ captionBeats: [{ zh: '无时间' }] }, exactSeg])).toBe(true)
+  })
+
+  it('bodyTimings 缺失/空数组 → false（旧任务，仍需 silencedetect）', () => {
+    expect(hasExactTimings(undefined, [exactSeg])).toBe(false)
+    expect(hasExactTimings([], [exactSeg])).toBe(false)
+    expect(hasExactTimings('not-an-array', [exactSeg])).toBe(false)
+  })
+
+  it('有 bodyTimings 但没有任何节拍带 startMs → false（均分兜底出来的时间，不算精确）', () => {
+    expect(hasExactTimings(timings, [{ captionBeats: [{ zh: '一句' }] }])).toBe(false)
+    expect(hasExactTimings(timings, [{ captionBeats: null }])).toBe(false)
+    expect(hasExactTimings(timings, [])).toBe(false)
+  })
+
+  it('startMs 存在但类型不对（字符串）→ false，不误判为精确时长', () => {
+    expect(hasExactTimings(timings, [{ captionBeats: [{ zh: '一句', startMs: '0' }] }])).toBe(false)
   })
 })

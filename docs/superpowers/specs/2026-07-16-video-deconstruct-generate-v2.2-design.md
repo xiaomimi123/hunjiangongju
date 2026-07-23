@@ -15,7 +15,7 @@
 跑通两条流水线的完整闭环：
 
 - **拆解**：运营粘贴抖音分享链接（或手动上传视频兜底）→ 下载 → ASR 转写 → 场景检测 → LLM 提炼可复用文案框架 → 存入框架库。
-- **生成**：运营选框架 + 填新主题（subject，如书名）→ LLM 生成新文案（自动长度校验）→ 逐段文生图 → 整篇 TTS → silencedetect 对齐 → HyperFrames 渲染视觉 → FFmpeg 合成 → 质检 → 发布到学员端。
+- **生成**：运营选框架 + 填新主题（subject，如书名）→ LLM 生成新文案（自动长度校验）→ 逐段文生图 → 逐段 TTS（每段真实时长即段时间） → HyperFrames 渲染视觉 → FFmpeg 合成 → 质检 → 发布到学员端。
 
 **成功标准**：从一个手工建的框架出发，能产出一条真实的、可下载的 AI 生成竖屏视频（图片轮播 + 标题卡片 + 水印 + 字幕 + 配音 + BGM），并通过黑屏/静音/字幕越界质检；随后拆解流水线能从一条真实抖音视频自动产出一个框架供生成使用。
 
@@ -226,7 +226,7 @@ model AiCapabilityConfig {
 
 **拆解**：`download-douyin`（解析分享链→直链→下载到 `/data`；兜底：直接用已上传文件）、`transcribe`（ASR→full_text + sentences 时间戳）、`detect-scenes`（`ffmpeg scene` filter→cut_points_ms）、`extract-framework`（LLM 提炼框架文本+`industry_category`+按分段节奏估算 `max_lines`/`max_total_chars`）。
 
-**生成**：`generate-script`（LLM 按框架生成文案，内部长度校验循环见 §8）、`generate-visuals`（统一入口，按 `visual_style_type` 路由；本期只实现 `generate-image` 逐段文生图，固定风格 prompt）、`generate-tts`（整篇拼接一次性配音→full_audio_url）、`align-captions`（`ffmpeg silencedetect`→按分段数聚合→body_timings）、`render-visuals`（HyperFrames：图片+body_timings+标题卡+水印→视觉片段）、`render-video`（FFmpeg：视觉片段+配音+BGM+音效混音+响度归一化→MP4）、`run-qc`（复用）。
+**生成**：`generate-script`（LLM 按框架生成文案，内部长度校验循环见 §8）、`generate-visuals`（统一入口，按 `visual_style_type` 路由；本期只实现 `generate-image` 逐段文生图，固定风格 prompt）、`generate-tts`（**逐段**配音，ffprobe 取每段真实时长累加得 body_timings，段内节拍按字数分布写回 captionBeats.startMs/endMs，再 concat 成 full_audio_url）、`align-captions`（检测到上述精确时长则直接放行；旧任务无精确时长才回退 `ffmpeg silencedetect`→按分段数聚合→body_timings）、`render-visuals`（HyperFrames：图片+body_timings+标题卡+水印→视觉片段）、`render-video`（FFmpeg：视觉片段+配音+BGM+音效混音+响度归一化→MP4）、`run-qc`（复用）。
 
 **画面策略路由表**（`visual_style_type` → job）：`ai_illustration → generate-image`（本期）；`material_library`/`digital_human`/`chart_animation` 预留、抛"未实现"。新增行业时只加策略实现并注册，不动通用环节。
 

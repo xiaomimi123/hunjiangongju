@@ -1,5 +1,34 @@
 import { describe, it, expect } from 'vitest'
-import { readVoiceId } from './generateTts'
+import { readVoiceId, parseBeats } from './generateTts'
+
+describe('parseBeats（逐段配音的朗读文本来源）', () => {
+  it('正常节拍 → 按序取出 zh，并保留 en', () => {
+    expect(
+      parseBeats([{ zh: '第一句', en: 'first' }, { zh: '第二句' }], '整段兜底'),
+    ).toEqual([{ zh: '第一句', en: 'first' }, { zh: '第二句' }])
+  })
+
+  it('zh 首尾空白被去除；en 为空字符串时不落 en 字段', () => {
+    expect(parseBeats([{ zh: '  有空白  ', en: '   ' }], '兜底')).toEqual([{ zh: '有空白' }])
+  })
+
+  it('captionBeats 缺失/非数组/空数组 → 回退整段 scriptText，保证该段仍有一次配音', () => {
+    expect(parseBeats(undefined, '整段文案')).toEqual([{ zh: '整段文案' }])
+    expect(parseBeats(null, '整段文案')).toEqual([{ zh: '整段文案' }])
+    expect(parseBeats('not-an-array', '整段文案')).toEqual([{ zh: '整段文案' }])
+    expect(parseBeats([], '整段文案')).toEqual([{ zh: '整段文案' }])
+  })
+
+  it('混入脏节拍（zh 非字符串/空串/null）→ 过滤掉，只保留合法句', () => {
+    expect(
+      parseBeats([{ zh: '' }, { zh: 123 }, null, { en: 'no-zh' }, { zh: '唯一合法' }], '兜底'),
+    ).toEqual([{ zh: '唯一合法' }])
+  })
+
+  it('全部节拍都是脏数据 → 整体回退 scriptText（而非产出空数组）', () => {
+    expect(parseBeats([{ zh: '   ' }, { zh: null }], '整段文案')).toEqual([{ zh: '整段文案' }])
+  })
+})
 
 describe('readVoiceId', () => {
   it('variables.voiceId 为非空字符串 → 原样返回（去除首尾空白）', () => {

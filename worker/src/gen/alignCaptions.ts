@@ -52,12 +52,41 @@ function runSilenceDetect(audioAbs: string): string {
   return `${r.stdout ?? ''}\n${r.stderr ?? ''}`
 }
 
+// 逐段配音已产出精确时长（generateTts）：bodyTimings 已写、captionBeats 带 startMs →
+// 字幕与音频天然逐段对齐，无需 silencedetect 猜段，也不做源节奏 re-timing（那会破坏精确同步）。
+// 两个条件都要满足：只有 bodyTimings 说明是旧任务的均分兜底，只有 startMs 则段级窗口无从谈起。
+export function hasExactTimings(
+  bodyTimings: unknown,
+  segs: { captionBeats: unknown }[],
+): boolean {
+  if (!Array.isArray(bodyTimings) || bodyTimings.length === 0) return false
+  return segs.some(
+    (s) =>
+      Array.isArray(s.captionBeats) &&
+      (s.captionBeats as { startMs?: unknown }[]).some((b) => typeof b?.startMs === 'number'),
+  )
+}
+
 export async function alignCaptions(genTaskId: string): Promise<void> {
   const task = await prisma.generationTask.findUniqueOrThrow({ where: { id: genTaskId } })
   if (!task.fullAudioUrl) throw new Error(`generation_task ${genTaskId} 缺少 fullAudioUrl`)
 
   const N = await prisma.generatedSegment.count({ where: { generationTaskId: genTaskId } })
   if (N < 1) throw new Error(`generation_task ${genTaskId} 无 generated_segments`)
+
+  const beatSegs = await prisma.generatedSegment.findMany({
+    where: { generationTaskId: genTaskId },
+    select: { captionBeats: true },
+  })
+  if (hasExactTimings(task.bodyTimings, beatSegs)) {
+    console.log(`[gen] align-captions ${genTaskId}: 采用逐句配音精确时长，跳过 silencedetect`)
+    await setGenerationStatus(genTaskId, 'ASSET_READY')
+    if (task.autoRender) {
+      await setGenerationStatus(genTaskId, 'VISUAL_RENDERING')
+      await enqueueGen('render-visuals', { genTaskId })
+    }
+    return
+  }
 
   const audioAbs = canonicalFullAudioPath(genTaskId)
   const durationMs = probeDurationMs(audioAbs)

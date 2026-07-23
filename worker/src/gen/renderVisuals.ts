@@ -79,10 +79,16 @@ export function buildBodyData(
     images.push({ seqNo: seg.seqNo, abs: urlToAbs(seg.imageUrl), rel })
     // 字幕节拍：本段口播短句在段时间窗内快速逐拍切换（图片保持）。缺省则回退整段单条字幕。
     const rawBeats = Array.isArray(seg.captionBeats)
-      ? (seg.captionBeats as { zh?: string; en?: string }[]).filter((b) => b && typeof b.zh === 'string' && b.zh.trim())
+      ? (seg.captionBeats as { zh?: string; en?: string; startMs?: number; endMs?: number }[]).filter(
+          (b) => b && typeof b.zh === 'string' && b.zh.trim(),
+        )
       : []
-    const timedBeats =
-      rawBeats.length > 1
+    // generateTts 逐句配音已写入精确 startMs/endMs → 直接采用（字幕=真实音频时长，逐句对齐）；
+    // 旧任务无精确时长时才回退按字数在段窗内均分。
+    const hasExactBeats = rawBeats.length > 0 && rawBeats.every((b) => typeof b.startMs === 'number' && typeof b.endMs === 'number')
+    const timedBeats = hasExactBeats
+      ? rawBeats.map((b) => ({ zh: b.zh as string, en: b.en, startMs: b.startMs as number, endMs: b.endMs as number }))
+      : rawBeats.length > 1
         ? timeCaptionBeats(rawBeats.map((b) => ({ zh: b.zh as string, en: b.en })), t.startMs, t.endMs)
         : []
     bodySegments.push({

@@ -1,5 +1,5 @@
 // 运镜库 + 转场库。全部产出字面量 GSAP tween 字符串（seek-safe，无 function-based 值）。
-import { sec, esc } from './util'
+import { sec, esc } from './util.js'
 
 export type MoveId = 'push-in' | 'pull-back' | 'pan-right' | 'pan-left' | 'drift-up' | 'tilt-settle'
 export const MOVES: MoveId[] = ['push-in', 'pull-back', 'pan-right', 'pan-left', 'drift-up', 'tilt-settle']

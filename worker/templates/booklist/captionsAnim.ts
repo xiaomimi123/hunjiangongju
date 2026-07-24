@@ -1,5 +1,5 @@
 // 字幕节拍入场库。每拍一个 .capN 单元；入场型按 index 轮换。全部 seek-safe。
-import { esc, sec } from './util'
+import { esc, sec } from './util.js'
 
 export type EntranceId = 'fade-up' | 'mask-reveal' | 'char-stagger' | 'slide-in'
 // char-stagger 的无头 seek 兼容性由集成验证（Task 8）确认；若失效从此数组移除即完成降级。

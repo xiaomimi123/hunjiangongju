@@ -1,6 +1,6 @@
 // 结构 CSS（引用 theme 的 CSS 变量）与 HTML 片段构造。美术 token 全部来自 var(--...)。
-import { esc } from './util'
-import { hasGrain, type PresetId } from './theme'
+import { esc } from './util.js'
+import { hasGrain, type PresetId } from './theme.js'
 
 export function baseCss(_preset: PresetId): string {
   return `    * { margin: 0; padding: 0; box-sizing: border-box; }

@@ -37,14 +37,6 @@ export function moveTweens(move: MoveId, n: number, startMs: number, endMs: numb
   }
 }
 
-/** 字幕首拍咬合：段起拍处对 .sN .photo 叠 0.12s scale 微脉冲，制造节奏重音。 */
-export function beatAccent(n: number, atMs: number): string {
-  const at = sec(atMs)
-  return (
-    `  tl.to('.s${n} .photo', { scale: '+=0.012', duration: 0.12, ease: 'power2.out', yoyo: true, repeat: 1 }, ${at});`
-  )
-}
-
 export type TransId = 'crossfade' | 'wipe' | 'shard' | 'glide-push' | 'blur-dissolve'
 export const TRANS: TransId[] = ['crossfade', 'wipe', 'shard', 'glide-push', 'blur-dissolve']
 

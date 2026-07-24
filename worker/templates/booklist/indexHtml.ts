@@ -2,7 +2,7 @@
 // 所有特效叠在既有 startMs/endMs 之上，不新增时长；契约见 docs/superpowers/specs 2026-07-24。
 import { sec } from './util.js'
 import { selectPreset, seedInt, rootVarsCss } from './theme.js'
-import { pickMove, moveTweens, beatAccent, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
+import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
 import { pickEntrance, captionUnit } from './captionsAnim.js'
 import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml } from './layout.js'
 
@@ -81,8 +81,6 @@ export function renderIndexHtml(data: BodyData): string {
     } else {
       motionLines.push(transTweens(transForBoundary[i] as ReturnType<typeof pickTrans>, n, s.startMs))
     }
-    // 首拍咬合重音（有节拍才叠；无节拍段落起点=段 startMs）
-    motionLines.push(beatAccent(n, s.startMs))
     // 末段结尾定格暗角（时长=段长，不外溢）
     if (isLast) {
       const segLenSec = Math.max(0.1, sec(s.endMs - s.startMs))

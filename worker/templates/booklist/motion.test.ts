@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MOVES, pickMove, moveTweens, beatAccent, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion'
+import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion'
 
 describe('pickMove', () => {
   it('确定性、相邻 seqNo 不撞招', () => {
@@ -29,15 +29,6 @@ describe('moveTweens', () => {
       expect(out).toContain(".s1 .photo'")
       expect(out).toContain('duration:')
     }
-  })
-})
-
-describe('beatAccent', () => {
-  it('在给定秒处对 .sN .photo 叠短脉冲', () => {
-    const out = beatAccent(2, 2000)
-    expect(out).toContain(".s2 .photo'")
-    expect(out).toContain(', 2)')
-    expect(out).toContain('duration: 0.12')
   })
 })
 

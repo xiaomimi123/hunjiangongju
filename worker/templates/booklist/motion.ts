@@ -1,5 +1,5 @@
 // 运镜库 + 转场库。全部产出字面量 GSAP tween 字符串（seek-safe，无 function-based 值）。
-import { sec } from './util'
+import { sec, esc } from './util'
 
 export type MoveId = 'push-in' | 'pull-back' | 'pan-right' | 'pan-left' | 'drift-up' | 'tilt-settle'
 export const MOVES: MoveId[] = ['push-in', 'pull-back', 'pan-right', 'pan-left', 'drift-up', 'tilt-settle']
@@ -43,4 +43,109 @@ export function beatAccent(n: number, atMs: number): string {
   return (
     `  tl.to('.s${n} .photo', { scale: '+=0.012', duration: 0.12, ease: 'power2.out', yoyo: true, repeat: 1 }, ${at});`
   )
+}
+
+export type TransId = 'crossfade' | 'wipe' | 'shard' | 'glide-push' | 'blur-dissolve'
+export const TRANS: TransId[] = ['crossfade', 'wipe', 'shard', 'glide-push', 'blur-dissolve']
+
+export function pickTrans(seqNo: number, offset: number): TransId {
+  return TRANS[(((seqNo + offset) % TRANS.length) + TRANS.length) % TRANS.length]
+}
+
+const W = 0.72 // crossfade 窗口秒数（所有转场共用，不占额外时长）
+
+/** 进入场景 n（上一场景 n-1）的转场，全部落在 boundarySec 起的 0.72s 窗内。 */
+export function transTweens(trans: TransId, n: number, boundaryMs: number): string {
+  const b = sec(boundaryMs)
+  const nw = `'.s${n}'`
+  const pv = `'.s${n - 1}'`
+  const lines: string[] = []
+  switch (trans) {
+    case 'crossfade':
+      lines.push(`  tl.fromTo(${nw}, { opacity: 0 }, { opacity: 1, duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.to(${pv}, { opacity: 0, duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      break
+    case 'wipe':
+      lines.push(`  tl.set(${nw}, { opacity: 1 }, ${b});`)
+      lines.push(`  tl.fromTo(${nw}, { clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)', duration: ${W}, ease: 'power2.inOut' }, ${b});`)
+      lines.push(`  tl.set(${pv}, { opacity: 0 }, ${Math.round((b + W) * 1000) / 1000});`)
+      break
+    case 'shard':
+      lines.push(`  tl.fromTo(${nw}, { opacity: 0 }, { opacity: 1, duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.set(${pv}, { opacity: 0 }, ${b});`)
+      lines.push(shardTransTweens(n, boundaryMs))
+      break
+    case 'glide-push':
+      lines.push(`  tl.set(${nw}, { opacity: 1 }, ${b});`)
+      lines.push(`  tl.fromTo(${nw}, { xPercent: 100 }, { xPercent: 0, duration: ${W}, ease: 'power3.out' }, ${b});`)
+      lines.push(`  tl.to(${pv}, { xPercent: -40, opacity: 0, duration: ${W}, ease: 'power3.out' }, ${b});`)
+      break
+    case 'blur-dissolve':
+      lines.push(`  tl.fromTo(${nw}, { opacity: 0, filter: 'blur(18px)' }, { opacity: 1, filter: 'blur(0px)', duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.to(${pv}, { opacity: 0, filter: 'blur(18px)', duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      break
+  }
+  return lines.join('\n')
+}
+
+/**
+ * 碎片网格：把一张图切成 cols×rows 个 .shard 绝对定位块，每块用负偏移背景显示自己那格。
+ * startScattered=true 时把「打散」初始 transform/opacity 烘焙进内联（GSAP 只 to 归位，seek-safe）。
+ */
+export function shardGrid(opts: {
+  containerClass: string
+  imgSrc: string
+  cols: number
+  rows: number
+  width: number
+  height: number
+  startScattered?: boolean
+}): string {
+  const { containerClass, imgSrc, cols, rows, width, height, startScattered } = opts
+  const cellW = width / cols
+  const cellH = height / rows
+  const shards: string[] = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c
+      const left = Math.round(c * cellW)
+      const top = Math.round(r * cellH)
+      const w = Math.round(cellW) + 1
+      const h = Math.round(cellH) + 1
+      let scatter = ''
+      if (startScattered) {
+        const dx = Math.round(Math.sin(idx * 1.7) * 240 + (idx % 2 === 0 ? 70 : -70))
+        const dy = Math.round(Math.cos(idx * 2.1) * 200 - 30)
+        const dr = Math.round(Math.sin(idx * 3.3) * 55)
+        scatter = `transform:translate(${dx}px,${dy}px) rotate(${dr}deg) scale(1.15);opacity:0.15;`
+      }
+      shards.push(
+        `      <div class="shard" style="left:${left}px;top:${top}px;width:${w}px;height:${h}px;` +
+          `background-image:url('${esc(imgSrc)}');background-size:${width}px ${height}px;` +
+          `background-position:-${left}px -${top}px;${scatter}"></div>`,
+      )
+    }
+  }
+  return `    <div class="${containerClass}" data-layout-ignore>\n${shards.join('\n')}\n    </div>`
+}
+
+/** 首场景玻璃碎片开场：t=0 起碎片 stagger 归位，0.82s 真实图淡入接手，0.88s 碎片层淡出。 */
+export function shardOpeningTweens(): string {
+  return [
+    `  tl.set('.s1 .photo', { opacity: 0 }, 0);`,
+    `  tl.to('.s1shatter .shard', { x: 0, y: 0, rotation: 0, scale: 1, opacity: 1, duration: 0.65, ease: 'power3.out', stagger: { amount: 0.45, from: 'center' } }, 0);`,
+    `  tl.to('.s1 .photo', { opacity: 1, duration: 0.2, ease: 'sine.inOut' }, 0.82);`,
+    `  tl.to('.s1shatter', { opacity: 0, duration: 0.25, ease: 'sine.inOut' }, 0.88);`,
+  ].join('\n')
+}
+
+/** shard 转场：上一场景碎片层随 crossfade 同刻碎裂散开。 */
+export function shardTransTweens(n: number, boundaryMs: number): string {
+  const b = sec(boundaryMs)
+  const hideAt = Math.round((b + W) * 1000) / 1000
+  return [
+    `  tl.set('.ts${n}', { opacity: 1 }, ${b});`,
+    `  tl.to('.ts${n} .shard', { scale: 1.3, y: -50, rotation: 12, opacity: 0, duration: 0.5, ease: 'power1.in', stagger: { amount: 0.26, from: 'edges' } }, ${b});`,
+    `  tl.set('.ts${n}', { opacity: 0 }, ${hideAt});`,
+  ].join('\n')
 }

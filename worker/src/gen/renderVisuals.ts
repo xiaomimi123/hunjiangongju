@@ -58,6 +58,7 @@ interface SegmentRow {
 export function buildBodyData(
   task: TaskWithFramework,
   segments: SegmentRow[],
+  genTaskId: string,
 ): { data: BodyData; images: { seqNo: number; abs: string; rel: string }[] } {
   const timings = Array.isArray(task.bodyTimings)
     ? (task.bodyTimings as { seqNo: number; startMs: number; endMs: number }[])
@@ -105,11 +106,19 @@ export function buildBodyData(
     imageIndex++
   }
 
+  // 风格预设：框架可在 overlayTemplate.__style 指定；seed 用 genTaskId 保证同任务稳定。
+  const ot = (task.framework.overlayTemplate && typeof task.framework.overlayTemplate === 'object'
+    ? (task.framework.overlayTemplate as Record<string, unknown>)
+    : {})
+  const style = typeof ot.__style === 'string' ? ot.__style : undefined
+
   const data: BodyData = {
     size: { width: WIDTH, height: HEIGHT },
     overlay,
     images: images.map((i) => ({ src: i.rel })),
     segments: bodySegments,
+    seed: genTaskId,
+    ...(style ? { style } : {}),
   }
   return { data, images }
 }
@@ -135,7 +144,7 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
   })
   if (segments.length === 0) throw new Error(`generation_task ${genTaskId} 无 generated_segments`)
 
-  const { data, images } = buildBodyData(task, segments)
+  const { data, images } = buildBodyData(task, segments, genTaskId)
 
   // 换 BGM：编辑页把选中的 bgmId 存在 variables.__bgmId，此处取出写入 RenderTask.bgmId
   // （render-video 会据此混入 BGM）。校验 bgm 仍存在，避免陈旧 id 触发 FK 失败。

@@ -4,7 +4,9 @@ import { sec } from './util.js'
 import { selectPreset, seedInt, rootVarsCss } from './theme.js'
 import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
 import { pickEntrance, captionUnit } from './captionsAnim.js'
-import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml } from './layout.js'
+import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml, fontFaceCss, flashCss, subtitleVarsCss } from './layout.js'
+import { flashTimeline } from './templateParams.js'
+import { openTitleHtml, openTitleTweens, flashCardsHtml, flashCardsTweens } from './flashMontage.js'
 
 export interface BodyOverlay {
   title: string
@@ -34,6 +36,11 @@ export interface BodyData {
   style?: string
   /** 稳定 seed（genTaskId），驱动预设/招式轮换的确定性 */
   seed?: string
+  /** 模板模式：flash=玻璃碎裂开场+书单快闪+叠化正片；缺省/classic=既有编排不变 */
+  template?: 'classic' | 'flash'
+  templateParams?: import('./templateParams.js').TemplateParams
+  flashCovers?: import('./flashMontage.js').FlashCover[]
+  fonts?: { family: string; url: string }[]
 }
 
 export function renderIndexHtml(data: BodyData): string {
@@ -45,6 +52,8 @@ export function renderIndexHtml(data: BodyData): string {
   const seed = data.seed ?? ''
   const preset = selectPreset(data.style, seed)
   const offset = seedInt(seed) % 5 // 轮换相位，5 与招式/转场数互质度足够
+
+  if (data.template === 'flash' && data.templateParams) return renderFlash(data, preset, offset)
 
   const imgFor = (s: BodySegment, i: number) => data.images[s.imageIndex]?.src ?? data.images[i]?.src ?? ''
 
@@ -169,5 +178,94 @@ ${allTweens}
   </script>
 </body>
 </html>
+`
+}
+
+// flash 分支：玻璃碎裂开场 + 书单快闪卡（落在第0段窗口内）+ 叠化正片长镜头 + 参数化字幕。
+// 复用 classic 的正片/字幕/书名头逻辑，仅第 0 段替换为开场+快闪；转场固定叠化。
+function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offset: number): string {
+  const { width, height } = data.size
+  const segs = [...data.segments].sort((a, b) => a.startMs - b.startMs)
+  const lastEndSec = sec(Math.max(...segs.map((s) => s.endMs)))
+  const p = data.templateParams!
+  const covers = data.flashCovers ?? []
+  const t = flashTimeline(p, segs[0].endMs, covers.length)
+  const imgFor = (s: BodySegment, i: number) => data.images[s.imageIndex]?.src ?? data.images[i]?.src ?? ''
+
+  // 场景：第0段=首图(碎裂开场底)；第1..N段=正片
+  const scenesHtml = segs.map((s, i) => sceneHtml(i + 1, imgFor(s, i))).join('\n')
+  const openingShatterHtml = p.open.shatter
+    ? shardGrid({ containerClass: 'shatter s1shatter', imgSrc: imgFor(segs[0], 0), cols: 4, rows: 5, width, height, startScattered: true })
+    : ''
+
+  // 运镜/转场：第0段特殊(开场碎裂,不推)；第1..段 轻推(或off) + 固定叠化
+  const motionLines: string[] = []
+  segs.forEach((s, i) => {
+    const n = i + 1
+    if (i === 0) {
+      motionLines.push(`  tl.set('.s1', { opacity: 1 }, 0);`)
+      if (p.open.shatter) motionLines.push(shardOpeningTweens())
+    } else {
+      if (p.body.kenBurns === 'subtle') motionLines.push(moveTweens('push-in', n, s.startMs, s.endMs, i === segs.length - 1))
+      // 固定叠化转场
+      motionLines.push(transTweens('crossfade', n, s.startMs))
+    }
+  })
+
+  // 开场标题 + 快闪卡（落在第0段窗口内）
+  const openHtml = openTitleHtml(p.open.titleText)
+  const cardsHtml = flashCardsHtml(covers, p.flash.titleFontFamily)
+  const flashTweens = [openTitleTweens(t.openEndMs), flashCardsTweens(covers, t, p.flash.bounceIn)].join('\n')
+
+  // 正片字幕：仅第1..N段（第0段视觉是快闪，不出底部字幕）
+  const capHtmlParts: string[] = []
+  const capTweenParts: string[] = []
+  let capIdx = 0
+  segs.slice(1).forEach((s) => {
+    const beats = Array.isArray(s.captionBeats) && s.captionBeats.length
+      ? s.captionBeats : [{ zh: s.subtitle, en: s.subtitleEn, startMs: s.startMs, endMs: s.endMs }]
+    for (const b of beats) {
+      capIdx++
+      const unit = captionUnit({ n: capIdx, entrance: pickEntrance(capIdx - 1, offset), zh: b.zh, en: (b as { en?: string }).en, startMs: b.startMs, endMs: b.endMs })
+      capHtmlParts.push(unit.html); capTweenParts.push(unit.tweens)
+    }
+  })
+
+  const scrim = `    <div class="scrim" data-layout-ignore></div>`
+  const decor = overlayDecorHtml(preset)
+  const watermark = watermarkHtml(data.overlay.watermark)
+  const fontsCss = fontFaceCss(data.fonts ?? [])
+  const allTweens = [motionLines.join('\n'), flashTweens, capTweenParts.join('\n')].filter(Boolean).join('\n')
+
+  return `<!doctype html>
+<html lang="zh"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=${width}, height=${height}" />
+<title>booklist flash</title>
+<style>
+${rootVarsCss(preset)}
+${subtitleVarsCss(p.body)}
+${fontsCss}
+${baseCss(preset)}
+${flashCss()}
+</style></head>
+<body>
+<main id="root" data-composition-id="main" data-start="0" data-duration="${lastEndSec}" data-width="${width}" data-height="${height}">
+${scenesHtml}
+${openingShatterHtml}
+${scrim}
+${decor}
+${openHtml}
+${cardsHtml}
+${capHtmlParts.join('\n')}
+${watermark}
+</main>
+<script src="gsap.min.js"></script>
+<script>
+  window.__timelines = window.__timelines || {};
+  var tl = gsap.timeline({ paused: true });
+${allTweens}
+  window.__timelines["main"] = tl;
+</script>
+</body></html>
 `
 }

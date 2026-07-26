@@ -1,6 +1,6 @@
 // 书单快闪：开场「今天分享的是」标题 + 逐本书封面(底图+叠书名)极速闪过。全字面量 seek-safe。
-import { esc, sec } from './util'
-import type { FlashTimeline } from './templateParams'
+import { esc, sec } from './util.js'
+import type { FlashTimeline } from './templateParams.js'
 
 export interface FlashCover { title: string; author?: string; coverSrc: string }
 

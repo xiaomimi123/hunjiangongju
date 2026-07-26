@@ -4,6 +4,8 @@ import path from 'path'
 import { prisma, transitionRender, enqueueGen, timeCaptionBeats } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { renderIndexHtml, type BodyData, type BodyOverlay } from '../../templates/booklist/indexHtml'
+import { parseTemplateParams } from '../../templates/booklist/templateParams'
+import { resolveBooks } from './generateImage'
 
 // worker/src/gen → up 2 = worker/ → templates/booklist（tsx 下 __dirname 于 CJS 可用）
 const TEMPLATE_DIR = path.join(__dirname, '..', '..', 'templates', 'booklist')
@@ -120,6 +122,27 @@ export function buildBodyData(
     seed: genTaskId,
     ...(style ? { style } : {}),
   }
+
+  const params = parseTemplateParams((task.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
+  if (params.mode === 'flash') {
+    const books = resolveBooks(task.framework.overlayTemplate, task.variables)
+    const flashCovers = books.map((b, i) => ({
+      title: b.title, ...(b.author ? { author: b.author } : {}),
+      coverSrc: `covers/${String(i + 1).padStart(2, '0')}.png`,
+    }))
+    // 书封文件加入待拷贝清单（渲染前 renderVisuals 会把 images[].abs→hf/rel）
+    books.forEach((_b, i) => {
+      const nn = String(i + 1).padStart(2, '0')
+      images.push({ seqNo: 1000 + i, abs: path.join(DATA_DIR, 'gen', genTaskId, 'covers', `${nn}.png`), rel: `covers/${nn}.png` })
+    })
+    ;(data as BodyData).template = 'flash'
+    ;(data as BodyData).templateParams = params
+    ;(data as BodyData).flashCovers = flashCovers
+    ;(data as BodyData).fonts = [
+      { family: 'flash-title', url: 'fonts/title.ttf' },
+      { family: 'subtitle', url: 'fonts/sub.otf' },
+    ]
+  }
   return { data, images }
 }
 
@@ -175,6 +198,7 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     const mediaDir = path.join(hfDir, 'media')
     await fs.rm(hfDir, { recursive: true, force: true })
     await fs.mkdir(mediaDir, { recursive: true })
+    await fs.mkdir(path.join(hfDir, 'covers'), { recursive: true })
 
     // 拷模板 package.json
     await fs.copyFile(path.join(TEMPLATE_DIR, 'package.json'), path.join(hfDir, 'package.json'))
@@ -182,6 +206,14 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     // 拷本地化的 GSAP（index.html 以相对路径 gsap.min.js 引用），离线/CN 主机可用，
     // 避免渲染时依赖外网 CDN 失败 → 静默产出无动画视频。
     await fs.copyFile(path.join(TEMPLATE_DIR, 'gsap.min.js'), path.join(hfDir, 'gsap.min.js'))
+
+    // 拷字体目录（flash 模板 @font-face 引用 fonts/title.ttf、fonts/sub.otf）：best-effort，
+    // 模板 fonts/ 缺失或为空时不应中断渲染（classic 任务本就不需要）。
+    try {
+      await fs.cp(path.join(TEMPLATE_DIR, 'fonts'), path.join(hfDir, 'fonts'), { recursive: true })
+    } catch {
+      // 忽略：目录不存在也不影响非 flash 渲染
+    }
 
     // 拷各段图片到 media/<NN>.png
     for (const img of images) {

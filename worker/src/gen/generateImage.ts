@@ -2,6 +2,24 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
+import { parseTemplateParams } from '../../templates/booklist/templateParams'
+import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
+
+// 取书单：overlayTemplate.books 优先，回退 variables.books；过滤无 title 的脏项。
+export function resolveBooks(overlayTemplate: unknown, variables: unknown): { title: string; author?: string }[] {
+  const pick = (x: unknown): { title: string; author?: string }[] => {
+    const arr = (x && typeof x === 'object' && Array.isArray((x as { books?: unknown }).books))
+      ? ((x as { books: unknown[] }).books) : []
+    return arr
+      .filter((b) => b && typeof (b as { title?: unknown }).title === 'string' && (b as { title: string }).title.trim())
+      .map((b) => {
+        const o = b as { title: string; author?: unknown }
+        return { title: o.title.trim(), ...(typeof o.author === 'string' && o.author.trim() ? { author: o.author.trim() } : {}) }
+      })
+  }
+  const fromOverlay = pick(overlayTemplate)
+  return fromOverlay.length ? fromOverlay : pick(variables)
+}
 
 export async function generateImage(genTaskId: string): Promise<void> {
   const task = await prisma.generationTask.findUniqueOrThrow({
@@ -48,6 +66,24 @@ export async function generateImage(genTaskId: string): Promise<void> {
       where: { id: seg.id },
       data: { imageUrl },
     })
+  }
+
+  // flash 模式：为书单每本书补生一张「书封底图」(无字)，供快闪叠书名用。
+  const params = parseTemplateParams((task.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
+  if (params.mode === 'flash') {
+    const books = resolveBooks(task.framework.overlayTemplate, task.variables)
+    const coversDir = path.join(dir, 'covers')
+    await fs.mkdir(coversDir, { recursive: true })
+    const styleHint = task.framework.imageStylePrompt ?? undefined
+    for (const [i, book] of books.entries()) {
+      const { prompt, negativePrompt } = buildBookCoverPrompt(book, styleHint)
+      const png = await withRetry(() => imageGenerate({ prompt, size: '720x960', negativePrompt }), {
+        attempts: 3, delayMs: 3000,
+        onRetry: (err, n) => console.warn(`[gen] book-cover ${genTaskId} #${i} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),
+      })
+      await fs.writeFile(path.join(coversDir, `${String(i + 1).padStart(2, '0')}.png`), png)
+    }
+    console.log(`[gen] generate-image ${genTaskId}: flash 书封 ${books.length} 张`)
   }
 
   await setGenerationStatus(genTaskId, 'TTS_GENERATING')

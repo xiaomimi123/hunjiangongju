@@ -152,11 +152,12 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
     const tl = flashTimeline(params, seg0EndMs, books.length)
     const gearAbs = path.join(SFX_DIR, 'gear.mp3')
     const dropAbs = path.join(SFX_DIR, 'drop.mp3')
+    // SFX 需同时满足：模板开关开启(params.audio.sfx.*) + 资源文件存在
     sfx = {
       openEndSec: tl.openEndMs / 1000,
       dropAtSec: tl.flashEndMs / 1000,
-      ...(existsSync(gearAbs) ? { gearAbs } : {}),
-      ...(existsSync(dropAbs) ? { dropAbs } : {}),
+      ...(params.audio.sfx.openGear && existsSync(gearAbs) ? { gearAbs } : {}),
+      ...(params.audio.sfx.transitionDrop && existsSync(dropAbs) ? { dropAbs } : {}),
     }
     bgmVolume = params.audio.bgmVolume
   }

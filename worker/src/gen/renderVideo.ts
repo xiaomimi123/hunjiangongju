@@ -1,11 +1,15 @@
 import { spawnSync } from 'child_process'
-import { promises as fs } from 'fs'
+import { promises as fs, existsSync } from 'fs'
 import path from 'path'
 import { prisma, transitionRender, buildSrt, enqueueGen } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
+import { parseTemplateParams, flashTimeline } from '../../templates/booklist/templateParams'
+import { resolveBooks } from './generateImage'
 
 const WIDTH = 720
 const HEIGHT = 960
+// worker/src/gen → up 2 = worker/ → assets/sfx（齿轮/水滴音效，Task 9 加入实际文件；缺失时静默跳过）
+const SFX_DIR = path.join(__dirname, '..', '..', 'assets', 'sfx')
 
 interface Timing {
   seqNo: number
@@ -55,17 +59,24 @@ function probeVideo(mp4Abs: string): { width: number; height: number; hasAudio: 
   return { width, height, hasAudio }
 }
 
-/** 构造 ffmpeg 参数：body 视觉 + 整篇配音（+可选 BGM）+ loudnorm，输出 final.mp4 */
+/** 构造 ffmpeg 参数：body 视觉 + 整篇配音（+可选 BGM/SFX）+ loudnorm，输出 final.mp4 */
 export function buildFfmpegArgs(opts: {
   bodyAbs: string
   audioAbs: string
   bgmAbs: string | null
   durSec: number
   outAbs: string
+  bgmVolume?: number
+  sfx?: { gearAbs?: string; dropAbs?: string; openEndSec: number; dropAtSec: number }
 }): string[] {
-  const { bodyAbs, audioAbs, bgmAbs, durSec, outAbs } = opts
+  const { bodyAbs, audioAbs, bgmAbs, durSec, outAbs, sfx } = opts
+  const bgmVol = typeof opts.bgmVolume === 'number' ? opts.bgmVolume : 0.32
   const args = ['-y', '-i', bodyAbs, '-i', audioAbs]
-  if (bgmAbs) args.push('-stream_loop', '-1', '-i', bgmAbs)
+  let idx = 2
+  let bgmIdx = -1, gearIdx = -1, dropIdx = -1
+  if (bgmAbs) { args.push('-stream_loop', '-1', '-i', bgmAbs); bgmIdx = idx++ }
+  if (sfx?.gearAbs) { args.push('-i', sfx.gearAbs); gearIdx = idx++ }
+  if (sfx?.dropAbs) { args.push('-i', sfx.dropAbs); dropIdx = idx++ }
 
   // 开场特效（ffmpeg 层，逐帧滤镜，可靠——HyperFrames 渲不出开场动画，故在合成阶段补）：
   // 前 ~1.1s 从黑淡入 + 画面由 1.12x 缓缓拉回到 1.0（电影感「揭开」）。on=输出帧号，30fps → 前 33 帧做缩放。
@@ -78,13 +89,16 @@ export function buildFfmpegArgs(opts: {
   // 动态压缩(声音更稳更"贴脸") + 极轻空间反射(故事感)。
   const VOICE_FX =
     'highpass=f=85,equalizer=f=250:width_type=q:w=1.2:g=2.5,equalizer=f=3200:width_type=q:w=1.6:g=1.5,equalizer=f=7200:width_type=q:w=2:g=-3.5,acompressor=threshold=-18dB:ratio=3:attack=20:release=200:makeup=2,aecho=0.9:0.85:18:0.10'
-  const afilter = bgmAbs
-    ? [
-        `[1:a]aresample=48000,${VOICE_FX},volume=1.0[voice]`,
-        `[2:a]atrim=0:${durSec.toFixed(3)},aresample=48000,volume=0.32[bgm]`,
-        `[voice][bgm]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95,loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`,
-      ].join(';')
-    : `[1:a]aresample=48000,${VOICE_FX},loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
+
+  const chains: string[] = [`[1:a]aresample=48000,${VOICE_FX},volume=1.0[voice]`]
+  const mixLabels = ['[voice]']
+  if (bgmIdx >= 0) { chains.push(`[${bgmIdx}:a]atrim=0:${durSec.toFixed(3)},aresample=48000,volume=${bgmVol}[bgm]`); mixLabels.push('[bgm]') }
+  if (gearIdx >= 0) { chains.push(`[${gearIdx}:a]aresample=48000,atrim=0:${(sfx!.openEndSec).toFixed(3)},volume=0.7[gear]`); mixLabels.push('[gear]') }
+  if (dropIdx >= 0) { chains.push(`[${dropIdx}:a]aresample=48000,adelay=${Math.round(sfx!.dropAtSec * 1000)}|${Math.round(sfx!.dropAtSec * 1000)},volume=0.6[drop]`); mixLabels.push('[drop]') }
+
+  const afilter = mixLabels.length === 1
+    ? `[1:a]aresample=48000,${VOICE_FX},loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
+    : `${chains.join(';')};${mixLabels.join('')}amix=inputs=${mixLabels.length}:duration=first:normalize=0,alimiter=limit=0.95,loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
 
   args.push(
     '-filter_complex', `${vfilter};${afilter}`,
@@ -100,7 +114,7 @@ export function buildFfmpegArgs(opts: {
 export async function renderVideo(renderTaskId: string): Promise<void> {
   const renderTask = await prisma.renderTask.findUniqueOrThrow({
     where: { id: renderTaskId },
-    include: { task: true, bgm: true },
+    include: { task: { include: { framework: true } }, bgm: true },
   })
   const genTaskId = renderTask.generationTaskId
   const genTask = renderTask.task
@@ -122,8 +136,33 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
   // BGM atrim 上界取 body / 配音 里较长者，保证覆盖整片
   const durSec = Math.max(probeDurationSec(bodyAbs), probeDurationSec(audioAbs), 1)
 
+  // bodyTimings（先于 SRT 生成算出，flash 模式的 SFX 节拍也依赖它）
+  const timings = Array.isArray(genTask.bodyTimings) ? (genTask.bodyTimings as unknown as Timing[]) : []
+  const sortedTimings = [...timings].sort((a, b) => a.startMs - b.startMs)
+
+  // flash 模板：把开场齿轮音 + 快闪→正文转场水滴音混进合成音轨；classic 模板不带 SFX（原行为）。
+  const params = parseTemplateParams(
+    (genTask.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
+  )
+  let sfx: { gearAbs?: string; dropAbs?: string; openEndSec: number; dropAtSec: number } | undefined
+  let bgmVolume: number | undefined
+  if (params.mode === 'flash') {
+    const seg0EndMs = sortedTimings[0]?.endMs ?? 0
+    const books = resolveBooks(genTask.framework.overlayTemplate, genTask.variables)
+    const tl = flashTimeline(params, seg0EndMs, books.length)
+    const gearAbs = path.join(SFX_DIR, 'gear.mp3')
+    const dropAbs = path.join(SFX_DIR, 'drop.mp3')
+    sfx = {
+      openEndSec: tl.openEndMs / 1000,
+      dropAtSec: tl.flashEndMs / 1000,
+      ...(existsSync(gearAbs) ? { gearAbs } : {}),
+      ...(existsSync(dropAbs) ? { dropAbs } : {}),
+    }
+    bgmVolume = params.audio.bgmVolume
+  }
+
   const outAbs = path.join(genDir, 'final.mp4')
-  const args = buildFfmpegArgs({ bodyAbs, audioAbs, bgmAbs, durSec, outAbs })
+  const args = buildFfmpegArgs({ bodyAbs, audioAbs, bgmAbs, durSec, outAbs, bgmVolume, sfx })
   const r = spawnSync('ffmpeg', args, { encoding: 'utf8', stdio: 'pipe' })
   if (r.status !== 0) {
     throw new Error(`ffmpeg 混音失败 (code ${r.status}): ${(r.stderr ?? r.stdout ?? '').slice(-800)}`)
@@ -138,10 +177,8 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
   if (!probed.hasAudio) throw new Error('final.mp4 缺少音轨')
 
   // 生成 SRT（bodyTimings + 各段 scriptText，按 seqNo join）
-  const timings = Array.isArray(genTask.bodyTimings) ? (genTask.bodyTimings as unknown as Timing[]) : []
   const textBySeq = new Map(segments.map((s) => [s.seqNo, s.scriptText]))
-  const srtItems = [...timings]
-    .sort((a, b) => a.startMs - b.startMs)
+  const srtItems = sortedTimings
     .map((t) => ({ text: textBySeq.get(t.seqNo) ?? '', startMs: t.startMs, endMs: t.endMs }))
   const srtAbs = path.join(genDir, 'subtitle.srt')
   await fs.writeFile(srtAbs, buildSrt(srtItems), 'utf8')

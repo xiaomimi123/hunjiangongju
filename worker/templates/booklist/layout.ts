@@ -49,8 +49,8 @@ export function baseCss(_preset: PresetId): string {
     .bh-kicker { display: inline-block; width: 46px; height: 4px; background: var(--accent); border-radius: 2px; margin-bottom: 14px; }
     .bh-title { color: var(--ink); font-size: var(--fs-book); font-weight: 800; line-height: 1.2; font-family: var(--font-title); }
     .bh-author { color: var(--accent); font-size: 26px; font-weight: 600; margin-top: 10px; }
-    .cap { position: absolute; left: 40px; right: 40px; bottom: 150px; text-align: center; opacity: 0; z-index: 15; }
-    .cap-zh { color: var(--ink); font-size: var(--fs-cap-zh); font-weight: 700; line-height: 1.4; text-shadow: 0 2px 10px rgba(0,0,0,0.8); }
+    .cap { position: absolute; left: 40px; right: 40px; bottom: var(--cap-bottom, 150px); text-align: center; opacity: 0; z-index: 15; }
+    .cap-zh { color: var(--cap-color, var(--ink)); font-size: var(--fs-cap-zh); font-weight: 700; line-height: 1.4; text-shadow: 0 2px 10px rgba(0,0,0,0.8); font-family: var(--cap-font, inherit); }
     .cap-en { color: var(--ink-dim); font-size: var(--fs-cap-en); font-style: italic; font-weight: 500; line-height: 1.3; margin-top: 8px; text-shadow: 0 2px 8px rgba(0,0,0,0.7); font-family: var(--font-en); }
     .watermark {
       position: absolute; left: 0; right: 0; bottom: 56px; text-align: center;
@@ -95,4 +95,30 @@ export function bookHeaderHtml(n: number, title: string, author?: string): strin
 export function overlayDecorHtml(preset: PresetId): string {
   const grain = hasGrain(preset) ? `\n    <div class="grain" data-layout-ignore></div>` : ''
   return `    <div class="vignette" data-layout-ignore></div>${grain}`
+}
+
+// 本地 @font-face（self-contained：字体文件随 hf 项目拷贝，相对路径引用；缺文件时浏览器回退系统字体）
+export function fontFaceCss(fonts: { family: string; url: string }[]): string {
+  if (!fonts.length) return ''
+  return fonts
+    .map((f) => `    @font-face { font-family: '${f.family}'; src: url('${f.url}'); font-display: swap; }`)
+    .join('\n')
+}
+
+// 快闪结构 CSS（开场标题 + 书封卡：满屏封面底图 + 居中大书名）
+export function flashCss(): string {
+  return `    .flash-open { position:absolute; top:44%; left:0; right:0; text-align:center; z-index:22; opacity:0; padding:0 40px; text-shadow:0 2px 14px rgba(0,0,0,.7); }
+    .flash-open .fo-kicker { display:inline-block; width:54px; height:4px; background:var(--accent); border-radius:2px; margin-bottom:16px; }
+    .flash-open .fo-title { color:var(--ink); font-size:56px; font-weight:800; font-family:var(--font-title); line-height:1.2; }
+    .flashcard { position:absolute; inset:0; z-index:18; opacity:0; overflow:hidden; }
+    .flashcard .fc-cover { position:absolute; inset:0; background-size:cover; background-position:center; }
+    .flashcard .fc-title { position:absolute; left:40px; right:40px; top:50%; transform:translateY(-50%); text-align:center; color:#fff; font-size:60px; font-weight:800; line-height:1.15; text-shadow:0 3px 18px rgba(0,0,0,.85); }
+    .flashcard .fc-author { position:absolute; left:0; right:0; top:62%; text-align:center; color:var(--accent); font-size:28px; font-weight:600; text-shadow:0 2px 10px rgba(0,0,0,.8); }`
+}
+
+// 用参数覆盖字幕相关 CSS 变量（注入到 :root 之后，优先级更高的第二个 :root）
+export function subtitleVarsCss(body: { subtitleColor: string; subtitlePosY: number; subtitleFontFamily: string }): string {
+  // subtitlePosY: 0..1 归一化(0.78≈下三分) → bottom = (1 - posY) * 960
+  const bottom = Math.round((1 - body.subtitlePosY) * 960)
+  return `    :root { --cap-color: ${body.subtitleColor}; --cap-bottom: ${bottom}px; --cap-font: '${body.subtitleFontFamily}', var(--font-body); }`
 }

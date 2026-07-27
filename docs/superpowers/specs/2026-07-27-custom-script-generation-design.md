@@ -101,6 +101,14 @@
 - imitate 仍可能偏离风格 → 靠参考 few-shot + STYLE_RULES 收敛，必要时再调。
 - 书名标题在 flash vs classic 两模板的显示位置需各自验收。
 
+## 实测结论（2026-07-28，本地 manual 模式验证）
+本地对用户「活下去的理由」那段文案跑 manual 模式，`generated_segments` 结果：
+- 切成 **4 段分镜**（按句号切；句内逗号保留）。
+- 每段 `script_text` **逐字等于用户文案**，无"模拟文案"——证实 **manual 完全跳过 LLM**。
+- 每段 `book_title = 活下去的理由`——per-gen 书名生效。
+（验证脚本因本地 redis 曾 OOM 退出，末步 enqueue 卡重连；段在 enqueue 前已建，逻辑不受影响，
+生产 redis 正常。）manual 核心保证成立：文案你给什么、成片就是什么。
+
 ## 后续（本期不做）
 - 逐张图手动指定/上传。
 - 文案+配图的可视化逐条编辑（重生成单段已存在）。

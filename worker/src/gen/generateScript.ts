@@ -157,6 +157,35 @@ export function buildTranslatePrompt(zh: string): string {
   ].join('\n')
 }
 
+/**
+ * 纯函数：根据参考文案拼装仿写提示词。
+ * 指示 LLM 仿照参考文案的语气、句式、情感浓度与第二人称口吻，就同一主题原创改写一条新文案。
+ * 复用 STYLE_RULES（包括禁 CTA 条款）。
+ */
+export function buildImitatePrompt(args: {
+  reference: string
+  subject: string
+  framework: { frameworkText: string; segCount: number; maxLines: number; maxTotalChars: number }
+}): string {
+  const { reference, subject, framework } = args
+  const { frameworkText, segCount, maxLines, maxTotalChars } = framework
+  return [
+    '你是一名书单号短视频文案写手。请【仿照】下面这段【参考文案】的语气、句式、情感浓度与第二人称口吻，就同一主题原创改写一条新文案。',
+    '',
+    `参考文案（模仿其风格与节奏，不要照抄内容）：\n${reference}`,
+    `主题：${subject}`,
+    `文案框架：\n${frameworkText}`,
+    '',
+    '要求：',
+    `1. 分成约 ${segCount} 段，每句单独一行；第二人称口吻，围绕一个核心主题贯穿，不逐本介绍、不讲故事情节。`,
+    '2. 只输出文案正文，不要编号、不要标题、不要任何解释说明。',
+    '3. 必须原创改写，严禁照抄参考文案或框架示例。',
+    `4. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+    '',
+    STYLE_RULES,
+  ].join('\n')
+}
+
 // mock 模式固定定长占位英文字幕；translateLine 的 mock 分支自带该 fixture，
 // 绝不经由 llmComplete 的通用 mock（那是无关的固定中文文案，不适合充当"翻译结果"）。
 const MOCK_SUBTITLE_EN = 'This is a mock English subtitle placeholder.'

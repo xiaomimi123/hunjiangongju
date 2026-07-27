@@ -9,6 +9,7 @@ import {
   getCapabilityConfig,
   isMockMode,
 } from '@mixcut/db'
+import { splitScriptToSegments } from './splitScript'
 
 const MAX_ATTEMPTS = 3
 
@@ -186,6 +187,22 @@ export function buildImitatePrompt(args: {
   ].join('\n')
 }
 
+export function readScriptMode(variables: unknown): 'auto' | 'manual' | 'imitate' {
+  const m = variables && typeof variables === 'object' && !Array.isArray(variables)
+    ? (variables as Record<string, unknown>).scriptMode : undefined
+  return m === 'manual' || m === 'imitate' ? m : 'auto'
+}
+export function readCustomScript(variables: unknown): string {
+  const v = variables && typeof variables === 'object' && !Array.isArray(variables)
+    ? (variables as Record<string, unknown>).customScript : undefined
+  return typeof v === 'string' ? v : ''
+}
+export function readBookTitle(variables: unknown): string | undefined {
+  const v = variables && typeof variables === 'object' && !Array.isArray(variables)
+    ? (variables as Record<string, unknown>).bookTitle : undefined
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+}
+
 // mock 模式固定定长占位英文字幕；translateLine 的 mock 分支自带该 fixture，
 // 绝不经由 llmComplete 的通用 mock（那是无关的固定中文文案，不适合充当"翻译结果"）。
 const MOCK_SUBTITLE_EN = 'This is a mock English subtitle placeholder.'
@@ -230,46 +247,60 @@ export async function generateScript(genTaskId: string): Promise<void> {
       ? `\n可用变量（JSON）：${JSON.stringify(task.variables)}`
       : ''
 
-  const basePrompt = buildScriptPrompt({
-    mode,
-    subject: task.subject,
-    books,
-    framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars },
-    variablesText,
-  })
+  const scriptMode = readScriptMode(task.variables)
+  const perGenBookTitle = readBookTitle(task.variables)
 
-  let prompt = basePrompt
-  let lastErrors: string[] = []
-  let lastClean: string[] = []
   let clean: string[] | null = null
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const raw = await llmComplete({ prompt, maxTokens: 1200 })
-    const lines = raw.split('\n')
-    const result = validateScript(lines, maxLines, maxTotalChars)
-    lastClean = result.clean
-
-    if (result.errors.length === 0) {
-      clean = result.clean
-      break
-    }
-
-    lastErrors = result.errors
-    // 追加压缩指令后重试
-    prompt = `${basePrompt}\n\n上一次生成过长（${result.errors.join('；')}），请压缩到 ${maxLines} 行 / ${maxTotalChars} 字以内重写。`
-  }
-
-  if (!clean) {
-    // 兜底：多次重试仍略超预算（真实 books 模式书评常见）→ 整行裁剪到预算内，不硬失败。
-    if (lastClean.length === 0) {
+  if (scriptMode === 'manual') {
+    // 手动：直接切分用户文案，跳过 LLM / validate / 重试
+    clean = splitScriptToSegments(readCustomScript(task.variables))
+    if (clean.length === 0) {
       await setGenerationStatus(genTaskId, 'FAILED')
-      throw new Error(`文案生成为空（已重试 ${MAX_ATTEMPTS} 次）：${lastErrors.join('；')}`)
+      throw new Error('自定义文案为空或无法切分')
     }
-    clean = trimToBudget(lastClean, maxLines, maxTotalChars)
-    console.warn(`[gen] generate-script ${genTaskId}: 超预算兜底裁剪 (${lastErrors.join('；')}) → ${clean.length} 行`)
+    // 安全上限：极端超预算仍裁剪（不硬失败）
+    clean = trimToBudget(clean, maxLines, maxTotalChars)
+  } else {
+    // imitate: 用参考仿写；auto: 现状。二者复用现有 validate/重试/兜底循环。
+    const basePrompt = scriptMode === 'imitate'
+      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars } })
+      : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText })
+
+    let prompt = basePrompt
+    let lastErrors: string[] = []
+    let lastClean: string[] = []
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const raw = await llmComplete({ prompt, maxTokens: 1200 })
+      const lines = raw.split('\n')
+      const result = validateScript(lines, maxLines, maxTotalChars)
+      lastClean = result.clean
+
+      if (result.errors.length === 0) {
+        clean = result.clean
+        break
+      }
+
+      lastErrors = result.errors
+      // 追加压缩指令后重试
+      prompt = `${basePrompt}\n\n上一次生成过长（${result.errors.join('；')}），请压缩到 ${maxLines} 行 / ${maxTotalChars} 字以内重写。`
+    }
+
+    if (!clean) {
+      // 兜底：多次重试仍略超预算（真实 books 模式书评常见）→ 整行裁剪到预算内，不硬失败。
+      if (lastClean.length === 0) {
+        await setGenerationStatus(genTaskId, 'FAILED')
+        throw new Error(`文案生成为空（已重试 ${MAX_ATTEMPTS} 次）：${lastErrors.join('；')}`)
+      }
+      clean = trimToBudget(lastClean, maxLines, maxTotalChars)
+      console.warn(`[gen] generate-script ${genTaskId}: 超预算兜底裁剪 (${lastErrors.join('；')}) → ${clean.length} 行`)
+    }
   }
 
   const assigned = assignBooksToSegments(clean, books ?? [])
+  const assignedFinal = perGenBookTitle
+    ? assigned.map((a) => ({ ...a, bookTitle: perGenBookTitle }))
+    : assigned
 
   // 每段拆成「字幕短句节拍」并逐拍中译英：图片停住、字幕短句快速跳（对齐优质书单号节奏）。
   const segments: {
@@ -281,8 +312,8 @@ export async function generateScript(genTaskId: string): Promise<void> {
     subtitleEn: string
     captionBeats: { zh: string; en: string }[]
   }[] = []
-  for (let i = 0; i < assigned.length; i++) {
-    const { scriptText, bookTitle, bookAuthor } = assigned[i]
+  for (let i = 0; i < assignedFinal.length; i++) {
+    const { scriptText, bookTitle, bookAuthor } = assignedFinal[i]
     const phrases = splitCaptionPhrases(scriptText)
     const beats: { zh: string; en: string }[] = []
     for (const zh of phrases) beats.push({ zh, en: await translateLine(zh) })

@@ -48,7 +48,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
         imageGenerate({
           prompt,
           size: '720x960',
-          negativePrompt: '文字, 字, 汉字, 字母, 单词, 书法, 标题, 字幕, 水印, text, letters, words, caption, watermark, signature',
+          negativePrompt: '人, 人物, 人脸, 人像, 手, person, people, human, face, portrait, man, woman, hands, 文字, 字, 汉字, 字母, 单词, 书法, 标题, 字幕, 水印, text, letters, words, caption, watermark, signature',
         }),
       {
         attempts: 3,

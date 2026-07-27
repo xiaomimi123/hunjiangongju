@@ -4,6 +4,7 @@
 export interface CoverPrompt { prompt: string; negativePrompt: string }
 
 const COVER_NEG =
+  '人, 人物, 人脸, 人像, person, people, human, face, portrait, ' +
   '文字, 字, 汉字, 字母, 单词, 书法, 标题, 作者名, 字幕, 水印, 条形码, ' +
   'text, letters, words, title, author, typography, caption, watermark, barcode, signature'
 

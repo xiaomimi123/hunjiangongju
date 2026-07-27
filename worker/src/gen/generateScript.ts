@@ -137,6 +137,15 @@ export type AssignedSegment = { scriptText: string; bookTitle?: string; bookAuth
  * 纯函数：结合 `allocateBookIndexes` 把书目的 title/author 落到每段文案上。
  * books 为空数组（subject 模式）时原样透传，不带 bookTitle/bookAuthor。
  */
+// 仅 auto 模式才按书单位置分配《书名》头；manual/imitate 是用户自控文案，不该被框架书目
+// 位置分配（否则单主题手动稿会出现轮换错乱的书名头）。per-gen bookTitle 仍可在其上显式覆盖。
+export function booksForAssign(
+  scriptMode: 'auto' | 'manual' | 'imitate',
+  books: BookInput[] | undefined,
+): BookInput[] {
+  return scriptMode === 'auto' ? (books ?? []) : []
+}
+
 export function assignBooksToSegments(lines: string[], books: BookInput[]): AssignedSegment[] {
   if (books.length === 0) return lines.map((scriptText) => ({ scriptText }))
   const idxs = allocateBookIndexes(lines.length, books.length)
@@ -297,7 +306,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
     }
   }
 
-  const assigned = assignBooksToSegments(clean, books ?? [])
+  const assigned = assignBooksToSegments(clean, booksForAssign(scriptMode, books))
   const assignedFinal = perGenBookTitle
     ? assigned.map((a) => ({ ...a, bookTitle: perGenBookTitle }))
     : assigned

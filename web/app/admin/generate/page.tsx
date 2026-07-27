@@ -12,6 +12,17 @@ type GenTask = { id: string; subject: string; status: string; createdAt: string;
 type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
 type Voice = { id: string; voiceId: string; name: string }
+type ScriptMode = 'auto' | 'manual' | 'imitate'
+
+const SCRIPT_MODE_OPTIONS: { value: ScriptMode; label: string }[] = [
+  { value: 'auto', label: '自动生成' },
+  { value: 'manual', label: '手动粘贴' },
+  { value: 'imitate', label: '参考仿写' },
+]
+const CUSTOM_SCRIPT_PLACEHOLDER: Record<'manual' | 'imitate', string> = {
+  manual: '粘贴你的文案，按句号/换行自动分句',
+  imitate: '粘贴参考文案，AI 照风格仿写',
+}
 
 const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
@@ -31,6 +42,9 @@ export default function GeneratePage() {
   const [busy, setBusy] = useState(false)
   const [voices, setVoices] = useState<Voice[]>([])
   const [voiceId, setVoiceId] = useState('')
+  const [scriptMode, setScriptMode] = useState<ScriptMode>('auto')
+  const [customScript, setCustomScript] = useState('')
+  const [bookTitle, setBookTitle] = useState('')
 
   const load = useCallback(async () => {
     try { setTasks(await api<GenTask[]>('/api/generate')) }
@@ -50,6 +64,7 @@ export default function GeneratePage() {
   function openModal() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
     setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
+    setScriptMode('auto'); setCustomScript(''); setBookTitle('')
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
@@ -71,7 +86,7 @@ export default function GeneratePage() {
   async function submit() {
     setModalErr('')
     if (!frameworkId) { setModalErr('请选择框架'); return }
-    if (!subject.trim()) { setModalErr('请填写选题'); return }
+    if (scriptMode === 'auto' && !subject.trim()) { setModalErr('请填写选题'); return }
     let vars: Record<string, unknown> | undefined
     if (mode === 'books') {
       const cleaned = books
@@ -85,6 +100,8 @@ export default function GeneratePage() {
       catch { setModalErr('变量需为合法 JSON（如 {"标题":"测试书"}）'); return }
     }
     if (voiceId) vars = { ...(vars ?? {}), voiceId }
+    if (scriptMode !== 'auto') vars = { ...(vars ?? {}), scriptMode, customScript }
+    if (bookTitle.trim()) vars = { ...(vars ?? {}), bookTitle: bookTitle.trim() }
     setBusy(true)
     try {
       const r = await api<{ id: string }>('/api/generate', { body: { frameworkId, subject: subject.trim(), variables: vars } })
@@ -149,9 +166,43 @@ export default function GeneratePage() {
             </select>
           </label>
           <label className="block">
-            <span className="eyebrow">选题</span>
+            <span className="eyebrow">选题{scriptMode !== 'auto' ? '（可选，留空则由文案自动推断）' : ''}</span>
             <input className="field mt-1" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="例：活下去的理由" autoFocus />
           </label>
+          <div className="block">
+            <span className="eyebrow">文案来源</span>
+            <div className="mt-1 flex gap-2">
+              {SCRIPT_MODE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setScriptMode(opt.value)}
+                  className={scriptMode === opt.value ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {scriptMode !== 'auto' && (
+            <label className="block">
+              <span className="eyebrow">{scriptMode === 'manual' ? '手动文案' : '参考文案'}</span>
+              <textarea
+                className="field mt-1"
+                rows={5}
+                value={customScript}
+                onChange={(e) => setCustomScript(e.target.value)}
+                placeholder={CUSTOM_SCRIPT_PLACEHOLDER[scriptMode]}
+              />
+            </label>
+          )}
+
+          <label className="block">
+            <span className="eyebrow">书名标题（可选）</span>
+            <input className="field mt-1" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} placeholder="例：活着" />
+          </label>
+
           <label className="block">
             <span className="eyebrow">音色（可选，不选则用通用音色）</span>
             <select className="field mt-1" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>

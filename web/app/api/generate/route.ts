@@ -11,7 +11,6 @@ export const POST = handler(async (req) => {
     throw new HttpError(400, '请求体格式错误')
   })
   if (!frameworkId || typeof frameworkId !== 'string') throw new HttpError(400, '请选择框架')
-  if (!subject || typeof subject !== 'string' || !subject.trim()) throw new HttpError(400, '选题不能为空')
   const fw = await prisma.copyFramework.findUnique({ where: { id: frameworkId } })
   if (!fw) throw new HttpError(400, '框架不存在')
   // 学员（非运营）：只能用已发布框架，自动串联渲染；运营：保留手工门禁
@@ -21,6 +20,18 @@ export const POST = handler(async (req) => {
     autoRender = true
   }
   const normalizedVariables = normalizeVariables(variables)
+  const mode = normalizedVariables?.scriptMode
+  let finalSubject = typeof subject === 'string' ? subject.trim() : ''
+  if (mode === 'manual' || mode === 'imitate') {
+    // 选题可空：用书名或文案首句兜底（满足非空约束、列表页可读）
+    if (!finalSubject) {
+      const bt = typeof normalizedVariables?.bookTitle === 'string' ? normalizedVariables.bookTitle : ''
+      const cs = typeof normalizedVariables?.customScript === 'string' ? normalizedVariables.customScript : ''
+      finalSubject = (bt || cs.split(/[。！？!?；;\n]/)[0] || '自定义文案').trim().slice(0, 40)
+    }
+  } else if (!finalSubject) {
+    throw new HttpError(400, '选题不能为空')
+  }
   if (normalizedVariables && typeof normalizedVariables.voiceId === 'string') {
     const voice = await prisma.clonedVoice.findUnique({ where: { voiceId: normalizedVariables.voiceId } })
     if (!voice) throw new HttpError(400, '所选音色不存在')
@@ -28,7 +39,7 @@ export const POST = handler(async (req) => {
   const task = await prisma.generationTask.create({
     data: {
       frameworkId,
-      subject: subject.trim(),
+      subject: finalSubject,
       variables: (normalizedVariables as Prisma.InputJsonValue | undefined) ?? undefined,
       status: 'SCRIPT_GENERATING',
       createdBy: s.userId,

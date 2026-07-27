@@ -37,5 +37,19 @@ export function normalizeVariables(variables: unknown): Record<string, unknown> 
     if (voiceId) v.voiceId = voiceId
     else delete v.voiceId
   }
+  // 文案来源：仅接受 manual/imitate，否则视为 auto（不设该字段，走全自动）。
+  const mode = v.scriptMode
+  if (mode === 'manual' || mode === 'imitate') {
+    v.scriptMode = mode
+    const cs = typeof v.customScript === 'string' ? v.customScript.trim() : ''
+    if (!cs) throw new HttpError(400, '自定义/仿写模式需要提供文案')
+    v.customScript = cs
+  } else {
+    delete v.scriptMode
+    delete v.customScript
+  }
+  const bt = typeof v.bookTitle === 'string' ? v.bookTitle.trim() : ''
+  if (bt) v.bookTitle = bt
+  else delete v.bookTitle
   return v
 }

@@ -41,3 +41,27 @@ describe('normalizeBooks', () => {
     expect(() => normalizeBooks('not-an-array')).toThrow()
   })
 })
+
+describe('normalizeVariables — 自定义文案', () => {
+  it('manual 模式：保留 scriptMode/customScript/bookTitle(trim)', () => {
+    const v = normalizeVariables({ scriptMode: 'manual', customScript: '  句一。句二。 ', bookTitle: ' 活着 ' })
+    expect(v?.scriptMode).toBe('manual')
+    expect(v?.customScript).toBe('句一。句二。')
+    expect(v?.bookTitle).toBe('活着')
+  })
+  it('imitate 模式同样要求 customScript', () => {
+    expect(() => normalizeVariables({ scriptMode: 'imitate', customScript: '   ' })).toThrow()
+  })
+  it('manual 缺 customScript → 400', () => {
+    expect(() => normalizeVariables({ scriptMode: 'manual' })).toThrow()
+  })
+  it('非法 scriptMode → 视为 auto(不设 scriptMode)，customScript 被忽略', () => {
+    const v = normalizeVariables({ scriptMode: 'weird', customScript: 'x' })
+    expect(v?.scriptMode).toBeUndefined()
+  })
+  it('auto(无 scriptMode) 不受影响', () => {
+    const v = normalizeVariables({ voiceId: 'v-1' })
+    expect(v?.scriptMode).toBeUndefined()
+    expect(v?.voiceId).toBe('v-1')
+  })
+})

@@ -103,7 +103,7 @@ export function buildFfmpegArgs(opts: {
   args.push(
     '-filter_complex', `${vfilter};${afilter}`,
     '-map', '[v]', '-map', '[a]',
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'high',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-profile:v', 'high',
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart', '-shortest',
     outAbs,

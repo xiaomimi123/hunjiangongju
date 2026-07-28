@@ -53,3 +53,23 @@ describe('renderIndexHtml — classic 回归', () => {
     expect(html).toContain('data-composition-id="main"')
   })
 })
+
+describe('renderIndexHtml — flash 常驻书名头', () => {
+  const withBook: BodyData = {
+    ...flashData,
+    segments: [
+      { seqNo: 1, startMs: 0, endMs: 4000, subtitle: '今天分享的是', imageIndex: 0, bookTitle: '活着' },
+      { seqNo: 2, startMs: 4000, endMs: 9000, subtitle: '正片一句', imageIndex: 1, bookTitle: '活着',
+        captionBeats: [{ zh: '正片一句', startMs: 4000, endMs: 9000 }] },
+    ],
+  }
+  const html = renderIndexHtml(withBook)
+  it('正片段带 bookTitle → 渲染常驻《书名》头', () => {
+    expect(html).toContain('class="book-header')
+    expect(html).toContain('《活着》')
+  })
+  it('书名头在正片开始(flashEnd)后淡入,不早于快闪窗口', () => {
+    // flashEnd = seg0.endMs = 4s；书名头 fromTo 起点应 >= 4
+    expect(html).toMatch(/\.bh1'[^\n]*opacity: 1[^\n]*, 4\)/)
+  })
+})

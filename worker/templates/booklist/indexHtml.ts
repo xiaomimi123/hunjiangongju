@@ -231,11 +231,33 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
     }
   })
 
+  // 常驻《书名》大标题：正片段(第1..N)的 bookTitle(per-gen 书名或框架书目)从正片开始(flashEnd)持续显示。
+  // 连续同书名合并为一个运行段；显示起点不早于 flashEnd，避免和开场快闪叠字。
+  const bodySegs = segs.slice(1)
+  interface FlashBookRun { title: string; author?: string; startIdx: number }
+  const bookRuns: FlashBookRun[] = []
+  bodySegs.forEach((s, i) => {
+    const title = (s.bookTitle ?? '').trim()
+    if (!title) return
+    const prev = bookRuns[bookRuns.length - 1]
+    if (!(prev && prev.title === title)) bookRuns.push({ title, author: s.bookAuthor, startIdx: i })
+  })
+  const bookHeadersHtml = bookRuns.map((r, ri) => bookHeaderHtml(ri + 1, r.title, r.author)).join('\n')
+  const bookHeaderTweens = bookRuns
+    .map((r, ri) => {
+      const n = ri + 1
+      const at = Math.max(sec(bodySegs[r.startIdx].startMs), sec(t.flashEndMs))
+      const lines = [`  tl.fromTo('.bh${n}', { opacity: 0 }, { opacity: 1, duration: 0.5, ease: 'sine.inOut' }, ${at});`]
+      if (ri > 0) lines.push(`  tl.to('.bh${ri}', { opacity: 0, duration: 0.5, ease: 'sine.inOut' }, ${at});`)
+      return lines.join('\n')
+    })
+    .join('\n')
+
   const scrim = `    <div class="scrim" data-layout-ignore></div>`
   const decor = overlayDecorHtml(preset)
   const watermark = watermarkHtml(data.overlay.watermark)
   const fontsCss = fontFaceCss(data.fonts ?? [])
-  const allTweens = [motionLines.join('\n'), flashTweens, capTweenParts.join('\n')].filter(Boolean).join('\n')
+  const allTweens = [motionLines.join('\n'), flashTweens, bookHeaderTweens, capTweenParts.join('\n')].filter(Boolean).join('\n')
 
   return `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8" />
@@ -256,6 +278,7 @@ ${scrim}
 ${decor}
 ${openHtml}
 ${cardsHtml}
+${bookHeadersHtml}
 ${capHtmlParts.join('\n')}
 ${watermark}
 </main>

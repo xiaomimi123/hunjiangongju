@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 
-type Cfg = { host: string; port: number; secure: boolean; username: string; fromAddress: string; fromName: string; enabled: boolean; hasPassword: boolean }
+type Cfg = { host: string; port: number; secure: boolean; username: string; fromAddress: string; fromName: string; enabled: boolean; hasPassword: boolean; registrationOpen: boolean }
 
 export default function SettingsPage() {
   const [cfg, setCfg] = useState<Cfg | null>(null)
@@ -50,6 +50,11 @@ export default function SettingsPage() {
           <input type="checkbox" checked={cfg.enabled} onChange={(e) => up('enabled', e.target.checked)} className="h-5 w-5" />
         </label>
         <p className="text-xs text-ink3">关闭时：注册直接可用、忘记密码不可用。开启时：注册需邮箱验证码、支持忘记密码。</p>
+        <label className="flex items-center justify-between">
+          <span className="font-medium">开放注册</span>
+          <input type="checkbox" checked={cfg.registrationOpen} onChange={(e) => up('registrationOpen', e.target.checked)} className="h-5 w-5" />
+        </label>
+        <p className="text-xs text-ink3">关闭时：登录页不显示「注册」标签，新用户无法自助注册。</p>
       </div>
 
       <div className="card grid gap-3 p-5">

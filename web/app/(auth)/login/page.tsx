@@ -112,6 +112,7 @@ function CodeRow({ code, onCode, cd, email, busy, onGet }: {
 export default function LoginPage() {
   const router = useRouter()
   const [emailEnabled, setEmailEnabled] = useState(false)
+  const [registrationOpen, setRegistrationOpen] = useState(false)
   const [view, setView] = useState<View>('login')
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
@@ -122,7 +123,11 @@ export default function LoginPage() {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => { api<{ emailEnabled: boolean }>('/api/auth/config').then((c) => setEmailEnabled(c.emailEnabled)).catch(() => {}) }, [])
+  useEffect(() => {
+    api<{ emailEnabled: boolean; registrationOpen: boolean }>('/api/auth/config')
+      .then((c) => { setEmailEnabled(c.emailEnabled); setRegistrationOpen(c.registrationOpen) })
+      .catch(() => {})
+  }, [])
   useEffect(() => { if (cd <= 0) return; const t = setTimeout(() => setCd(cd - 1), 1000); return () => clearTimeout(t) }, [cd])
 
   function clear() { setErr(''); setMsg('') }
@@ -179,7 +184,7 @@ export default function LoginPage() {
 
       {view !== 'reset' && (
         <div className="flex gap-1 rounded-2xl bg-surface2 p-1 text-sm">
-          {(['login', 'register'] as View[]).map((v) => (
+          {((registrationOpen ? ['login', 'register'] : ['login']) as View[]).map((v) => (
             <button key={v} onClick={() => switchTo(v)}
               className={`flex-1 rounded-xl py-2.5 font-medium transition ${view === v ? 'bg-surface text-ink shadow-card' : 'text-ink3'}`}>
               {v === 'login' ? '登录' : '注册'}

@@ -47,8 +47,8 @@ export default function LibraryPage() {
                 </p>
               </div>
               <div className="flex gap-2.5 text-sm">
-                {w.videoUrl && <a href={w.videoUrl} download className="btn-primary flex-1 text-center">下载 MP4</a>}
-                {w.subtitleUrl && <a href={w.subtitleUrl} download className="btn-ghost flex-1 text-center">字幕 SRT</a>}
+                {w.videoUrl && <a href={`${w.videoUrl}?download=1`} download className="btn-primary flex-1 text-center">下载 MP4</a>}
+                {w.subtitleUrl && <a href={`${w.subtitleUrl}?download=1`} download className="btn-ghost flex-1 text-center">字幕 SRT</a>}
               </div>
             </div>
           </div>

@@ -4,6 +4,7 @@ import fs from 'fs'
 import { getSession } from '@/lib/auth'
 import { DATA_DIR } from '@/lib/paths'
 import { verifyAssetToken } from '@mixcut/db'
+import { contentDispositionAttachment } from '@/lib/contentDisposition'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.srt': 'text/plain; charset=utf-8',
@@ -29,6 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
 
   const size = fs.statSync(abs).size
   const type = MIME[path.extname(abs).toLowerCase()] ?? 'application/octet-stream'
+  const download = req.nextUrl.searchParams.get('download')
   const range = req.headers.get('range')
   if (range) {
     const m = /^bytes=(\d*)-(\d*)$/.exec(range)
@@ -61,10 +63,16 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
         'Accept-Ranges': 'bytes',
         'Content-Length': String(end - start + 1),
         'Content-Type': type,
+        ...(download ? { 'Content-Disposition': contentDispositionAttachment(path.basename(abs)) } : {}),
       },
     })
   }
   return new Response(fs.createReadStream(abs) as unknown as ReadableStream, {
-    headers: { 'Content-Length': String(size), 'Content-Type': type, 'Accept-Ranges': 'bytes' },
+    headers: {
+      'Content-Length': String(size),
+      'Content-Type': type,
+      'Accept-Ranges': 'bytes',
+      ...(download ? { 'Content-Disposition': contentDispositionAttachment(path.basename(abs)) } : {}),
+    },
   })
 }

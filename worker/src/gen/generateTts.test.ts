@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readVoiceId, parseBeats } from './generateTts'
+import { readVoiceId, parseBeats, readVoice } from './generateTts'
 
 describe('parseBeats（逐段配音的朗读文本来源）', () => {
   it('正常节拍 → 按序取出 zh，并保留 en', () => {
@@ -51,5 +51,14 @@ describe('readVoiceId', () => {
 
   it('variables 含其余字段（如 books）时仍能取出 voiceId', () => {
     expect(readVoiceId({ books: [{ title: 'A' }], voiceId: 'v-1' })).toBe('v-1')
+  })
+})
+
+describe('readVoice', () => {
+  it('白名单内的 voice 原样返回，否则 undefined', () => {
+    expect(readVoice({ voice: 'Cherry' })).toBe('Cherry')
+    expect(readVoice({ voice: '乱填' })).toBeUndefined()
+    expect(readVoice({})).toBeUndefined()
+    expect(readVoice(null)).toBeUndefined()
   })
 })

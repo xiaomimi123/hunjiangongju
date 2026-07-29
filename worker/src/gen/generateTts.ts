@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats } from '@mixcut/db'
+import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
 
 // 纯函数：从 GenerationTask.variables（Json）中取出运营在生成表单里选的克隆音色 voiceId。
@@ -9,6 +9,13 @@ export function readVoiceId(variables: unknown): string | undefined {
   if (!variables || typeof variables !== 'object' || Array.isArray(variables)) return undefined
   const voiceId = (variables as Record<string, unknown>).voiceId
   return typeof voiceId === 'string' && voiceId.trim() ? voiceId.trim() : undefined
+}
+
+// 纯函数：从 GenerationTask.variables（Json）中取出运营选的普通音色 voice（白名单校验，防注入）。
+export function readVoice(variables: unknown): string | undefined {
+  if (!variables || typeof variables !== 'object' || Array.isArray(variables)) return undefined
+  const voice = (variables as Record<string, unknown>).voice
+  return isValidVoice(voice) ? voice : undefined
 }
 
 function probeDurationMs(audioAbs: string): number {
@@ -59,6 +66,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
     prisma.generatedSegment.findMany({ where: { generationTaskId: genTaskId }, orderBy: { seqNo: 'asc' } }),
   ])
   const voiceId = readVoiceId(task?.variables)
+  const voice = readVoice(task?.variables)
 
   const dir = path.join(DATA_DIR, 'gen', genTaskId)
   const clipsDir = path.join(dir, 'clips')
@@ -73,12 +81,15 @@ export async function generateTts(genTaskId: string): Promise<void> {
     const beats = parseBeats(seg.captionBeats, seg.scriptText)
     // 整段一次配音（节拍拼回整段文本朗读，保证语流自然、且只占一次限流额度）。
     const segText = beats.map((b) => b.zh).join('，')
-    const audio = await withRetry(() => ttsSynthesize({ text: segText, ...(voiceId ? { voiceId } : {}) }), {
-      attempts: 4,
-      delayMs: 4000, // 429 限流窗口较长，退避给足
-      onRetry: (err, n) =>
-        console.warn(`[gen] generate-tts ${genTaskId} 段#${i} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),
-    })
+    const audio = await withRetry(
+      () => ttsSynthesize({ text: segText, ...(voiceId ? { voiceId } : {}), ...(voice ? { voice } : {}) }),
+      {
+        attempts: 4,
+        delayMs: 4000, // 429 限流窗口较长，退避给足
+        onRetry: (err, n) =>
+          console.warn(`[gen] generate-tts ${genTaskId} 段#${i} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),
+      },
+    )
     const clipPath = path.join(clipsDir, `c${i}.wav`)
     await fs.writeFile(clipPath, audio)
     const durMs = probeDurationMs(clipPath) || 2000 // 探测失败给个兜底时长

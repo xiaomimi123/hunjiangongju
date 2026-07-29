@@ -5,6 +5,7 @@ import { HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { isEmail } from '@/lib/authcodes'
 import { emailEnabled } from '@/lib/mailer'
+import { registrationOpen } from '@/lib/registration'
 import { sendCode } from '@/lib/emailflow'
 import { setSessionCookie } from '@/lib/session'
 import { checkRate } from '@/lib/ratelimit'
@@ -14,6 +15,7 @@ export const POST = handler(async (req) => {
   const { email, password } = await req.json()
   checkRate('register-ip', clientIp(req), 20, 3600_000)
   checkRate('register', String(email ?? '').toLowerCase(), 5)
+  if (!(await registrationOpen())) throw new HttpError(403, '注册未开放')
   if (!isEmail(email)) throw new HttpError(400, '邮箱格式不正确')
   assertPassword(password)
   if (await prisma.user.findUnique({ where: { email } })) throw new HttpError(409, '该邮箱已注册')

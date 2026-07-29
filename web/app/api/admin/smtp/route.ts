@@ -11,6 +11,7 @@ export const GET = handler(async () => {
     host: row?.host ?? '', port: row?.port ?? 465, secure: row?.secure ?? true,
     username: row?.username ?? '', fromAddress: row?.fromAddress ?? '', fromName: row?.fromName ?? '东方文澜',
     enabled: row?.enabled ?? false, hasPassword: !!row?.passwordEnc,
+    registrationOpen: row?.registrationOpen ?? false,
   })
 })
 
@@ -23,6 +24,7 @@ export const PUT = handler(async (req) => {
     host: String(b.host ?? '').trim(), port: Number.isFinite(port) ? port : 465, secure: !!b.secure,
     username: String(b.username ?? '').trim(), fromAddress: String(b.fromAddress ?? '').trim(),
     fromName: String(b.fromName ?? '东方文澜').trim(), enabled: !!b.enabled,
+    registrationOpen: !!b.registrationOpen,
   }
   if (typeof b.password === 'string' && b.password.length > 0) data.passwordEnc = encrypt(b.password)
   const row = await prisma.smtpConfig.upsert({

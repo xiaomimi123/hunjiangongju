@@ -31,6 +31,7 @@ model SmtpConfig {
   fromAddress String   @default("") @map("from_address")
   fromName    String   @default("东方文澜") @map("from_name")
   enabled     Boolean  @default(false)
+  registrationOpen Boolean @default(false) @map("registration_open")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("smtp_config")

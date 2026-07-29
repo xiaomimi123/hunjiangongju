@@ -26,6 +26,14 @@ const CUSTOM_SCRIPT_PLACEHOLDER: Record<'manual' | 'imitate', string> = {
 
 const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
+// 配音音色白名单镜像（与 packages/db/src/ai/ttsVoices.ts 的 TTS_VOICES 保持一致，页面内不引入服务端代码）
+const TTS_VOICE_OPTIONS: { id: string; label: string }[] = [
+  { id: 'Cherry', label: '知性女声（Cherry）' },
+  { id: 'Serena', label: '温柔女声（Serena）' },
+  { id: 'Ethan', label: '磁性男声（Ethan）' },
+  { id: 'Chelsie', label: '清亮女声（Chelsie）' },
+]
+
 export default function GeneratePage() {
   const router = useRouter()
   const [tasks, setTasks] = useState<GenTask[] | null>(null)
@@ -45,6 +53,9 @@ export default function GeneratePage() {
   const [scriptMode, setScriptMode] = useState<ScriptMode>('auto')
   const [customScript, setCustomScript] = useState('')
   const [bookTitle, setBookTitle] = useState('')
+  const [voice, setVoice] = useState('')
+  const [previewingVoice, setPreviewingVoice] = useState('')
+  const [previewErr, setPreviewErr] = useState('')
 
   const load = useCallback(async () => {
     try { setTasks(await api<GenTask[]>('/api/generate')) }
@@ -65,6 +76,7 @@ export default function GeneratePage() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
     setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
     setScriptMode('auto'); setCustomScript(''); setBookTitle('')
+    setVoice(''); setPreviewingVoice(''); setPreviewErr('')
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
@@ -81,6 +93,32 @@ export default function GeneratePage() {
   }
   function removeBook(i: number) {
     setBooks((prev) => (prev.length === 1 ? prev : prev.filter((_, idx) => idx !== i)))
+  }
+
+  async function previewVoice(id: string) {
+    if (previewingVoice) return
+    setPreviewErr('')
+    setPreviewingVoice(id)
+    try {
+      const res = await fetch('/api/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice: id }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error((data as { error?: string }).error ?? `试听失败(${res.status})`)
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.onended = () => { setPreviewingVoice(''); URL.revokeObjectURL(url) }
+      audio.onerror = () => { setPreviewingVoice(''); URL.revokeObjectURL(url) }
+      await audio.play()
+    } catch (e) {
+      setPreviewErr((e as Error).message)
+      setPreviewingVoice('')
+    }
   }
 
   async function submit() {
@@ -102,6 +140,7 @@ export default function GeneratePage() {
     if (voiceId) vars = { ...(vars ?? {}), voiceId }
     if (scriptMode !== 'auto') vars = { ...(vars ?? {}), scriptMode, customScript }
     if (bookTitle.trim()) vars = { ...(vars ?? {}), bookTitle: bookTitle.trim() }
+    if (voice) vars = { ...(vars ?? {}), voice }
     setBusy(true)
     try {
       const r = await api<{ id: string }>('/api/generate', { body: { frameworkId, subject: subject.trim(), variables: vars } })
@@ -212,6 +251,39 @@ export default function GeneratePage() {
               ))}
             </select>
           </label>
+
+          <div className="block">
+            <span className="eyebrow">配音音色（可选，不选则用系统默认音色）</span>
+            <div className="mt-1 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setVoice('')}
+                className={voice === '' ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+              >
+                系统默认
+              </button>
+              {TTS_VOICE_OPTIONS.map((v) => (
+                <div key={v.id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setVoice(v.id)}
+                    className={voice === v.id ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+                  >
+                    {v.label}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => previewVoice(v.id)}
+                    disabled={!!previewingVoice}
+                    className="btn-ghost px-2 py-1.5 text-xs disabled:opacity-40"
+                  >
+                    {previewingVoice === v.id ? '播放中…' : '试听'}
+                  </button>
+                </div>
+              ))}
+            </div>
+            {previewErr && <p className="pill pill-bad mt-1">{previewErr}</p>}
+          </div>
 
           <div className="block">
             <span className="eyebrow">生成模式</span>

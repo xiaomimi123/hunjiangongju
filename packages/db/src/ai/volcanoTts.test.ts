@@ -29,4 +29,15 @@ describe('parseVolcanoAudio', () => {
   it('无音频行 → 抛错', () => {
     expect(() => parseVolcanoAudio(JSON.stringify({code:20000000}))).toThrow()
   })
+  it('已收集音频后遇到中途错误码 → 立即抛错,不返回截断音频', () => {
+    const a = Buffer.from('AA').toString('base64')
+    const nd = [JSON.stringify({code:0,data:a}), JSON.stringify({code:55000031,message:'quota exceeded'})].join('\n')
+    expect(() => parseVolcanoAudio(nd)).toThrow(/55000031/)
+    expect(() => parseVolcanoAudio(nd)).toThrow(/quota exceeded/)
+  })
+  it('不可解析(非JSON)的行被跳过,不抛错', () => {
+    const a = Buffer.from('AA').toString('base64')
+    const nd = [JSON.stringify({code:0,data:a}), 'not-json-garbage'].join('\n')
+    expect(parseVolcanoAudio(nd).toString()).toBe('AA')
+  })
 })

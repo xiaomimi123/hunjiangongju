@@ -17,6 +17,9 @@ export function parseVolcanoAudio(ndjson: string): Buffer {
     const t = line.trim(); if (!t) continue
     let obj: { code?: number; data?: string; message?: string }
     try { obj = JSON.parse(t) } catch { continue }
+    if (typeof obj.code === 'number' && obj.code !== 0 && obj.code !== 20000000) {
+      throw new Error(`火山TTS流错误 code=${obj.code}${obj.message ? ': ' + obj.message : ''}`)
+    }
     if (obj.code === 0 && typeof obj.data === 'string' && obj.data) chunks.push(Buffer.from(obj.data, 'base64'))
   }
   if (chunks.length === 0) throw new Error(`火山TTS无音频返回: ${String(ndjson).slice(-300)}`)

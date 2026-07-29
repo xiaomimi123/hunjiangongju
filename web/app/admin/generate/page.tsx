@@ -28,10 +28,8 @@ const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
 // 配音音色白名单镜像（与 packages/db/src/ai/ttsVoices.ts 的 TTS_VOICES 保持一致，页面内不引入服务端代码）
 const TTS_VOICE_OPTIONS: { id: string; label: string }[] = [
-  { id: 'Cherry', label: '知性女声（Cherry）' },
-  { id: 'Serena', label: '温柔女声（Serena）' },
-  { id: 'Ethan', label: '磁性男声（Ethan）' },
-  { id: 'Chelsie', label: '清亮女声（Chelsie）' },
+  { id: 'zh_female_wanwanxiaohe_moon_bigtts', label: '知性女声（待确认）' },
+  { id: 'zh_male_M392_conversation_wvae_bigtts', label: '磁性男声（待确认）' },
 ]
 
 export default function GeneratePage() {

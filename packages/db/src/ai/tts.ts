@@ -2,6 +2,8 @@ import { getCapabilityConfig, isMockMode } from './config'
 import { mockSilentWav } from './mock'
 import { isDashScope, dashPost, fetchUrlToBuffer } from './dashscope'
 import { isCosyvoiceVoiceId, resolveCosyvoiceModel, cosyvoiceSynthesize } from './cosyvoiceSynth'
+import { isVolcano, volcanoTtsSynthesize } from './volcanoTts'
+import { TTS_VOICES } from './ttsVoices'
 import type { TtsOpts } from './types'
 
 // 构造 DashScope 原生 multimodal-generation 的 TTS 请求体（纯函数，便于单测）。
@@ -21,6 +23,16 @@ export function buildDashTtsBody(
 export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
   const cfg = await getCapabilityConfig('tts')
   if (isMockMode(cfg)) return mockSilentWav(Math.max(1, Math.round(opts.text.length / 5)))
+
+  // 火山「语音合成大模型2.0」：baseUrl 指向 openspeech.bytedance.com 时走此适配器。
+  if (isVolcano(cfg.baseUrl)) {
+    const speaker = opts.voice ?? (cfg.extra.voice as string) ?? TTS_VOICES[0].id
+    return volcanoTtsSynthesize({
+      endpoint: cfg.baseUrl, appId: cfg.model, accessKey: cfg.apiKey,
+      resourceId: (cfg.extra.resourceId as string) || 'seed-tts-2.0',
+      text: opts.text, speaker, emotionText: (cfg.extra.emotion as string) || undefined,
+    })
+  }
 
   const voiceId = opts.voiceId ?? (cfg.extra.voiceId as string | undefined)
 

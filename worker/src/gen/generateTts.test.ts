@@ -56,7 +56,7 @@ describe('readVoiceId', () => {
 
 describe('readVoice', () => {
   it('白名单内的 voice 原样返回，否则 undefined', () => {
-    expect(readVoice({ voice: 'Cherry' })).toBe('Cherry')
+    expect(readVoice({ voice: 'zh_female_wanwanxiaohe_moon_bigtts' })).toBe('zh_female_wanwanxiaohe_moon_bigtts')
     expect(readVoice({ voice: '乱填' })).toBeUndefined()
     expect(readVoice({})).toBeUndefined()
     expect(readVoice(null)).toBeUndefined()

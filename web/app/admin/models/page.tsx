@@ -51,6 +51,9 @@ export default function ModelsPage() {
                 <input type="checkbox" checked={c.enabled} onChange={(e) => upd(c.capability, { enabled: e.target.checked })} className="h-5 w-5" />
               </label>
             </div>
+            {c.capability === 'tts' && (
+              <p className="text-xs text-ink3">火山配音：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填火山 AppID，密钥填 Access Key（音色需按控制台开通替换）</p>
+            )}
             <label className="block text-sm text-ink2">接口地址
               <input className="field mt-1" value={c.baseUrl} onChange={(e) => upd(c.capability, { baseUrl: e.target.value })} placeholder="https://relay.aitoken.homes/v1" autoCapitalize="none" /></label>
             <label className="block text-sm text-ink2">模型

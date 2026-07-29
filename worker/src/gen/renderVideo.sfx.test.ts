@@ -16,4 +16,8 @@ describe('buildFfmpegArgs — SFX', () => {
     expect(a).toContain('volume=0.69')            // bgm 音量参数化
     expect(a).toMatch(/amix=inputs=[34]/)         // 人声+bgm+齿轮+水滴
   })
+  it('编码加 -crf 28 压小体积', () => {
+    const a = buildFfmpegArgs({ bodyAbs:'b.mp4', audioAbs:'a.wav', bgmAbs:null, durSec:10, outAbs:'o.mp4' }).join(' ')
+    expect(a).toContain('-crf 28')
+  })
 })

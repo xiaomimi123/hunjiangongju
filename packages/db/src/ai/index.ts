@@ -12,7 +12,7 @@ export { describeImageStyle, parseVisionStyle, MOCK_VISION_STYLE, describeBooksF
 export type { VisualStyleType, VisionStyleResult } from './vision'
 export { TTS_VOICES, isValidVoice } from './ttsVoices'
 export type { TtsVoice } from './ttsVoices'
-export { isVolcano, buildVolcanoBody, parseVolcanoAudio, volcanoTtsSynthesize } from './volcanoTts'
+export { isVolcano, buildVolcanoBody, parseVolcanoCreate, volcanoTtsSynthesize } from './volcanoTts'
 import { llmComplete } from './llm'
 import { imageGenerate } from './image'
 import { ttsSynthesize } from './tts'

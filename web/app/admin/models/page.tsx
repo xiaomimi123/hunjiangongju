@@ -52,7 +52,7 @@ export default function ModelsPage() {
               </label>
             </div>
             {c.capability === 'tts' && (
-              <p className="text-xs text-ink3">火山配音：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填火山 AppID，密钥填 Access Key（音色需按控制台开通替换）</p>
+              <p className="text-xs text-ink3">火山配音(豆包 seed-audio-1.0)：接口地址填 https://openspeech.bytedance.com/api/v3/tts/create，模型填 seed-audio-1.0，密钥填控制台的 API Key（X-Api-Key）；音色 speaker 用「豆包语音合成模型2.0」音色或声音复刻音色</p>
             )}
             <label className="block text-sm text-ink2">接口地址
               <input className="field mt-1" value={c.baseUrl} onChange={(e) => upd(c.capability, { baseUrl: e.target.value })} placeholder="https://relay.aitoken.homes/v1" autoCapitalize="none" /></label>

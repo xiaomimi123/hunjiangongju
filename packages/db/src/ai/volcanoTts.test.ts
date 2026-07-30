@@ -1,43 +1,50 @@
 import { describe, it, expect } from 'vitest'
-import { isVolcano, buildVolcanoBody, parseVolcanoAudio } from './volcanoTts'
+import { isVolcano, buildVolcanoBody, parseVolcanoCreate } from './volcanoTts'
+
 describe('isVolcano', () => {
   it('按 openspeech 域名识别', () => {
-    expect(isVolcano('https://openspeech.bytedance.com/api/v3/tts/unidirectional')).toBe(true)
+    expect(isVolcano('https://openspeech.bytedance.com/api/v3/tts/create')).toBe(true)
     expect(isVolcano('https://dashscope.aliyuncs.com/x')).toBe(false)
   })
 })
+
 describe('buildVolcanoBody', () => {
-  it('含 text/speaker/audio_params;无情感时不带 additions', () => {
+  it('含 model/text_prompt/references/audio_config;无情感时 text_prompt 即原文', () => {
     const b = buildVolcanoBody('你好', 'zh_female_x') as any
-    expect(b.req_params.text).toBe('你好')
-    expect(b.req_params.speaker).toBe('zh_female_x')
-    expect(b.req_params.audio_params.format).toBe('mp3')
-    expect(b.req_params.additions).toBeUndefined()
+    expect(b.model).toBe('seed-audio-1.0')
+    expect(b.text_prompt).toBe('你好')
+    expect(b.references).toEqual([{ speaker: 'zh_female_x' }])
+    expect(b.audio_config.format).toBe('mp3')
+    expect(b.audio_config.sample_rate).toBe(24000)
   })
-  it('有情感时 additions 为序列化 JSON 含 context_texts', () => {
-    const b = buildVolcanoBody('你好', 'v', '用温柔治愈的语气') as any
-    expect(typeof b.req_params.additions).toBe('string')
-    expect(JSON.parse(b.req_params.additions).context_texts).toEqual(['用温柔治愈的语气'])
+  it('有情感时以自然语言前置到 text_prompt', () => {
+    const b = buildVolcanoBody('你好', 'v', { emotionText: '用温柔治愈的语气' }) as any
+    expect(b.text_prompt).toBe('（用温柔治愈的语气）你好')
+  })
+  it('model/sampleRate 可覆盖', () => {
+    const b = buildVolcanoBody('你好', 'v', { model: 'seed-audio-1.0-multilingual', sampleRate: 48000 }) as any
+    expect(b.model).toBe('seed-audio-1.0-multilingual')
+    expect(b.audio_config.sample_rate).toBe(48000)
   })
 })
-describe('parseVolcanoAudio', () => {
-  it('拼接 code===0 行的 base64,忽略结束行', () => {
-    const a = Buffer.from('AA').toString('base64'), b = Buffer.from('BB').toString('base64')
-    const nd = [JSON.stringify({code:0,data:a}), JSON.stringify({code:0,data:b}), JSON.stringify({code:20000000})].join('\n')
-    expect(parseVolcanoAudio(nd).toString()).toBe('AABB')
+
+describe('parseVolcanoCreate', () => {
+  it('audio(base64) → 解码为 Buffer', () => {
+    const audio = Buffer.from('AABB').toString('base64')
+    const r = parseVolcanoCreate({ audio })
+    expect(r.audio?.toString()).toBe('AABB')
+    expect(r.url).toBeUndefined()
   })
-  it('无音频行 → 抛错', () => {
-    expect(() => parseVolcanoAudio(JSON.stringify({code:20000000}))).toThrow()
+  it('只有 url → 返回 url 待下载', () => {
+    const r = parseVolcanoCreate({ duration: 82.8, url: 'https://x/a.mp3' })
+    expect(r.url).toBe('https://x/a.mp3')
+    expect(r.audio).toBeUndefined()
   })
-  it('已收集音频后遇到中途错误码 → 立即抛错,不返回截断音频', () => {
-    const a = Buffer.from('AA').toString('base64')
-    const nd = [JSON.stringify({code:0,data:a}), JSON.stringify({code:55000031,message:'quota exceeded'})].join('\n')
-    expect(() => parseVolcanoAudio(nd)).toThrow(/55000031/)
-    expect(() => parseVolcanoAudio(nd)).toThrow(/quota exceeded/)
+  it('非0 code → 抛错(含 code 与 message)', () => {
+    expect(() => parseVolcanoCreate({ code: 45000010, message: 'Invalid X-Api-Key' })).toThrow(/45000010/)
+    expect(() => parseVolcanoCreate({ code: 45000010, message: 'Invalid X-Api-Key' })).toThrow(/Invalid X-Api-Key/)
   })
-  it('不可解析(非JSON)的行被跳过,不抛错', () => {
-    const a = Buffer.from('AA').toString('base64')
-    const nd = [JSON.stringify({code:0,data:a}), 'not-json-garbage'].join('\n')
-    expect(parseVolcanoAudio(nd).toString()).toBe('AA')
+  it('既无 audio 也无 url → 抛错', () => {
+    expect(() => parseVolcanoCreate({ duration: 0 })).toThrow()
   })
 })

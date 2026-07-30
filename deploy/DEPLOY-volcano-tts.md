@@ -44,8 +44,12 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
 ## 三、拿凭据（用户在火山控制台做）
 
-1. 登录**火山引擎控制台** → 豆包语音，开通「语音合成大模型 / 音频生成」。
-2. 到 **控制台 > API Key 管理** 拿 **API Key**（新版控制台单头 `X-Api-Key`；旧版是 AppID+AccessKey 双头，会下线，用新版即可）。
+> ⚠️ **TTS 属「语音技术」产品线，与「火山方舟」是两套、需单独开通。** 火山方舟的 `ark-` 开头 key 在此接口**无效**（会报 `Invalid X-Api-Key`）。务必到「语音技术」里拿凭据。
+
+1. 火山控制台进 **「语音技术」**（不是方舟）→ 开通 **「语音合成大模型 / 音频生成」**。
+2. 在**语音技术**控制台拿凭据，两种之一（适配器都支持）：
+   - **新版**：一个 **X-Api-Key**（单头）。
+   - **旧版**：**APP ID + Access Token**（双头）。
 3. 记下要用的 **speaker 音色 ID**：可用「豆包语音合成模型2.0」的音色（形如 `zh_female_xxx_bigtts`）或你的声音复刻音色。
 
 ---
@@ -58,12 +62,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 |---|---|
 | **接口地址** | `https://openspeech.bytedance.com/api/v3/tts/create` |
 | **模型** | `seed-audio-1.0`（中英）或 `seed-audio-1.0-multilingual`（多语种+时间轴） |
-| **密钥** | 控制台 **API Key**（X-Api-Key） |
+| **密钥** | 新版：**X-Api-Key**；旧版：**Access Token**（此时还要在 `extra.appId` 填 **APP ID**） |
 
 填完点「测试连通」→ 通过后点**启用**。
 
 > - 系统靠「接口地址含 openspeech.bytedance.com」自动识别走火山；想切回 qwen-tts，把接口地址改回百炼地址即可。
-> - 可在该能力配置的 `extra` 里加 `emotion`（自然语言语气，如「用温柔治愈的语气」，会前置到合成 Prompt）、`voice`（兜底 speaker）。
+> - **旧版双头凭据**：密钥填 Access Token，并在能力配置 `extra` 里加 `appId`=你的 APP ID（适配器检测到 appId 就自动走 `X-Api-App-Id` + `X-Api-Access-Key` 双头）。
+> - 可在 `extra` 里加 `emotion`（自然语言语气，如「用温柔治愈的语气」，会前置到合成 Prompt）、`voice`（兜底 speaker）。
 > - **配置修改不追溯旧任务**，改完要**新生成**才生效。
 
 ---

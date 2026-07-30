@@ -25,12 +25,14 @@ export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
   if (isMockMode(cfg)) return mockSilentWav(Math.max(1, Math.round(opts.text.length / 5)))
 
   // 火山「音频生成HTTP」(豆包 seed-audio-1.0)：baseUrl 指向 openspeech.bytedance.com 时走此适配器。
-  // 配置映射：接口地址=baseUrl(/api/v3/tts/create)、模型=seed-audio-1.0、密钥=X-Api-Key。
+  // 配置映射：接口地址=baseUrl(/api/v3/tts/create)、模型=seed-audio-1.0、密钥=X-Api-Key(新版)
+  // 或 Access Token(旧版双头)；旧版双头时把 AppID 填到 extra.appId。
   if (isVolcano(cfg.baseUrl)) {
     const speaker = opts.voice ?? (cfg.extra.voice as string) ?? TTS_VOICES[0].id
     return volcanoTtsSynthesize({
       endpoint: cfg.baseUrl,
       apiKey: cfg.apiKey,
+      appId: (cfg.extra.appId as string) || undefined,
       text: opts.text,
       speaker,
       model: cfg.model || 'seed-audio-1.0',

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isVolcano, buildVolcanoBody, parseVolcanoCreate } from './volcanoTts'
+import { isVolcano, buildVolcanoBody, buildVolcanoHeaders, parseVolcanoCreate } from './volcanoTts'
 
 describe('isVolcano', () => {
   it('按 openspeech 域名识别', () => {
@@ -25,6 +25,21 @@ describe('buildVolcanoBody', () => {
     const b = buildVolcanoBody('你好', 'v', { model: 'seed-audio-1.0-multilingual', sampleRate: 48000 }) as any
     expect(b.model).toBe('seed-audio-1.0-multilingual')
     expect(b.audio_config.sample_rate).toBe(48000)
+  })
+})
+
+describe('buildVolcanoHeaders', () => {
+  it('无 appId → 新版单头 X-Api-Key', () => {
+    const h = buildVolcanoHeaders('k1')
+    expect(h['X-Api-Key']).toBe('k1')
+    expect(h['X-Api-App-Id']).toBeUndefined()
+    expect(h['X-Api-Access-Key']).toBeUndefined()
+  })
+  it('有 appId → 旧版双头,apiKey 作 Access-Key,不带 X-Api-Key', () => {
+    const h = buildVolcanoHeaders('token1', 'app123')
+    expect(h['X-Api-App-Id']).toBe('app123')
+    expect(h['X-Api-Access-Key']).toBe('token1')
+    expect(h['X-Api-Key']).toBeUndefined()
   })
 })
 

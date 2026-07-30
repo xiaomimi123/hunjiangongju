@@ -34,11 +34,28 @@ export function parseVolcanoCreate(json: unknown): { audio?: Buffer; url?: strin
   throw new Error(`火山TTS无音频返回: ${JSON.stringify(json).slice(0, 300)}`)
 }
 
+// 鉴权头：语音技术控制台有两种凭据。
+// - 新版：单头 X-Api-Key（apiKey）。
+// - 旧版：双头 X-Api-App-Id(appId) + X-Api-Access-Key(apiKey=Access Token)。
+// 传了 appId 就走旧版双头，否则走新版单头。
+export function buildVolcanoHeaders(apiKey: string, appId?: string, requestId?: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (appId && appId.trim()) {
+    h['X-Api-App-Id'] = appId
+    h['X-Api-Access-Key'] = apiKey
+  } else {
+    h['X-Api-Key'] = apiKey
+  }
+  if (requestId) h['X-Api-Request-Id'] = requestId
+  return h
+}
+
 export async function volcanoTtsSynthesize(o: {
   endpoint: string
   apiKey: string
   text: string
   speaker: string
+  appId?: string
   model?: string
   sampleRate?: number
   emotionText?: string
@@ -46,11 +63,7 @@ export async function volcanoTtsSynthesize(o: {
 }): Promise<Buffer> {
   const res = await fetch(o.endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Api-Key': o.apiKey,
-      ...(o.requestId ? { 'X-Api-Request-Id': o.requestId } : {}),
-    },
+    headers: buildVolcanoHeaders(o.apiKey, o.appId, o.requestId),
     body: JSON.stringify(
       buildVolcanoBody(o.text, o.speaker, { model: o.model, sampleRate: o.sampleRate, emotionText: o.emotionText }),
     ),

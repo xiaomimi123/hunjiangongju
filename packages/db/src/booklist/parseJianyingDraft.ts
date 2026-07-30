@@ -252,20 +252,25 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   // ---- 开场动画（破镜重圆/收拢） ----
   let shatter = DEFAULT_PARAMS.open.shatter
   try {
-    const animMaterials = arr(materials.material_animations).map(obj)
-    let found = false
-    for (const ma of animMaterials) {
-      for (const rawAnim of arr(ma.animations)) {
-        const anim = obj(rawAnim)
-        const name = typeof anim.name === 'string' ? anim.name : ''
-        if (/破镜|收拢/.test(name)) {
-          found = true
-          break
+    const animMaterialsRaw = arr(materials.material_animations)
+    if (animMaterialsRaw.length === 0) {
+      warnings.push('未找到动画素材(material_animations)，开场动画(破镜重圆)回退默认值')
+    } else {
+      const animMaterials = animMaterialsRaw.map(obj)
+      let found = false
+      for (const ma of animMaterials) {
+        for (const rawAnim of arr(ma.animations)) {
+          const anim = obj(rawAnim)
+          const name = typeof anim.name === 'string' ? anim.name : ''
+          if (/破镜|收拢/.test(name)) {
+            found = true
+            break
+          }
         }
+        if (found) break
       }
-      if (found) break
+      shatter = found
     }
-    shatter = found
   } catch {
     warnings.push('开场动画解析失败')
   }
@@ -349,20 +354,25 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   // ---- Ken-Burns ----
   let kenBurns: 'subtle' | 'off' = DEFAULT_PARAMS.body.kenBurns
   try {
-    const animMaterials = arr(materials.material_animations).map(obj)
-    let hasVideoAnim = false
-    for (const ma of animMaterials) {
-      for (const rawAnim of arr(ma.animations)) {
-        const anim = obj(rawAnim)
-        const materialType = typeof anim.material_type === 'string' ? anim.material_type : ''
-        if (materialType.toLowerCase().includes('video')) {
-          hasVideoAnim = true
-          break
+    const animMaterialsRaw = arr(materials.material_animations)
+    if (animMaterialsRaw.length === 0) {
+      warnings.push('未找到动画素材(material_animations)，Ken-Burns 回退默认值')
+    } else {
+      const animMaterials = animMaterialsRaw.map(obj)
+      let hasVideoAnim = false
+      for (const ma of animMaterials) {
+        for (const rawAnim of arr(ma.animations)) {
+          const anim = obj(rawAnim)
+          const materialType = typeof anim.material_type === 'string' ? anim.material_type : ''
+          if (materialType.toLowerCase().includes('video')) {
+            hasVideoAnim = true
+            break
+          }
         }
+        if (hasVideoAnim) break
       }
-      if (hasVideoAnim) break
+      kenBurns = hasVideoAnim ? 'subtle' : 'off'
     }
-    kenBurns = hasVideoAnim ? 'subtle' : 'off'
   } catch {
     warnings.push('Ken-Burns 动画解析失败')
   }
@@ -395,17 +405,33 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       }
     }
 
-    const bgmCandidates = audioSegs.filter((s) => /歌曲|音乐/.test(s.name))
-    if (bgmCandidates.length > 0) {
-      bgmCandidates.sort((a, b) => b.durationUs - a.durationUs)
-      const chosen = bgmCandidates[0]
-      if (typeof chosen.volume === 'number') bgmVolume = chosen.volume
+    if (audioSegs.length === 0) {
+      warnings.push('未找到音频轨道，BGM 音量/音效回退默认值')
     } else {
-      warnings.push('未找到 BGM 音轨，回退默认音量')
-    }
+      // BGM 候选：名称含"歌曲"且不含"提取"，避开剪映自动生成的"提取音乐..."参考轨
+      // （"提取音乐"里含"音乐"这个子串，若仍按 /歌曲|音乐/ 匹配会被误选中）
+      const songCandidates = audioSegs.filter((s) => /歌曲/.test(s.name) && !/提取/.test(s.name))
+      let bgmChosen: AudioSeg | undefined
+      if (songCandidates.length > 0) {
+        songCandidates.sort((a, b) => b.durationUs - a.durationUs)
+        bgmChosen = songCandidates[0]
+      } else {
+        // 没有可识别的"歌曲"候选：退而求其次，取时长最长且有明确 volume 的音轨
+        const withVolume = audioSegs.filter((s) => typeof s.volume === 'number')
+        if (withVolume.length > 0) {
+          withVolume.sort((a, b) => b.durationUs - a.durationUs)
+          bgmChosen = withVolume[0]
+        }
+      }
+      if (bgmChosen && typeof bgmChosen.volume === 'number') {
+        bgmVolume = bgmChosen.volume
+      } else {
+        warnings.push('未找到有效 BGM 音量，回退默认 BGM 音量')
+      }
 
-    openGear = audioSegs.some((s) => /齿轮|旋钮/.test(s.name))
-    transitionDrop = audioSegs.some((s) => /水滴/.test(s.name))
+      openGear = audioSegs.some((s) => /齿轮|旋钮/.test(s.name))
+      transitionDrop = audioSegs.some((s) => /水滴/.test(s.name))
+    }
   } catch {
     warnings.push('音频解析失败')
   }

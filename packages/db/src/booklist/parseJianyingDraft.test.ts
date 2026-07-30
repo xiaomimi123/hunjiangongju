@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseJianyingDraft } from './parseJianyingDraft'
+import { DEFAULT_PARAMS } from './templateParams.js'
 
 const draft = {
   canvas_config: { width: 720, height: 960 },
@@ -61,5 +62,53 @@ describe('parseJianyingDraft', () => {
     const { params, meta } = parseJianyingDraft({})
     expect(params.mode).toBe('flash')
     expect(meta.warnings.length).toBeGreaterThan(0)
+  })
+
+  it('BGM 避开剪映自动生成的"提取音乐"参考轨，优先选"歌曲"轨', () => {
+    const d = {
+      materials: {
+        audios: [
+          { id: 'au_extract', name: '提取音乐20260101' },
+          { id: 'au_song', name: '歌曲ABC' },
+        ],
+      },
+      tracks: [
+        { type: 'audio', segments: [
+          // 提取音乐：时长更长，但没有 volume，且属于参考轨，不应被选中
+          { material_id: 'au_extract', target_timerange: { start: 0, duration: 30000000 } },
+        ] },
+        { type: 'audio', segments: [
+          // 歌曲：时长更短，但有明确 volume，应被选中
+          { material_id: 'au_song', volume: 0.7, target_timerange: { start: 0, duration: 5000000 } },
+        ] },
+      ],
+    }
+    const { params } = parseJianyingDraft(d)
+    expect(params.audio.bgmVolume).toBeCloseTo(0.7, 2)
+  })
+
+  it('BGM 候选无 volume → 回退默认音量并告警', () => {
+    const d = {
+      materials: {
+        audios: [{ id: 'au_song', name: '歌曲XYZ' }],
+      },
+      tracks: [
+        { type: 'audio', segments: [
+          { material_id: 'au_song', target_timerange: { start: 0, duration: 5000000 } }, // 无 volume
+        ] },
+      ],
+    }
+    const { params, meta } = parseJianyingDraft(d)
+    expect(params.audio.bgmVolume).toBe(DEFAULT_PARAMS.audio.bgmVolume)
+    expect(meta.warnings.some((w) => /bgm/i.test(w))).toBe(true)
+  })
+
+  it('缺失 material_animations → shatter/kenBurns 回退默认值并告警', () => {
+    const { material_animations: _omit, ...restMaterials } = draft.materials as Record<string, unknown>
+    const d = { ...draft, materials: restMaterials }
+    const { params, meta } = parseJianyingDraft(d)
+    expect(params.open.shatter).toBe(true)
+    expect(params.body.kenBurns).toBe('subtle')
+    expect(meta.warnings.some((w) => /material_animations|动画素材/.test(w))).toBe(true)
   })
 })

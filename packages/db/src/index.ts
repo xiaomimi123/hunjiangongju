@@ -19,7 +19,7 @@ export {
   DEFAULT_PARAMS,
   parseTemplateParams,
   flashTimeline,
-} from './booklist/templateParams.js'
-export type { TemplateParams, TemplateMode, FlashTimeline } from './booklist/templateParams.js'
-export { parseJianyingDraft } from './booklist/parseJianyingDraft.js'
-export type { DraftMeta } from './booklist/parseJianyingDraft.js'
+} from './booklist/templateParams'
+export type { TemplateParams, TemplateMode, FlashTimeline } from './booklist/templateParams'
+export { parseJianyingDraft } from './booklist/parseJianyingDraft'
+export type { DraftMeta } from './booklist/parseJianyingDraft'

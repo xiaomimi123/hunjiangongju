@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseJianyingDraft } from './parseJianyingDraft'
-import { DEFAULT_PARAMS } from './templateParams.js'
+import { DEFAULT_PARAMS } from './templateParams'
 
 const draft = {
   canvas_config: { width: 720, height: 960 },

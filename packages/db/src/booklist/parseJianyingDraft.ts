@@ -2,7 +2,7 @@
 // 纯函数、不抛错（draft 非对象时返回全默认 + warning）。每个字段抽取块用 try/catch 兜底，
 // 缺失/异常时回退 DEFAULT_PARAMS 对应值。最终 params 再过一遍 parseTemplateParams 兜底。
 
-import { DEFAULT_PARAMS, parseTemplateParams, type TemplateParams } from './templateParams.js'
+import { DEFAULT_PARAMS, parseTemplateParams, type TemplateParams } from './templateParams'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -185,7 +185,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   let fontsNeeded: string[] = []
   try {
     const set = new Set<string>()
-    for (const t of textsById.values()) {
+    for (const t of Array.from(textsById.values())) {
       if (t.fontBasename) set.add(t.fontBasename)
     }
     fontsNeeded = Array.from(set)
@@ -202,7 +202,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   let bookTitles: string[] = []
   try {
     const set = new Set<string>()
-    for (const t of textsById.values()) {
+    for (const t of Array.from(textsById.values())) {
       const re = /《([^》]+)》/g
       let m: RegExpExecArray | null
       while ((m = re.exec(t.text))) {
@@ -337,7 +337,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       for (const v of durationsUs) counts.set(v, (counts.get(v) ?? 0) + 1)
       let best = durationsUs[0]
       let bestCount = 0
-      for (const [v, c] of counts) {
+      for (const [v, c] of Array.from(counts)) {
         if (c > bestCount || (c === bestCount && v > best)) {
           best = v
           bestCount = c

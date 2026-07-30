@@ -27,9 +27,15 @@ const CUSTOM_SCRIPT_PLACEHOLDER: Record<'manual' | 'imitate', string> = {
 const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
 // 配音音色白名单镜像（与 packages/db/src/ai/ttsVoices.ts 的 TTS_VOICES 保持一致，页面内不引入服务端代码）
+// 与 packages/db/src/ai/ttsVoices.ts 的 TTS_VOICES 保持一致（火山豆包2.0音色）。
 const TTS_VOICE_OPTIONS: { id: string; label: string }[] = [
-  { id: 'zh_female_wanwanxiaohe_moon_bigtts', label: '知性女声（待确认）' },
-  { id: 'zh_male_M392_conversation_wvae_bigtts', label: '磁性男声（待确认）' },
+  { id: 'zh_female_vv_uranus_bigtts', label: '知性女声 Vivi' },
+  { id: 'zh_female_zhixingnv_uranus_bigtts', label: '知性女声' },
+  { id: 'zh_female_wenrouxiaoya_uranus_bigtts', label: '温柔女声（治愈）' },
+  { id: 'zh_female_xinlingjitang_uranus_bigtts', label: '心灵鸡汤女声' },
+  { id: 'zh_male_ruyayichen_uranus_bigtts', label: '儒雅男声' },
+  { id: 'zh_male_baqiqingshu_uranus_bigtts', label: '磁性青叔（有声阅读）' },
+  { id: 'zh_male_cixingjieshuonan_uranus_bigtts', label: '磁性解说男声' },
 ]
 
 export default function GeneratePage() {

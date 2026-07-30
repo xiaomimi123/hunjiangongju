@@ -1,53 +1,82 @@
-// 火山「音频生成HTTP」(豆包 seed-audio-1.0) 适配器。
-// 同步接口 POST /api/v3/tts/create，新版控制台 X-Api-Key 单头鉴权。
-// 请求体 {model, text_prompt, references:[{speaker}], audio_config, watermark}；
-// 同步返回 JSON：成功给 audio(base64) 或 url(2h有效)，失败给 code(非0)+message。
+// 火山「豆包语音合成大模型2.0」单向流式 HTTP 适配器。
+// 接口 POST https://openspeech.bytedance.com/api/v3/tts/unidirectional
+// 头：X-Api-Key（语音技术控制台的 API Key）+ X-Api-Resource-Id（seed-tts-2.0）+ X-Api-Request-Id（uuid）。
+// 体：{req_params:{text, speaker, audio_params:{format,sample_rate}, context_texts?:[语音指令]}}。
+// 响应：HTTP Chunked 流，多个 JSON 对象拼接，每个 {code, data(base64 音频分片)}；拼接 data 即成品，code 非 0 为错误。
 export function isVolcano(baseUrl: string): boolean {
   return typeof baseUrl === 'string' && baseUrl.includes('openspeech.bytedance.com')
 }
 
-// 构造 /tts/create 请求体。emotionText 以自然语言前置到 text_prompt（模型按语气描述合成，不会读出括号内容）。
 export function buildVolcanoBody(
   text: string,
   speaker: string,
-  opts?: { model?: string; sampleRate?: number; emotionText?: string },
+  opts?: { sampleRate?: number; emotionText?: string },
 ): object {
+  const req_params: Record<string, unknown> = {
+    text,
+    speaker,
+    audio_params: { format: 'mp3', sample_rate: opts?.sampleRate ?? 24000 },
+  }
+  // 语音指令（仅豆包2.0音色支持）：用自然语言控制语气/情绪。
   const emotion = opts?.emotionText?.trim()
-  const text_prompt = emotion ? `（${emotion}）${text}` : text
+  if (emotion) req_params.context_texts = [emotion]
+  return { req_params }
+}
+
+export function buildVolcanoHeaders(apiKey: string, resourceId: string, requestId: string): Record<string, string> {
   return {
-    model: opts?.model || 'seed-audio-1.0',
-    text_prompt,
-    references: [{ speaker }],
-    audio_config: { format: 'mp3', sample_rate: opts?.sampleRate ?? 24000 },
-    watermark: {},
+    'Content-Type': 'application/json',
+    'X-Api-Key': apiKey,
+    'X-Api-Resource-Id': resourceId,
+    'X-Api-Request-Id': requestId,
   }
 }
 
-// 解析同步返回：优先 audio(base64)，否则给 url 待下载；有非0 code 或两者皆无则抛错。
-export function parseVolcanoCreate(json: unknown): { audio?: Buffer; url?: string } {
-  const obj = (json ?? {}) as { code?: number; message?: string; audio?: string; url?: string }
-  if (typeof obj.code === 'number' && obj.code !== 0) {
-    throw new Error(`火山TTS错误 code=${obj.code}${obj.message ? ': ' + obj.message : ''}`)
+// 从拼接的多 JSON 对象响应里按大括号配平切出每个对象（兼容 NDJSON 与无分隔拼接；
+// base64 音频不含大括号/引号，字符串态跟踪仅为稳妥）。
+function splitJsonObjects(s: string): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = []
+  let depth = 0, start = -1, inStr = false, esc = false
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (c === '\\') esc = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') { inStr = true; continue }
+    if (c === '{') { if (depth === 0) start = i; depth++ }
+    else if (c === '}') {
+      depth--
+      if (depth === 0 && start >= 0) {
+        try { out.push(JSON.parse(s.slice(start, i + 1))) } catch { /* 跳过不完整片段 */ }
+        start = -1
+      }
+    }
   }
-  if (typeof obj.audio === 'string' && obj.audio) return { audio: Buffer.from(obj.audio, 'base64') }
-  if (typeof obj.url === 'string' && obj.url) return { url: obj.url }
-  throw new Error(`火山TTS无音频返回: ${JSON.stringify(json).slice(0, 300)}`)
+  return out
 }
 
-// 鉴权头：语音技术控制台有两种凭据。
-// - 新版：单头 X-Api-Key（apiKey）。
-// - 旧版：双头 X-Api-App-Id(appId) + X-Api-Access-Key(apiKey=Access Token)。
-// 传了 appId 就走旧版双头，否则走新版单头。
-export function buildVolcanoHeaders(apiKey: string, appId?: string, requestId?: string): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (appId && appId.trim()) {
-    h['X-Api-App-Id'] = appId
-    h['X-Api-Access-Key'] = apiKey
-  } else {
-    h['X-Api-Key'] = apiKey
+export function parseVolcanoStream(body: string): Buffer {
+  const chunks: Buffer[] = []
+  for (const obj of splitJsonObjects(String(body ?? ''))) {
+    const code = obj.code as number | undefined
+    if (typeof code === 'number' && code !== 0) {
+      const message = obj.message as string | undefined
+      throw new Error(`火山TTS错误 code=${code}${message ? ': ' + message : ''}`)
+    }
+    const data = obj.data as string | undefined
+    if (typeof data === 'string' && data) chunks.push(Buffer.from(data, 'base64'))
   }
-  if (requestId) h['X-Api-Request-Id'] = requestId
-  return h
+  if (chunks.length === 0) throw new Error(`火山TTS无音频返回: ${String(body).slice(0, 300)}`)
+  return Buffer.concat(chunks)
+}
+
+function genRequestId(): string {
+  const g = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  if (g && typeof g.randomUUID === 'function') return g.randomUUID()
+  return `${Date.now()}-${Math.floor(Math.random() * 1e9)}`
 }
 
 export async function volcanoTtsSynthesize(o: {
@@ -55,27 +84,17 @@ export async function volcanoTtsSynthesize(o: {
   apiKey: string
   text: string
   speaker: string
-  appId?: string
-  model?: string
+  resourceId?: string
   sampleRate?: number
   emotionText?: string
   requestId?: string
 }): Promise<Buffer> {
   const res = await fetch(o.endpoint, {
     method: 'POST',
-    headers: buildVolcanoHeaders(o.apiKey, o.appId, o.requestId),
-    body: JSON.stringify(
-      buildVolcanoBody(o.text, o.speaker, { model: o.model, sampleRate: o.sampleRate, emotionText: o.emotionText }),
-    ),
+    headers: buildVolcanoHeaders(o.apiKey, o.resourceId || 'seed-tts-2.0', o.requestId || genRequestId()),
+    body: JSON.stringify(buildVolcanoBody(o.text, o.speaker, { sampleRate: o.sampleRate, emotionText: o.emotionText })),
   })
   const bodyText = await res.text()
   if (!res.ok) throw new Error(`火山TTS请求失败 ${res.status}: ${bodyText.slice(0, 300)}`)
-  let json: unknown
-  try { json = JSON.parse(bodyText) } catch { throw new Error(`火山TTS返回非JSON: ${bodyText.slice(0, 300)}`) }
-  const parsed = parseVolcanoCreate(json)
-  if (parsed.audio) return parsed.audio
-  // 返回的是带过期时间的 URL，下载音频字节
-  const audioRes = await fetch(parsed.url as string)
-  if (!audioRes.ok) throw new Error(`火山TTS音频下载失败 ${audioRes.status}`)
-  return Buffer.from(await audioRes.arrayBuffer())
+  return parseVolcanoStream(bodyText)
 }

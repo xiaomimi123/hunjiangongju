@@ -24,18 +24,17 @@ export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
   const cfg = await getCapabilityConfig('tts')
   if (isMockMode(cfg)) return mockSilentWav(Math.max(1, Math.round(opts.text.length / 5)))
 
-  // 火山「音频生成HTTP」(豆包 seed-audio-1.0)：baseUrl 指向 openspeech.bytedance.com 时走此适配器。
-  // 配置映射：接口地址=baseUrl(/api/v3/tts/create)、模型=seed-audio-1.0、密钥=X-Api-Key(新版)
-  // 或 Access Token(旧版双头)；旧版双头时把 AppID 填到 extra.appId。
+  // 火山「豆包语音合成大模型2.0」单向流式：baseUrl 指向 openspeech.bytedance.com 时走此适配器。
+  // 配置映射：接口地址=baseUrl(/api/v3/tts/unidirectional)、模型=X-Api-Resource-Id(seed-tts-2.0)、
+  // 密钥=X-Api-Key(语音技术控制台的 API Key)。情感语气用 extra.emotion(自然语言)。
   if (isVolcano(cfg.baseUrl)) {
     const speaker = opts.voice ?? (cfg.extra.voice as string) ?? TTS_VOICES[0].id
     return volcanoTtsSynthesize({
       endpoint: cfg.baseUrl,
       apiKey: cfg.apiKey,
-      appId: (cfg.extra.appId as string) || undefined,
+      resourceId: cfg.model || 'seed-tts-2.0',
       text: opts.text,
       speaker,
-      model: cfg.model || 'seed-audio-1.0',
       sampleRate: 24000,
       emotionText: (cfg.extra.emotion as string) || undefined,
     })

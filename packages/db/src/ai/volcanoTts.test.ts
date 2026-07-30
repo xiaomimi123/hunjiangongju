@@ -38,9 +38,13 @@ describe('buildVolcanoHeaders', () => {
 })
 
 describe('parseVolcanoStream', () => {
-  it('拼接多个 code:0 分片的 base64(NDJSON 分隔)', () => {
+  it('拼接多个 code:0 分片的 base64,忽略 20000000 结束标记', () => {
     const a = Buffer.from('AA').toString('base64'), b = Buffer.from('BB').toString('base64')
-    const body = [JSON.stringify({ code: 0, data: a }), JSON.stringify({ code: 0, data: b, sentence: {} })].join('\n')
+    const body = [
+      JSON.stringify({ code: 0, data: a }),
+      JSON.stringify({ code: 0, data: b, sentence: {} }),
+      JSON.stringify({ code: 20000000, message: 'OK' }),
+    ].join('\n')
     expect(parseVolcanoStream(body).toString()).toBe('AABB')
   })
   it('无分隔拼接的对象也能切分', () => {

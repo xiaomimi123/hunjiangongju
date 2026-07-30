@@ -62,7 +62,8 @@ export function parseVolcanoStream(body: string): Buffer {
   const chunks: Buffer[] = []
   for (const obj of splitJsonObjects(String(body ?? ''))) {
     const code = obj.code as number | undefined
-    if (typeof code === 'number' && code !== 0) {
+    // code===0 为音频分片，code===20000000 为流结束标记(message "OK")，其余为真错误。
+    if (typeof code === 'number' && code !== 0 && code !== 20000000) {
       const message = obj.message as string | undefined
       throw new Error(`火山TTS错误 code=${code}${message ? ': ' + message : ''}`)
     }

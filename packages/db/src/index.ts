@@ -15,3 +15,9 @@ export type { SilenceEvent, Segment, Timing } from './silence'
 export { derivePace, applyPace, computeSegmentPads } from './pace'
 export type { SentenceSpan, PaceInfo, PaceTiming } from './pace'
 export * from './assets/signedUrl'
+export {
+  DEFAULT_PARAMS,
+  parseTemplateParams,
+  flashTimeline,
+} from './booklist/templateParams.js'
+export type { TemplateParams, TemplateMode, FlashTimeline } from './booklist/templateParams.js'

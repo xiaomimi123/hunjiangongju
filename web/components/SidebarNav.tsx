@@ -15,9 +15,10 @@ const ICONS: Record<string, string> = {
 
 const GROUPS: { label: string; items: { href: string; label: string; icon: string }[] }[] = [
   { label: '概览', items: [{ href: '/admin', label: '仪表盘', icon: 'dashboard' }] },
-  { label: '拆解', items: [
+  { label: '拆解 / 复刻', items: [
+    { href: '/admin/extract', label: '视频拆解', icon: 'tasks' },
+    { href: '/admin/jianying', label: '剪映复刻', icon: 'film' },
     { href: '/admin/frameworks', label: '框架库', icon: 'tag' },
-    { href: '/admin/jianying', label: '剪映模板', icon: 'film' },
   ] },
   { label: '生成', items: [
     { href: '/admin/generate', label: '生成', icon: 'film' },

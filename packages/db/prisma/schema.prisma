@@ -145,6 +145,8 @@ model BgmLibrary {
   fileUrl     String       @map("file_url")
   styleTag    String?      @map("style_tag")
   durationMs  Int?         @map("duration_ms")
+  name        String?
+  folder      String?
   renderTasks RenderTask[]
   @@map("bgm_library")
 }

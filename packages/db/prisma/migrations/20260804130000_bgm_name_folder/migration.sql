@@ -1,0 +1,2 @@
+ALTER TABLE "bgm_library" ADD COLUMN IF NOT EXISTS "name" TEXT;
+ALTER TABLE "bgm_library" ADD COLUMN IF NOT EXISTS "folder" TEXT;

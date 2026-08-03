@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeVariables, normalizeBooks } from './normalize'
+import { normalizeVariables, normalizeBooks, stripVoiceForNonOperator } from './normalize'
 
 describe('normalizeVariables', () => {
   it('variables 为空/undefined → undefined', () => {
@@ -88,5 +88,31 @@ describe('normalizeVariables — 配图来源', () => {
   it('缺省 assetSource → 不设该字段', () => {
     const v = normalizeVariables({ voiceId: 'v-1' })
     expect(v?.assetSource).toBeUndefined()
+  })
+})
+
+describe('stripVoiceForNonOperator', () => {
+  it('学员（student）→ 剔除 voice 与 voiceId，其余字段原样保留', () => {
+    const r = stripVoiceForNonOperator('student', { voice: 'S_clonevoice', voiceId: 'cosyvoice-abc', bookTitle: '活着' })
+    expect(r).toEqual({ bookTitle: '活着' })
+  })
+
+  it('非 operator 的任意角色 → 同样剔除', () => {
+    const r = stripVoiceForNonOperator('guest', { voice: 'S_x', voiceId: 'v-1' })
+    expect(r).toEqual({})
+  })
+
+  it('运营（operator）→ voice 与 voiceId 原样保留', () => {
+    const r = stripVoiceForNonOperator('operator', { voice: 'S_clonevoice', voiceId: 'cosyvoice-abc', bookTitle: '活着' })
+    expect(r).toEqual({ voice: 'S_clonevoice', voiceId: 'cosyvoice-abc', bookTitle: '活着' })
+  })
+
+  it('variables 为 undefined → 原样返回 undefined（不抛错）', () => {
+    expect(stripVoiceForNonOperator('student', undefined)).toBeUndefined()
+  })
+
+  it('variables 中无 voice/voiceId → 其余字段不受影响', () => {
+    const r = stripVoiceForNonOperator('student', { bookTitle: '活着' })
+    expect(r).toEqual({ bookTitle: '活着' })
   })
 })

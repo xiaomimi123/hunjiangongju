@@ -63,3 +63,16 @@ export function normalizeVariables(variables: unknown): Record<string, unknown> 
   }
   return v
 }
+
+// 非运营角色（学员等）一律使用默认音色：剥离 voice（火山克隆音色 id）与 voiceId（CosyVoice 克隆音色 id），
+// 防止学员盗用运营的私有/付费克隆音色。运营角色原样保留；其余字段不受影响。
+export function stripVoiceForNonOperator(
+  role: string,
+  variables: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (role === 'operator' || variables === undefined) return variables
+  const v = { ...variables }
+  delete v.voice
+  delete v.voiceId
+  return v
+}

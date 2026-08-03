@@ -17,6 +17,12 @@ type Form = {
   overlayTemplate: string; renderTemplate: string; maxLines: string; maxTotalChars: string; suggestedSegmentCount: string
 }
 
+const STYLE_PRESETS = [
+  { label: '厚涂油画', v: '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物,静物/自然/动物' },
+  { label: '梵高风', v: '梵高后印象派风格,旋转笔触,厚重颜料肌理,鲜明蓝黄对比,星夜质感,无人物' },
+  { label: '治愈插画', v: '极简性冷淡治愈系艺术插画,动物自然静物,留白构图,无人物' },
+]
+
 export default function FrameworksPage() {
   const [rows, setRows] = useState<FrameworkRow[] | null>(null)
   const [err, setErr] = useState('')
@@ -185,6 +191,13 @@ export default function FrameworksPage() {
             </div>
             <label className="block">
               <span className="eyebrow">图片风格提示词</span>
+              <div className="mt-1 flex gap-2">
+                {STYLE_PRESETS.map((p) => (
+                  <button key={p.label} type="button" className="btn-ghost text-xs" onClick={() => setF({ imageStylePrompt: p.v })}>
+                    {p.label}
+                  </button>
+                ))}
+              </div>
               <textarea className="field mt-1 text-xs" rows={3} value={form.imageStylePrompt} onChange={(e) => setF({ imageStylePrompt: e.target.value })} />
             </label>
             <label className="block">

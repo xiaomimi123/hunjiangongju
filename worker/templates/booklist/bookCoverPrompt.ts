@@ -9,7 +9,7 @@ const COVER_NEG =
   'text, letters, words, title, author, typography, caption, watermark, barcode, signature'
 
 export function buildBookCoverPrompt(book: { title: string; author?: string }, styleHint?: string): CoverPrompt {
-  const style = (styleHint ?? '文艺极简').trim()
+  const style = (styleHint ?? '厚涂油画文艺').trim()
   const prompt = [
     `a ${style} literary book cover background`,
     '文艺书籍封面底图, 优雅抽象构图, 克制的低饱和色调, 中央留出空白标题区',

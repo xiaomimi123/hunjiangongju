@@ -6,6 +6,9 @@ import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
 import { pickAssetsForSegments, readAssetSource } from './stockAssets'
 
+// 画风提示词留空时的默认兜底：厚涂油画质感，避免生成画面过于平淡。
+export const DEFAULT_IMAGE_STYLE = '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物'
+
 // 取书单：overlayTemplate.books 优先，回退 variables.books；过滤无 title 的脏项。
 export function resolveBooks(overlayTemplate: unknown, variables: unknown): { title: string; author?: string }[] {
   const pick = (x: unknown): { title: string; author?: string }[] => {
@@ -27,7 +30,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
     where: { id: genTaskId },
     include: { framework: true },
   })
-  const stylePrompt = task.framework.imageStylePrompt ?? ''
+  const stylePrompt = (task.framework.imageStylePrompt ?? '').trim() || DEFAULT_IMAGE_STYLE
 
   const segments = await prisma.generatedSegment.findMany({
     where: { generationTaskId: genTaskId },

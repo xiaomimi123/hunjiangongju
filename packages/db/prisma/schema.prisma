@@ -197,6 +197,16 @@ model ClonedVoice {
   @@map("cloned_voices")
 }
 
+model StockAsset {
+  id        String   @id @default(uuid())
+  kind      String   // 'image' | 'video'
+  name      String
+  folder    String?
+  fileUrl   String   @map("file_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("stock_assets")
+}
+
 model AiCapabilityConfig {
   capability String   @id
   baseUrl    String   @default("") @map("base_url")

@@ -65,3 +65,28 @@ describe('normalizeVariables — 自定义文案', () => {
     expect(v?.voiceId).toBe('v-1')
   })
 })
+
+describe('normalizeVariables — 配图来源', () => {
+  it('assetSource=library 且带 assetFolder(可能带首尾空白) → 透传并 trim', () => {
+    const v = normalizeVariables({ assetSource: 'library', assetFolder: '  旅行  ' })
+    expect(v?.assetSource).toBe('library')
+    expect(v?.assetFolder).toBe('旅行')
+  })
+  it('assetSource=library 但 assetFolder 空/纯空白 → 保留 source，剔除 folder', () => {
+    const v1 = normalizeVariables({ assetSource: 'library' })
+    expect(v1?.assetSource).toBe('library')
+    expect(v1?.assetFolder).toBeUndefined()
+    const v2 = normalizeVariables({ assetSource: 'library', assetFolder: '   ' })
+    expect(v2?.assetSource).toBe('library')
+    expect(v2?.assetFolder).toBeUndefined()
+  })
+  it('非法 assetSource(含 "ai"/其它) → 剔除 assetSource 与 assetFolder', () => {
+    const v = normalizeVariables({ assetSource: 'ai', assetFolder: '旅行' })
+    expect(v?.assetSource).toBeUndefined()
+    expect(v?.assetFolder).toBeUndefined()
+  })
+  it('缺省 assetSource → 不设该字段', () => {
+    const v = normalizeVariables({ voiceId: 'v-1' })
+    expect(v?.assetSource).toBeUndefined()
+  })
+})

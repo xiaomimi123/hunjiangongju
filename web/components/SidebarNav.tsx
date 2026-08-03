@@ -26,6 +26,7 @@ const GROUPS: { label: string; items: { href: string; label: string; icon: strin
   ] },
   { label: '运营', items: [
     { href: '/admin/students', label: '学员数据', icon: 'users' },
+    { href: '/admin/assets', label: '素材库', icon: 'doc' },
   ] },
   { label: '系统', items: [
     { href: '/admin/models', label: '模型配置', icon: 'gear' },

@@ -13,6 +13,13 @@ type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
 type Voice = { id: string; voiceId: string; name: string }
 type ScriptMode = 'auto' | 'manual' | 'imitate'
+type AssetSource = 'ai' | 'library'
+type AssetsResp = { folders: string[] }
+
+const ASSET_SOURCE_OPTIONS: { value: AssetSource; label: string }[] = [
+  { value: 'ai', label: 'AI 生图' },
+  { value: 'library', label: '素材库优先' },
+]
 
 const SCRIPT_MODE_OPTIONS: { value: ScriptMode; label: string }[] = [
   { value: 'auto', label: '自动生成' },
@@ -60,6 +67,9 @@ export default function GeneratePage() {
   const [voice, setVoice] = useState('')
   const [previewingVoice, setPreviewingVoice] = useState('')
   const [previewErr, setPreviewErr] = useState('')
+  const [assetSource, setAssetSource] = useState<AssetSource>('ai')
+  const [assetFolder, setAssetFolder] = useState('')
+  const [assetFolders, setAssetFolders] = useState<string[]>([])
 
   const load = useCallback(async () => {
     try { setTasks(await api<GenTask[]>('/api/generate')) }
@@ -81,12 +91,14 @@ export default function GeneratePage() {
     setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
     setScriptMode('auto'); setCustomScript(''); setBookTitle('')
     setVoice(''); setPreviewingVoice(''); setPreviewErr('')
+    setAssetSource('ai'); setAssetFolder('')
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
       if (fw[0]) setFrameworkId(fw[0].id)
     }).catch((e) => setModalErr((e as Error).message))
     api<Voice[]>('/api/admin/voices').then(setVoices).catch(() => setVoices([]))
+    api<AssetsResp>('/api/admin/assets').then((r) => setAssetFolders(r.folders)).catch(() => setAssetFolders([]))
   }
 
   function updateBook(i: number, field: keyof BookRow, value: string) {
@@ -145,6 +157,7 @@ export default function GeneratePage() {
     if (scriptMode !== 'auto') vars = { ...(vars ?? {}), scriptMode, customScript }
     if (bookTitle.trim()) vars = { ...(vars ?? {}), bookTitle: bookTitle.trim() }
     if (voice) vars = { ...(vars ?? {}), voice }
+    if (assetSource === 'library') vars = { ...(vars ?? {}), assetSource, ...(assetFolder ? { assetFolder } : {}) }
     setBusy(true)
     try {
       const r = await api<{ id: string }>('/api/generate', { body: { frameworkId, subject: subject.trim(), variables: vars } })
@@ -287,6 +300,30 @@ export default function GeneratePage() {
               ))}
             </div>
             {previewErr && <p className="pill pill-bad mt-1">{previewErr}</p>}
+          </div>
+
+          <div className="block">
+            <span className="eyebrow">配图来源</span>
+            <div className="mt-1 flex gap-2">
+              {ASSET_SOURCE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setAssetSource(opt.value)}
+                  className={assetSource === opt.value ? 'btn-primary px-4 py-1.5 text-sm' : 'btn-ghost px-4 py-1.5 text-sm'}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {assetSource === 'library' && (
+              <select className="field mt-2" value={assetFolder} onChange={(e) => setAssetFolder(e.target.value)}>
+                <option value="">不限文件夹（全部素材）</option>
+                {assetFolders.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="block">

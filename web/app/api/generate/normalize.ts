@@ -51,5 +51,15 @@ export function normalizeVariables(variables: unknown): Record<string, unknown> 
   const bt = typeof v.bookTitle === 'string' ? v.bookTitle.trim() : ''
   if (bt) v.bookTitle = bt
   else delete v.bookTitle
+  // 配图来源：仅接受 'library' 透传（素材库优先），其余（含缺省）一律不设该字段，走全 AI 生图。
+  if (v.assetSource === 'library') {
+    v.assetSource = 'library'
+    const folder = typeof v.assetFolder === 'string' ? v.assetFolder.trim() : ''
+    if (folder) v.assetFolder = folder
+    else delete v.assetFolder
+  } else {
+    delete v.assetSource
+    delete v.assetFolder
+  }
   return v
 }

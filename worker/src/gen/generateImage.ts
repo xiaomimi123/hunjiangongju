@@ -99,7 +99,8 @@ export async function generateImage(genTaskId: string): Promise<void> {
     const books = resolveBooks(task.framework.overlayTemplate, task.variables)
     const coversDir = path.join(dir, 'covers')
     await fs.mkdir(coversDir, { recursive: true })
-    const styleHint = task.framework.imageStylePrompt ?? undefined
+    // || + trim:画风被清成空字符串时也回退 buildBookCoverPrompt 的默认(?? 只兜 null)
+    const styleHint = (task.framework.imageStylePrompt || '').trim() || undefined
     for (const [i, book] of books.entries()) {
       const { prompt, negativePrompt } = buildBookCoverPrompt(book, styleHint)
       const png = await withRetry(() => imageGenerate({ prompt, size: '720x960', negativePrompt }), {

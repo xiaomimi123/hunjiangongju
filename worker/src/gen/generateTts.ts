@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice } from '@mixcut/db'
+import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
 
 // 纯函数：从 GenerationTask.variables（Json）中取出运营在生成表单里选的克隆音色 voiceId。
@@ -11,11 +11,12 @@ export function readVoiceId(variables: unknown): string | undefined {
   return typeof voiceId === 'string' && voiceId.trim() ? voiceId.trim() : undefined
 }
 
-// 纯函数：从 GenerationTask.variables（Json）中取出运营选的普通音色 voice（白名单校验，防注入）。
+// 纯函数：从 GenerationTask.variables（Json）中取出运营选的普通音色 voice。
+// 内置白名单命中，或形如合法音色 id（含火山克隆 S_ 开头、DB customVoices 里登记的音色）都放行；防注入。
 export function readVoice(variables: unknown): string | undefined {
   if (!variables || typeof variables !== 'object' || Array.isArray(variables)) return undefined
   const voice = (variables as Record<string, unknown>).voice
-  return isValidVoice(voice) ? voice : undefined
+  return isValidVoice(voice) || isPlausibleVoiceId(voice) ? (voice as string) : undefined
 }
 
 function probeDurationMs(audioAbs: string): number {

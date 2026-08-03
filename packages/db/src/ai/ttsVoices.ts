@@ -13,3 +13,9 @@ export const TTS_VOICES: TtsVoice[] = [
 export function isValidVoice(id: unknown): id is string {
   return typeof id === 'string' && TTS_VOICES.some((v) => v.id === id)
 }
+
+// 形如合法音色 id（字母数字._- ，3~64 位）——用于放行内置白名单之外、但格式看起来合理的音色，
+// 典型场景是火山「声音复刻2.0」克隆得到的 S_ 开头音色 ID，以及 DB 配置里运营自行登记的 customVoices。
+export function isPlausibleVoiceId(id: unknown): id is string {
+  return typeof id === 'string' && /^[A-Za-z0-9_.-]{3,64}$/.test(id)
+}

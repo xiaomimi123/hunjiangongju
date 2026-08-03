@@ -52,7 +52,7 @@ export default function ModelsPage() {
               </label>
             </div>
             {c.capability === 'tts' && (
-              <p className="text-xs text-ink3">火山配音(豆包语音合成2.0)：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填 seed-tts-2.0，密钥填「语音技术」控制台的 API Key（非火山方舟的 ark- key）</p>
+              <p className="text-xs text-ink3">火山配音(豆包语音合成2.0)：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填 seed-tts-2.0，密钥填「语音技术」控制台的 API Key（非火山方舟的 ark- key）。克隆音色：火山声音复刻2.0 克隆得 S_ 开头音色ID，填入 extra 的 customVoices（如 {'{"customVoices":[{"id":"S_xxx","label":"我的对标男声"}]}'}）即出现在生成页</p>
             )}
             <label className="block text-sm text-ink2">接口地址
               <input className="field mt-1" value={c.baseUrl} onChange={(e) => upd(c.capability, { baseUrl: e.target.value })} placeholder="https://relay.aitoken.homes/v1" autoCapitalize="none" /></label>

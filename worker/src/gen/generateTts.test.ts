@@ -61,4 +61,13 @@ describe('readVoice', () => {
     expect(readVoice({})).toBeUndefined()
     expect(readVoice(null)).toBeUndefined()
   })
+
+  it('形如合法音色 id（如火山克隆 S_ 开头）即便不在内置白名单也放行', () => {
+    expect(readVoice({ voice: 'S_abc123' })).toBe('S_abc123')
+  })
+
+  it('格式不合法（含空格/过短）仍拒绝', () => {
+    expect(readVoice({ voice: '乱 填' })).toBeUndefined()
+    expect(readVoice({ voice: 'ab' })).toBeUndefined()
+  })
 })

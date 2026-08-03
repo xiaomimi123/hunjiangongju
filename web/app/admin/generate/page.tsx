@@ -2,6 +2,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+// 直接从子模块导入（而非 '@mixcut/db' 包索引）：包索引会连带引入 bullmq/ioredis 等仅限服务端的
+// 依赖，被 'use client' 组件打包进浏览器 bundle 会构建失败（Can't resolve 'net'/'fs' 等）。
+import { TTS_VOICES, type TtsVoice } from '@mixcut/db/src/ai/ttsVoices'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
@@ -33,18 +36,6 @@ const CUSTOM_SCRIPT_PLACEHOLDER: Record<'manual' | 'imitate', string> = {
 
 const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 
-// 配音音色白名单镜像（与 packages/db/src/ai/ttsVoices.ts 的 TTS_VOICES 保持一致，页面内不引入服务端代码）
-// 与 packages/db/src/ai/ttsVoices.ts 的 TTS_VOICES 保持一致（火山豆包2.0音色）。
-const TTS_VOICE_OPTIONS: { id: string; label: string }[] = [
-  { id: 'zh_female_vv_uranus_bigtts', label: '知性女声 Vivi' },
-  { id: 'zh_female_zhixingnv_uranus_bigtts', label: '知性女声' },
-  { id: 'zh_female_wenrouxiaoya_uranus_bigtts', label: '温柔女声（治愈）' },
-  { id: 'zh_female_xinlingjitang_uranus_bigtts', label: '心灵鸡汤女声' },
-  { id: 'zh_male_ruyayichen_uranus_bigtts', label: '儒雅男声' },
-  { id: 'zh_male_baqiqingshu_uranus_bigtts', label: '磁性青叔（有声阅读）' },
-  { id: 'zh_male_cixingjieshuonan_uranus_bigtts', label: '磁性解说男声' },
-]
-
 export default function GeneratePage() {
   const router = useRouter()
   const [tasks, setTasks] = useState<GenTask[] | null>(null)
@@ -70,12 +61,17 @@ export default function GeneratePage() {
   const [assetSource, setAssetSource] = useState<AssetSource>('ai')
   const [assetFolder, setAssetFolder] = useState('')
   const [assetFolders, setAssetFolders] = useState<string[]>([])
+  const [ttsVoices, setTtsVoices] = useState<TtsVoice[]>(TTS_VOICES)
 
   const load = useCallback(async () => {
     try { setTasks(await api<GenTask[]>('/api/generate')) }
     catch (e) { setErr((e as Error).message) }
   }, [])
   useEffect(() => { load() }, [load])
+  // 音色下拉：内置清单先兜底展示，拉取成功后换成「内置 + DB customVoices」合并清单；拉取失败保持内置兜底。
+  useEffect(() => {
+    api<{ voices: TtsVoice[] }>('/api/tts/voices').then((r) => setTtsVoices(r.voices)).catch(() => {})
+  }, [])
 
   const [deleting, setDeleting] = useState('')
   async function del(id: string, subject: string) {
@@ -279,7 +275,7 @@ export default function GeneratePage() {
               >
                 系统默认
               </button>
-              {TTS_VOICE_OPTIONS.map((v) => (
+              {ttsVoices.map((v) => (
                 <div key={v.id} className="flex items-center gap-1">
                   <button
                     type="button"

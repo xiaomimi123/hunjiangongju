@@ -1,4 +1,4 @@
-import { ttsSynthesize, isValidVoice } from '@mixcut/db'
+import { ttsSynthesize, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
@@ -13,7 +13,7 @@ export const POST = handler(async (req) => {
   const { voice } = await req.json().catch(() => {
     throw new HttpError(400, '请求体格式错误')
   })
-  if (!isValidVoice(voice)) throw new HttpError(400, '未知音色')
+  if (!isValidVoice(voice) && !isPlausibleVoiceId(voice)) throw new HttpError(400, '未知音色')
   const audio = await ttsSynthesize({ text: SAMPLE, voice })
   return new Response(audio as unknown as BodyInit, {
     headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' },

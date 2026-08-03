@@ -29,14 +29,17 @@ export async function ttsSynthesize(opts: TtsOpts): Promise<Buffer> {
   // 密钥=X-Api-Key(语音技术控制台的 API Key)。情感语气用 extra.emotion(自然语言)。
   if (isVolcano(cfg.baseUrl)) {
     const speaker = opts.voice ?? (cfg.extra.voice as string) ?? TTS_VOICES[0].id
+    // 声音复刻2.0（S_ 开头的克隆音色 ID）与预置 2.0 音色走不同 resource：克隆固定用 seed-icl-2.0
+    // （可用 extra.cloneResourceId 覆盖），且不支持 context_texts 语音指令，emotionText 必须为空。
+    const isClone = speaker.startsWith('S_')
     return volcanoTtsSynthesize({
       endpoint: cfg.baseUrl,
       apiKey: cfg.apiKey,
-      resourceId: cfg.model || 'seed-tts-2.0',
+      resourceId: isClone ? ((cfg.extra.cloneResourceId as string) || 'seed-icl-2.0') : (cfg.model || 'seed-tts-2.0'),
       text: opts.text,
       speaker,
       sampleRate: 24000,
-      emotionText: (cfg.extra.emotion as string) || undefined,
+      emotionText: isClone ? undefined : ((cfg.extra.emotion as string) || undefined),
     })
   }
 

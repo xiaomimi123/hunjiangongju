@@ -7,6 +7,9 @@ import PageHeader from '@/components/admin/PageHeader'
 type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number }
 type Resp = { stats: { totalStudents: number; todayNew: number; totalTasks: number; totalExported: number }; students: Row[]; total: number }
 type Task = { id: string; status: string; subject: string; createdAt: string; framework: { name: string | null } | null }
+// 重置密码弹窗共用（学员/运营账号字段一致，仅需 id/email/nickname）
+type AccountRef = { id: string; email: string; nickname: string | null }
+type OpRow = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string }
 
 const PAGE = 20
 
@@ -20,10 +23,24 @@ export default function StudentsPage() {
 
   const [expanded, setExpanded] = useState('')          // 展开查看作品的学员 id
   const [works, setWorks] = useState<Task[] | null>(null)
-  const [resetFor, setResetFor] = useState<Row | null>(null) // 重置密码弹窗目标
+  const [resetFor, setResetFor] = useState<AccountRef | null>(null) // 重置密码弹窗目标（学员/运营共用）
   const [newPw, setNewPw] = useState('')
   const [modalErr, setModalErr] = useState('')
   const [modalMsg, setModalMsg] = useState('')
+
+  // 新增账号弹层
+  const [showAdd, setShowAdd] = useState(false)
+  const [newEmail, setNewEmail] = useState('')
+  const [newNickname, setNewNickname] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newRole, setNewRole] = useState<'student' | 'operator'>('student')
+  const [addErr, setAddErr] = useState('')
+  const [addBusy, setAddBusy] = useState(false)
+
+  // 运营账号小节
+  const [opOpen, setOpOpen] = useState(false)
+  const [operators, setOperators] = useState<OpRow[] | null>(null)
+  const [opErr, setOpErr] = useState('')
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 300)
@@ -36,6 +53,12 @@ export default function StudentsPage() {
   }, [debounced, page])
   useEffect(() => { load() }, [load])
 
+  const loadOperators = useCallback(async () => {
+    try { setOperators((await api<Resp>('/api/admin/students?role=operator&pageSize=50')).students) }
+    catch (e) { setOpErr((e as Error).message) }
+  }, [])
+  useEffect(() => { if (opOpen) loadOperators() }, [opOpen, loadOperators])
+
   async function toggleWorks(id: string) {
     if (expanded === id) { setExpanded(''); setWorks(null); return }
     setExpanded(id); setWorks(null)
@@ -43,10 +66,13 @@ export default function StudentsPage() {
     catch (e) { setErr((e as Error).message) }
   }
 
-  async function setDisabled(s: Row, disabled: boolean) {
-    setBusyId(s.id); setErr('')
-    try { await api(`/api/admin/students/${s.id}`, { method: 'PATCH', body: { action: disabled ? 'disable' : 'enable' } }); await load() }
-    catch (e) { setErr((e as Error).message) } finally { setBusyId('') }
+  async function setDisabled(s: AccountRef, disabled: boolean, kind: 'student' | 'operator' = 'student') {
+    setBusyId(s.id); setErr(''); setOpErr('')
+    try {
+      await api(`/api/admin/students/${s.id}`, { method: 'PATCH', body: { action: disabled ? 'disable' : 'enable' } })
+      if (kind === 'operator') await loadOperators(); else await load()
+    }
+    catch (e) { (kind === 'operator' ? setOpErr : setErr)((e as Error).message) } finally { setBusyId('') }
   }
 
   async function remove(s: Row) {
@@ -66,6 +92,17 @@ export default function StudentsPage() {
     } catch (e) { setModalErr((e as Error).message) } finally { setBusyId('') }
   }
 
+  async function createAccount() {
+    setAddErr('')
+    if (!newEmail.trim()) { setAddErr('请填写邮箱'); return }
+    setAddBusy(true)
+    try {
+      await api('/api/admin/students', { body: { email: newEmail.trim(), nickname: newNickname.trim(), password: newPassword, role: newRole } })
+      setShowAdd(false); setNewEmail(''); setNewNickname(''); setNewPassword(''); setNewRole('student')
+      if (newRole === 'operator') { setOpOpen(true); await loadOperators() } else { await load() }
+    } catch (e) { setAddErr((e as Error).message) } finally { setAddBusy(false) }
+  }
+
   const stats = data?.stats
   const cards = [
     { k: '总学员数', v: stats?.totalStudents }, { k: '今日新增', v: stats?.todayNew },
@@ -75,7 +112,9 @@ export default function StudentsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="学员数据" subtitle="注册学员的作品与账号管理" />
+      <PageHeader title="学员数据" subtitle="注册学员的作品与账号管理">
+        <button onClick={() => { setShowAdd(true); setAddErr(''); setNewRole('student') }} className="btn-primary px-4">＋ 新增账号</button>
+      </PageHeader>
       {err && <p className="pill pill-bad">{err}</p>}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -85,6 +124,32 @@ export default function StudentsPage() {
             <p className="num mt-1 text-3xl font-bold">{c.v ?? '—'}</p>
           </div>
         ))}
+      </div>
+
+      <div className="card p-4">
+        <button onClick={() => setOpOpen((v) => !v)} className="flex w-full items-center justify-between text-left">
+          <span className="font-semibold">运营账号{operators ? `（${operators.length}）` : ''}</span>
+          <span className="text-ink3">{opOpen ? '收起 ▲' : '展开 ▼'}</span>
+        </button>
+        {opOpen && (
+          <div className="mt-4 space-y-2.5">
+            {opErr && <p className="pill pill-bad">{opErr}</p>}
+            {operators === null ? <p className="text-sm text-ink3">加载中…</p>
+              : operators.length === 0 ? <p className="text-sm text-ink3">暂无运营账号</p>
+              : operators.map((o) => (
+                <div key={o.id} className={`flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface2 px-3 py-2.5 ${o.disabled ? 'opacity-55' : ''}`}>
+                  <span className="inline-flex items-center gap-2 text-sm">
+                    {o.email} <span className="text-ink3">{o.nickname ?? ''}</span>
+                    {o.disabled && <span className="pill pill-bad">已禁用</span>}
+                  </span>
+                  <div className="flex items-center gap-3 text-sm">
+                    <button onClick={() => { setResetFor(o); setNewPw(''); setModalErr(''); setModalMsg('') }} className="text-ink2 hover:text-ink">重置密码</button>
+                    <button onClick={() => setDisabled(o, !o.disabled, 'operator')} disabled={busyId === o.id} className="text-ink2 hover:text-ink disabled:text-ink3">{o.disabled ? '启用' : '禁用'}</button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -177,6 +242,43 @@ export default function StudentsPage() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setResetFor(null)} className="btn-ghost px-4">取消</button>
               <button onClick={doReset} disabled={busyId === resetFor.id} className="btn-primary px-5">{busyId === resetFor.id ? '处理中…' : '确认重置'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => { if (!addBusy) setShowAdd(false) }}>
+          <div className="card w-full max-w-sm space-y-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="text-lg font-bold">新增账号</h3>
+              <p className="mt-1 text-sm text-ink3">创建学员或运营账号</p>
+            </div>
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-xs text-ink3">角色</span>
+                <select className="field" value={newRole} onChange={(e) => setNewRole(e.target.value as 'student' | 'operator')}>
+                  <option value="student">学员</option>
+                  <option value="operator">运营</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-ink3">邮箱</span>
+                <input className="field" type="text" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="name@example.com" autoCapitalize="none" autoFocus />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-ink3">昵称（可选）</span>
+                <input className="field" type="text" value={newNickname} onChange={(e) => setNewNickname(e.target.value)} placeholder="显示昵称" />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-ink3">初始密码</span>
+                <input className="field" type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少 8 位" />
+              </label>
+            </div>
+            {addErr && <p className="pill pill-bad">{addErr}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAdd(false)} className="btn-ghost px-4">取消</button>
+              <button onClick={createAccount} disabled={addBusy} className="btn-primary px-5">{addBusy ? '创建中…' : '确认创建'}</button>
             </div>
           </div>
         </div>

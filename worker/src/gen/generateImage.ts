@@ -5,6 +5,7 @@ import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
 import { pickAssetsForSegments, readAssetSource } from './stockAssets'
+import { describeScenes, buildSegmentImagePrompt } from './scenePrompts'
 
 // 画风提示词留空时的默认兜底：厚涂油画质感，避免生成画面过于平淡。
 export const DEFAULT_IMAGE_STYLE = '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物'
@@ -50,6 +51,12 @@ export async function generateImage(genTaskId: string): Promise<void> {
     : []
   const assignedAssets = pickAssetsForSegments(libraryAssets, segments.length)
 
+  // 每段文案先由 LLM 提炼成一句画面描述（口播话术直接塞生图模型是噪音）；全部命中素材库则跳过。
+  const needAi = segments.some((_, i) => !assignedAssets[i])
+  const scenes = needAi
+    ? await describeScenes(stylePrompt, segments.map((s) => s.scriptText))
+    : segments.map(() => null)
+
   for (const [i, seg] of segments.entries()) {
     const asset = assignedAssets[i]
     let imageUrl: string
@@ -61,11 +68,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
       await fs.copyFile(urlToAbs(asset.fileUrl), abs)
       imageUrl = `/api/files/gen/${genTaskId}/${seg.seqNo}${ext}`
     } else {
-      // 文案只作「画面意境」引导，绝不能把句子当文字画进图里（否则与字幕层叠字、乱码）。
-      // 不提"书/书名/书页"等会诱导模型画出文字的词；只给情绪场景，配 negative_prompt 强力压制文字。
-      const prompt = [stylePrompt, `一个能烘托这种情绪的安静场景：${seg.scriptText}`, '干净的纯画面场景，画面里不出现任何文字、书本上的字、招牌、字幕或水印']
-        .filter(Boolean)
-        .join('，')
+      // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildSegmentImagePrompt
+      // 内保底，配 negative_prompt 强力压制。场景描述缺失时自动回退文案意境引导。
+      const prompt = buildSegmentImagePrompt(stylePrompt, scenes[i], seg.scriptText)
       // 单张文生图偶发 504/超时是瞬时错误，逐图重试而非让整任务失败。
       const png = await withRetry(
         () =>

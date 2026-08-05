@@ -7,6 +7,7 @@ import { pickBgmSegment } from './draftMedia'
 import { extractDraftStructure, type DraftStructure } from './draftStructure'
 import { extractDraftGrade } from './draftGrade'
 import { extractDraftMoves } from './draftMotion'
+import { extractSubtitleEntrance } from './draftTextAnim'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -472,6 +473,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     warnings.push('运镜解析失败')
   }
 
+  // ---- 字幕入场动画 ----
+  let entrance: ReturnType<typeof extractSubtitleEntrance> = null
+  try {
+    entrance = extractSubtitleEntrance(draft)
+  } catch {
+    warnings.push('字幕入场动画解析失败')
+  }
+
   const built: Record<string, unknown> = {
     mode: 'flash',
     open: { durationMs: openDurationMs, shatter, titleText: openTitleText, sfx: openGear },
@@ -486,6 +495,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     body: {
       subtitleFontFamily, subtitleColor, subtitlePosY, kenBurns,
       ...(structure.bodyScale !== 1 ? { photoScale: structure.bodyScale } : {}),
+      ...(entrance ? { subtitleEntrance: entrance } : {}),
     },
     audio: { bgmVolume, sfx: { openGear, transitionDrop } },
     ...(grade ? { grade } : {}),

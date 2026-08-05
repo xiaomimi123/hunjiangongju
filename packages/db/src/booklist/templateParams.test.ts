@@ -86,3 +86,16 @@ describe('motion / flash.scale / body.photoScale 可选字段', () => {
     expect(parseTemplateParams({ body: { photoScale: NaN } }).body.photoScale).toBeUndefined()
   })
 })
+
+describe('body.subtitleEntrance 可选字段', () => {
+  it('缺省 → undefined', () => {
+    expect(parseTemplateParams({}).body.subtitleEntrance).toBeUndefined()
+  })
+  it('给合法值 → 原样保留', () => {
+    expect(parseTemplateParams({ body: { subtitleEntrance: 'char-stagger' } }).body.subtitleEntrance).toBe('char-stagger')
+  })
+  it('非字符串/空字符串 → 字段不存在', () => {
+    expect(parseTemplateParams({ body: { subtitleEntrance: 42 } }).body.subtitleEntrance).toBeUndefined()
+    expect(parseTemplateParams({ body: { subtitleEntrance: '' } }).body.subtitleEntrance).toBeUndefined()
+  })
+})

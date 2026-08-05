@@ -12,7 +12,7 @@ export interface TemplateParams {
   open: { durationMs: number; shatter: boolean; titleText: string; sfx: boolean }
   flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number }
   transition: { type: 'dissolve'; durationMs: number }
-  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number }
+  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
   grade?: GradeParams
   motion?: { moves: MoveId[] }
@@ -61,6 +61,7 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       subtitlePosY: num(body.subtitlePosY, D.body.subtitlePosY),
       kenBurns: body.kenBurns === 'off' ? 'off' : 'subtle',
       ...(typeof body.photoScale === 'number' && Number.isFinite(body.photoScale) ? { photoScale: body.photoScale } : {}),
+      ...(typeof body.subtitleEntrance === 'string' && body.subtitleEntrance ? { subtitleEntrance: body.subtitleEntrance } : {}),
     },
     audio: {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseJianyingDraft } from './parseJianyingDraft'
+import { parseJianyingDraft, transformYToNorm } from './parseJianyingDraft'
 import { DEFAULT_PARAMS } from './templateParams'
 
 const draft = {
@@ -55,7 +55,8 @@ describe('parseJianyingDraft', () => {
     const { params } = parseJianyingDraft(draft)
     expect(params.body.subtitleFontFamily).toBe('subtitle')     // 莫雪体→subtitle
     expect(params.body.subtitleColor).toBe('#ffffff')           // [1,1,1]
-    expect(params.body.subtitlePosY).toBeCloseTo(0.5 + (-0.486)/2, 3) // 0.257
+    // y=-0.486(靠下三分之一) → 0.743(ground truth，非原先反号公式算出的 0.257，那会把字幕渲染到画面顶部)
+    expect(params.body.subtitlePosY).toBeCloseTo(0.743, 3)
   })
   it('非对象/空 → 全默认不抛错', () => {
     expect(() => parseJianyingDraft(null)).not.toThrow()
@@ -113,6 +114,17 @@ describe('parseJianyingDraft', () => {
   })
 })
 
+// transformYToNorm 符号约定 ground truth（跨样本实测，见 parseJianyingDraft.ts 里的注释）：
+// clip.transform.y 正=靠上、负=靠下；下游 subtitlePosY 是"离底部的归一化距离"(0.78≈下三分)。
+describe('transformYToNorm：y 正=靠上/负=靠下，转换到"离底部距离"', () => {
+  it('底部三分之一字幕 y=-0.486 → ≈0.743(靠下，>0.5)', () => {
+    expect(transformYToNorm(-0.486)).toBeCloseTo(0.743, 3)
+  })
+  it('顶部书名/快闪文字 y=+0.663 → ≈0.1685(靠上，<0.5)', () => {
+    expect(transformYToNorm(0.663)).toBeCloseTo(0.1685, 3)
+  })
+})
+
 const P = '##_draftpath_placeholder_X_##'
 function textDraft(trackType: 'text' | 'sticker') {
   return {
@@ -122,6 +134,8 @@ function textDraft(trackType: 'text' | 'sticker') {
       texts: [
         { id: 't1', content: JSON.stringify({ text: '今天分享的是', styles: [{ font: { path: 'x/font.ttf' }, fill: { content: { solid: { color: [1, 1, 1] } } } }] }) },
         { id: 't2', content: JSON.stringify({ text: '@欧子好读', styles: [{ font: { path: 'a/SourceHanSerifCN-Heavy.otf' }, fill: { content: { solid: { color: [1, 1, 1] } } } }] }) },
+        // 真实样例里的免责声明：y<0(靠下)、比标题晚出现，但不以 @ 开头——曾被旧的"y<0 优先"判据误当成开场标题
+        { id: 't3', content: JSON.stringify({ text: '内容来自书评/感悟/素材来源于网络', styles: [{ font: { path: 'a/SourceHanSerifCN-Heavy.otf' }, fill: { content: { solid: { color: [1, 1, 1] } } } }] }) },
       ],
       material_animations: [{ id: 'an1', animations: [{ name: '玻璃聚集', type: 'in', duration: 1_300_000 }] }],
       audios: [{ id: 'sfx1', name: '鼠标单击', type: 'sound', path: `${P}/audio/click.mp3` }],
@@ -130,6 +144,7 @@ function textDraft(trackType: 'text' | 'sticker') {
       { type: trackType, segments: [
         { material_id: 't1', target_timerange: { start: 200_000, duration: 1_300_000 }, clip: { transform: { y: 0.374 } }, extra_material_refs: [] },
         { material_id: 't2', target_timerange: { start: 2_967_000, duration: 28_933_000 }, clip: { transform: { y: -0.793 } }, extra_material_refs: [] },
+        { material_id: 't3', target_timerange: { start: 2_966_666, duration: 28_933_000 }, clip: { transform: { y: -0.889 } }, extra_material_refs: [] },
       ] },
       { type: 'audio', segments: [{ material_id: 'sfx1', target_timerange: { start: 5_167_000, duration: 367_000 } }] },
     ],

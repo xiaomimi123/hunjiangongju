@@ -71,21 +71,7 @@ export function pickBgmSegment(draft: unknown): BgmPick | null {
 export function extractDraftMedia(draft: unknown): DraftMediaWanted {
   const materials = obj(obj(draft).materials)
   const picked = pickBgmSegment(draft)
-  let bgm: { fileName: string; title: string }[] = []
-  if (picked?.fileName) {
-    bgm = [{ fileName: picked.fileName, title: picked.name || picked.fileName }]
-  } else {
-    // 向后兼容：没有 tracks/volume 信息（如只给了 materials 清单）时，退回按名称判据
-    for (const raw of arr(materials.audios)) {
-      const a = obj(raw)
-      const name = typeof a.name === 'string' ? a.name : ''
-      if (!/歌曲/.test(name) || /提取/.test(name)) continue
-      const fileName = basename(a.path)
-      if (!fileName) continue
-      bgm = [{ fileName, title: name }]
-      break
-    }
-  }
+  const bgm = picked?.fileName ? [{ fileName: picked.fileName, title: picked.name || picked.fileName }] : []
   const images: string[] = []
   const seenImg = new Set<string>()
   for (const raw of arr(materials.videos)) {

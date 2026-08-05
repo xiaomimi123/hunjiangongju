@@ -18,6 +18,11 @@ const draft = {
       { id: 'v5', type: 'photo', path: `${P}/video/IMG_C.heic` }, // 不支持的扩展,排除
     ],
   },
+  tracks: [
+    { type: 'audio', segments: [{ material_id: 'a1', volume: 0.65, target_timerange: { start: 0, duration: 20000000 } }] }, // BGM,被压低音量
+    { type: 'audio', segments: [{ material_id: 'a3', target_timerange: { start: 0, duration: 19790000 } }] }, // 配音参考轨,无 volume,排除
+    { type: 'audio', segments: [{ material_id: 'a4', volume: 0.4, target_timerange: { start: 0, duration: 500000 } }] }, // 音效轨(type=sound),排除
+  ],
 }
 
 describe('extractDraftMedia', () => {

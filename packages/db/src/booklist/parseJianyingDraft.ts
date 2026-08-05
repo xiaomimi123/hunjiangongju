@@ -30,9 +30,14 @@ export function rgbToHex(c: unknown): string | undefined {
   return `#${h(c[0])}${h(c[1])}${h(c[2])}`
 }
 
+// 剪映 clip.transform.y 符号约定：正值=画面靠上，负值=画面靠下（跨样本实测：
+// 《书名》/快闪文字靠上 y=+0.663/+0.565；水印/免责声明靠下 y=-0.793/-0.889；
+// 口播字幕靠下三分之一 y=-0.486）。下游 subtitlePosY 是"离底部的归一化距离"
+// （worker/templates/booklist/layout.ts: bottom=(1-subtitlePosY)*960，DEFAULT 0.78≈下三分），
+// 因此需要 y 越大(越靠上)→ subtitlePosY 越小，公式取 0.5 - y/2。
 export function transformYToNorm(y: unknown): number {
   const v = typeof y === 'number' ? y : 0
-  return Math.max(0, Math.min(1, 0.5 + v / 2))
+  return Math.max(0, Math.min(1, 0.5 - v / 2))
 }
 
 export function fontBasename(path: unknown): string | undefined {
@@ -247,13 +252,12 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   let openDurationMs = DEFAULT_PARAMS.open.durationMs
   let openTitleMaterialId: string | undefined
   try {
+    // 不用竖直位置(y)判定：不同模板的 y 号约定不一致(实测有正负两种"标题在上"约定，
+    // 也有免责声明这类靠下的长文案)，唯一稳定信号是"最早出现、非书名、非水印"。
     const isWatermarkText = (text: string) => text.trim().startsWith('@') && text.trim().length > 1
-    const base = stickers
+    const candidates = stickers
       .map((s) => ({ s, t: textsById.get(s.materialId) }))
       .filter((x) => x.t && !isBookName(x.t.text) && !isWatermarkText(x.t.text))
-    // 优先取 y<0（沿用原模板"标题上浮"约定）；若无符合项（如另一模板 y 号约定不同），退而取任意候选
-    const preferred = base.filter((x) => x.s.y < 0)
-    const candidates = preferred.length > 0 ? preferred : base
     if (candidates.length > 0) {
       candidates.sort((a, b) => a.s.start - b.s.start)
       const chosen = candidates[0]

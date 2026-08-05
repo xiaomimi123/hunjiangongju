@@ -86,6 +86,10 @@ describe('POST /api/admin/jianying/parse', () => {
         audios: [{ id: 'a1', name: '歌曲A', path: `${P}/audio/song.mp3`, type: 'extract_music' }],
         videos: [{ id: 'v1', type: 'photo', path: `${P}/video/pic.png` }],
       },
+      tracks: [
+        // BGM 判据看 tracks 里的音量：被压低音量(<1)才算 BGM
+        { type: 'audio', segments: [{ material_id: 'a1', volume: 0.6, target_timerange: { start: 0, duration: 5000000 } }] },
+      ],
     }
     const res = await POST(req({ draftJson }), { params: {} })
     expect(res.status).toBe(200)

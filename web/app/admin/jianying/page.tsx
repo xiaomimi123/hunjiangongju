@@ -55,7 +55,14 @@ export default function JianyingTemplatePage() {
     setFolderFiles(files)
     setImportResult(null)
     const draftFile = files.find((f) => f.name === 'draft_content.json')
-    if (!draftFile) { setParseErr('这不是剪映工程文件夹（未找到 draft_content.json）'); return }
+    if (!draftFile) {
+      setParseErr('这不是剪映工程文件夹（未找到 draft_content.json）')
+      setMeta(null)
+      setTemplateParams(null)
+      setMedia(null)
+      setSavedId('')
+      return
+    }
     const proj = (draftFile as File & { webkitRelativePath?: string }).webkitRelativePath?.split('/')[0] || '剪映工程'
     setProjectName(proj)
     if (!name.trim()) setName(proj)

@@ -86,6 +86,7 @@ export default function GeneratePage() {
   // 供 openModal 的初始选中框架、以及 select onChange 切换框架时共用。
   function applyFrameworkPrefill(fw: Framework | undefined) {
     if (fw?.defaultAssetFolder) { setAssetSource('library'); setAssetFolder(fw.defaultAssetFolder) }
+    else { setAssetSource('ai'); setAssetFolder('') }
   }
 
   function openModal() {

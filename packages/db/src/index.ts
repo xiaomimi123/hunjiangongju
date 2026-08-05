@@ -23,3 +23,5 @@ export {
 export type { TemplateParams, TemplateMode, FlashTimeline } from './booklist/templateParams'
 export { parseJianyingDraft } from './booklist/parseJianyingDraft'
 export type { DraftMeta } from './booklist/parseJianyingDraft'
+export { extractDraftMedia, readFrameworkDefaults } from './booklist/draftMedia.js'
+export type { DraftMediaWanted, FrameworkDefaults } from './booklist/draftMedia.js'

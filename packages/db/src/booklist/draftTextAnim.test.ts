@@ -24,4 +24,16 @@ describe('extractSubtitleEntrance', () => {
     expect(extractSubtitleEntrance(draftWith([]))).toBeNull()
     expect(extractSubtitleEntrance(null)).toBeNull()
   })
+  it('loop 型动画即使名字可映射也不计入（只统计 in 型入场动画）', () => {
+    const draft = {
+      materials: {
+        texts: [{ id: 't0', content: JSON.stringify({ text: '@水印' }) }],
+        material_animations: [
+          { id: 'an0', animations: [{ name: '逐字放大', type: 'loop', duration: 1_000_000 }] },
+        ],
+      },
+      tracks: [{ type: 'text', segments: [{ material_id: 't0', extra_material_refs: ['an0'], target_timerange: { duration: 1_000_000 } }] }],
+    }
+    expect(extractSubtitleEntrance(draft)).toBeNull()
+  })
 })

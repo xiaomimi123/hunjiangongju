@@ -10,7 +10,7 @@ import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
 import { GenPill } from './genStatus'
 
-type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string }
+type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string; defaultAssetFolder: string | null }
 type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null }
 type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
@@ -210,7 +210,13 @@ export default function GeneratePage() {
         <div className="space-y-4">
           <label className="block">
             <span className="eyebrow">框架</span>
-            <select className="field mt-1" value={frameworkId} onChange={(e) => setFrameworkId(e.target.value)}>
+            <select className="field mt-1" value={frameworkId} onChange={(e) => {
+              const id = e.target.value
+              setFrameworkId(id)
+              const fw = frameworks.find((f) => f.id === id)
+              // 剪映导入的框架自动预填「素材库优先 + 原工程文件夹」;运营可手动改回 AI
+              if (fw?.defaultAssetFolder) { setAssetSource('library'); setAssetFolder(fw.defaultAssetFolder) }
+            }}>
               {frameworks.length === 0 && <option value="">（暂无框架）</option>}
               {frameworks.map((f) => (
                 <option key={f.id} value={f.id}>{f.name ?? f.id.slice(0, 8)}{f.industryCategory ? `（${f.industryCategory}）` : ''}</option>

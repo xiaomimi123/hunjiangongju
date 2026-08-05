@@ -36,4 +36,17 @@ describe('extractDraftMoves', () => {
     expect(extractDraftMoves(null)).toEqual([])
     expect(extractDraftMoves({ tracks: [] })).toEqual([])
   })
+  it('快闪段(role=flash)的关键帧即使超过阈值也被排除,只取正片段(role=body)', () => {
+    // 开场后紧跟 3 段 <500ms 的短段 → 按 extractDraftStructure 判为快闪(role=flash)，
+    // 即便它们带的缩放脉冲(卡片弹入效果)幅度超过 EPS，也不应进入 moves；
+    // 第 5 段(6000ms) role=body，其位移关键帧才应被采纳。
+    const d = { tracks: [{ type: 'video', attribute: 1, segments: [
+      { target_timerange: { duration: 1_500_000 } }, // 开场
+      { target_timerange: { duration: 150_000 }, common_keyframes: [kf('KFTypeScaleX', [[0, 1.0], [150, 1.15]])] }, // 快闪卡片微缩放脉冲
+      { target_timerange: { duration: 180_000 }, common_keyframes: [kf('KFTypeScaleX', [[0, 1.0], [180, 1.12]])] }, // 同上
+      { target_timerange: { duration: 200_000 }, common_keyframes: [kf('KFTypeScaleX', [[0, 1.0], [200, 1.10]])] }, // 同上
+      { target_timerange: { duration: 6_000_000 }, common_keyframes: [kf('KFTypePositionX', [[0, 0], [6000, 0.125]])] }, // 正片段
+    ] }] }
+    expect(extractDraftMoves(d)).toEqual(['pan-right'])
+  })
 })

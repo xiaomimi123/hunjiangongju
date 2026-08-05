@@ -1,5 +1,10 @@
 // 从每段 common_keyframes 的首尾差值分类运镜。阈值 0.02（归一化坐标/缩放），低于此视为无运镜。
 // 剪映 y 轴向上为负：Δy < 0 = 上移(drift-up)，Δy > 0 = 下沉(tilt-settle 近似)。
+// 只取正片段(role==='body')：快闪卡片(100~200ms)常带一个「卡片弹入」式微缩放脉冲，
+// 那是快闪卡效果本身、不是相机运镜；渲染层(Task 7)按 moves 数组循环套到正片段上，
+// 混进快闪脉冲会把真实运镜信号稀释掉（见 fix round 1）。
+
+import { extractDraftStructure } from './draftStructure'
 
 export type MoveId = 'push-in' | 'pull-back' | 'pan-right' | 'pan-left' | 'drift-up' | 'tilt-settle'
 
@@ -34,9 +39,12 @@ export function extractDraftMoves(draft: unknown): MoveId[] {
   const main = tracks.find((t) => t.type === 'video' && t.attribute === 1) ?? tracks.find((t) => t.type === 'video')
   if (!main) return []
   const segs = arr(main.segments).map(obj)
+  // role 判定复用 Task 2 的 extractDraftStructure（同一条主视频轨、同样的下标），
+  // 避免与「开场/快闪/正片」三段切分逻辑产生第二套判定标准。
+  const roleByIndex = new Map(extractDraftStructure(draft).segments.map((s) => [s.index, s.role]))
   const out: MoveId[] = []
   segs.forEach((s, i) => {
-    if (i === 0) return // 开场段的动画另有开场特效负责
+    if (roleByIndex.get(i) !== 'body') return // 只取正片段：开场/快闪段的动画另有其效果负责
     const kfs = arr(s.common_keyframes)
     if (kfs.length === 0) return
     const dx = deltaOf(kfs, ['KFTypePositionX'])

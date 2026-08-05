@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, enqueueGen, timeCaptionBeats } from '@mixcut/db'
+import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { renderIndexHtml, type BodyData, type BodyOverlay } from '../../templates/booklist/indexHtml'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
@@ -176,6 +176,14 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
   if (vars && typeof vars === 'object' && vars.__bgmId) {
     const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
     bgmId = bgm?.id ?? null
+  }
+  // 次优先：剪映导入框架的默认 BGM（原工程同款）。校验仍存在，避免陈旧 id 触发 FK 失败。
+  if (!bgmId) {
+    const defaultBgmId = readFrameworkDefaults(task.framework.overlayTemplate).bgmId
+    if (defaultBgmId) {
+      const bgm = await prisma.bgmLibrary.findUnique({ where: { id: defaultBgmId } })
+      bgmId = bgm?.id ?? null
+    }
   }
   // 未指定 BGM → 从曲库自动选一首（对齐竞品：无指定则配乐，不留白）。
   // 用 genTaskId 派生的稳定索引，避免同任务重跑换曲。

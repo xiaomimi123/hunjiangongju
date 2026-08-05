@@ -54,6 +54,26 @@ describe('renderIndexHtml — classic 回归', () => {
   })
 })
 
+describe('renderIndexHtml — flash 分支调色注入', () => {
+  it('templateParams.grade 存在(真实新模板样本值) → 渲染 HTML 含对应 filter 声明', () => {
+    const withGrade: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({
+        mode: 'flash',
+        grade: { filterName: '青橙', intensity: 0.503, contrast: -0.2138, sharpen: true },
+      }),
+    }
+    const html = renderIndexHtml(withGrade)
+    expect(html).toContain(
+      '.scene .photo, .flashcard .fc-cover { filter: contrast(0.834) saturate(1.126) sepia(0.091) hue-rotate(-5.03deg); }'
+    )
+  })
+  it('templateParams.grade 缺省 → 渲染 HTML 不含任何调色 filter 声明', () => {
+    const html = renderIndexHtml(flashData) // flashData.templateParams 无 grade 字段
+    expect(html).not.toContain('filter: contrast(')
+  })
+})
+
 describe('renderIndexHtml — flash 常驻书名头', () => {
   const withBook: BodyData = {
     ...flashData,

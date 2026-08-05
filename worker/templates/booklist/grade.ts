@@ -25,8 +25,10 @@ export function gradeCss(grade: GradeParams | undefined): string {
         hueRotate: lerp(NEUTRAL.hueRotate, recipe.hueRotate, t),
       }
     : { ...NEUTRAL }
-  // 草稿自带的对比度调整（-1..1）叠乘到滤镜之上
-  const contrast = r3(r.contrast * (1 + grade.contrast))
+  // 草稿自带的对比度调整（文档范围 -1..1，但来源不受控，越界值会让叠乘结果为负，
+  // 而 CSS `filter` 里任何一个函数参数非法都会让整条声明失效，故这里防御性钳制）
+  const contrastAdj = Math.max(-1, Math.min(1, grade.contrast))
+  const contrast = r3(r.contrast * (1 + contrastAdj))
   const fns: string[] = []
   if (contrast !== 1) fns.push(`contrast(${contrast})`)
   if (r3(r.saturate) !== 1) fns.push(`saturate(${r3(r.saturate)})`)

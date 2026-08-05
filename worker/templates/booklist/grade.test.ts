@@ -23,4 +23,11 @@ describe('gradeCss', () => {
   it('全中性（无滤镜且对比度 0）→ 空串,不产生无意义的 filter', () => {
     expect(gradeCss({ filterName: '', intensity: 0, contrast: 0, sharpen: false })).toBe('')
   })
+  it('对比度越界（< -1）被钳制到 -1，不产生非法负值使整条 filter 声明失效', () => {
+    const clamped = gradeCss({ filterName: '青橙', intensity: 0.5, contrast: -1, sharpen: false })
+    const overshoot = gradeCss({ filterName: '青橙', intensity: 0.5, contrast: -3, sharpen: false })
+    expect(overshoot).toBe(clamped)
+    expect(overshoot).toContain('contrast(0)')
+    expect(overshoot).not.toMatch(/contrast\(-/)
+  })
 })

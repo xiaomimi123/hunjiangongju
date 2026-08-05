@@ -47,37 +47,42 @@ export function pickTrans(seqNo: number, offset: number): TransId {
   return TRANS[(((seqNo + offset) % TRANS.length) + TRANS.length) % TRANS.length]
 }
 
-const W = 0.72 // crossfade 窗口秒数（所有转场共用，不占额外时长）
+export const DEFAULT_TRANS_WINDOW = 0.72 // crossfade 窗口秒数（所有转场共用默认值，不占额外时长）
 
-/** 进入场景 n（上一场景 n-1）的转场，全部落在 boundarySec 起的 0.72s 窗内。 */
-export function transTweens(trans: TransId, n: number, boundaryMs: number): string {
+/**
+ * 进入场景 n（上一场景 n-1）的转场，全部落在 boundarySec 起的 windowSec 窗内。
+ * windowSec 缺省=DEFAULT_TRANS_WINDOW，保证不传参数时输出与改动前逐字节一致
+ * （剪映工程提取到 transition.durationMs 时由调用方传入覆盖，见 indexHtml.ts flash 分支）。
+ */
+export function transTweens(trans: TransId, n: number, boundaryMs: number, windowSec: number = DEFAULT_TRANS_WINDOW): string {
   const b = sec(boundaryMs)
+  const w = windowSec
   const nw = `'.s${n}'`
   const pv = `'.s${n - 1}'`
   const lines: string[] = []
   switch (trans) {
     case 'crossfade':
-      lines.push(`  tl.fromTo(${nw}, { opacity: 0 }, { opacity: 1, duration: ${W}, ease: 'sine.inOut' }, ${b});`)
-      lines.push(`  tl.to(${pv}, { opacity: 0, duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.fromTo(${nw}, { opacity: 0 }, { opacity: 1, duration: ${w}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.to(${pv}, { opacity: 0, duration: ${w}, ease: 'sine.inOut' }, ${b});`)
       break
     case 'wipe':
       lines.push(`  tl.set(${nw}, { opacity: 1 }, ${b});`)
-      lines.push(`  tl.fromTo(${nw}, { clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)', duration: ${W}, ease: 'power2.inOut' }, ${b});`)
-      lines.push(`  tl.set(${pv}, { opacity: 0 }, ${Math.round((b + W) * 1000) / 1000});`)
+      lines.push(`  tl.fromTo(${nw}, { clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0% 0 0)', duration: ${w}, ease: 'power2.inOut' }, ${b});`)
+      lines.push(`  tl.set(${pv}, { opacity: 0 }, ${Math.round((b + w) * 1000) / 1000});`)
       break
     case 'shard':
-      lines.push(`  tl.fromTo(${nw}, { opacity: 0 }, { opacity: 1, duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.fromTo(${nw}, { opacity: 0 }, { opacity: 1, duration: ${w}, ease: 'sine.inOut' }, ${b});`)
       lines.push(`  tl.set(${pv}, { opacity: 0 }, ${b});`)
-      lines.push(shardTransTweens(n, boundaryMs))
+      lines.push(shardTransTweens(n, boundaryMs, w))
       break
     case 'glide-push':
       lines.push(`  tl.set(${nw}, { opacity: 1 }, ${b});`)
-      lines.push(`  tl.fromTo(${nw}, { xPercent: 100 }, { xPercent: 0, duration: ${W}, ease: 'power3.out' }, ${b});`)
-      lines.push(`  tl.to(${pv}, { xPercent: -40, opacity: 0, duration: ${W}, ease: 'power3.out' }, ${b});`)
+      lines.push(`  tl.fromTo(${nw}, { xPercent: 100 }, { xPercent: 0, duration: ${w}, ease: 'power3.out' }, ${b});`)
+      lines.push(`  tl.to(${pv}, { xPercent: -40, opacity: 0, duration: ${w}, ease: 'power3.out' }, ${b});`)
       break
     case 'blur-dissolve':
-      lines.push(`  tl.fromTo(${nw}, { opacity: 0, filter: 'blur(18px)' }, { opacity: 1, filter: 'blur(0px)', duration: ${W}, ease: 'sine.inOut' }, ${b});`)
-      lines.push(`  tl.to(${pv}, { opacity: 0, filter: 'blur(18px)', duration: ${W}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.fromTo(${nw}, { opacity: 0, filter: 'blur(18px)' }, { opacity: 1, filter: 'blur(0px)', duration: ${w}, ease: 'sine.inOut' }, ${b});`)
+      lines.push(`  tl.to(${pv}, { opacity: 0, filter: 'blur(18px)', duration: ${w}, ease: 'sine.inOut' }, ${b});`)
       break
   }
   return lines.join('\n')
@@ -134,10 +139,10 @@ export function shardOpeningTweens(): string {
   ].join('\n')
 }
 
-/** shard 转场：上一场景碎片层随 crossfade 同刻碎裂散开。 */
-export function shardTransTweens(n: number, boundaryMs: number): string {
+/** shard 转场：上一场景碎片层随 crossfade 同刻碎裂散开。windowSec 缺省=DEFAULT_TRANS_WINDOW，与 transTweens 的窗口保持一致。 */
+export function shardTransTweens(n: number, boundaryMs: number, windowSec: number = DEFAULT_TRANS_WINDOW): string {
   const b = sec(boundaryMs)
-  const hideAt = Math.round((b + W) * 1000) / 1000
+  const hideAt = Math.round((b + windowSec) * 1000) / 1000
   return [
     `  tl.set('.ts${n}', { opacity: 1 }, ${b});`,
     `  tl.to('.ts${n} .shard', { scale: 1.3, y: -50, rotation: 12, opacity: 0, duration: 0.5, ease: 'power1.in', stagger: { amount: 0.26, from: 'edges' } }, ${b});`,

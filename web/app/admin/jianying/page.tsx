@@ -52,8 +52,12 @@ type Row = { icon: '✓' | '⚠' | '✗'; label: string; text: string }
 // 新版剪映(约 6.5+，含 iOS 19.x)加密 draft_content.json（密文不以 { 开头）。
 // 同工程的 Timelines/<id>/template.json 是等价明文时间线，自动回退到它。
 async function readDraftText(files: File[], draftFile: File): Promise<string> {
-  const head = await draftFile.slice(0, 1).text()
-  if (head === '{') return draftFile.text()
+  // 切 1 字节可能正好切在 UTF-8 BOM(EF BB BF)中间,解出乱码/替换字符——带 BOM 的合法明文
+  // draft_content.json 会被误判成密文。多切几字节,剥掉 BOM/空白后再判断是否以 { 开头。
+  const BOM = String.fromCharCode(0xfeff)
+  const headRaw = await draftFile.slice(0, 8).text()
+  const head = (headRaw.startsWith(BOM) ? headRaw.slice(1) : headRaw).trimStart()
+  if (head.startsWith('{')) return draftFile.text()
   const plain = files.find((f) => {
     const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? ''
     return f.name === 'template.json' && rel.includes('/Timelines/')
@@ -191,10 +195,23 @@ export default function JianyingTemplatePage() {
     if (st && st.bodyCount > 0) {
       rows.push({ icon: '✓', label: '结构', text: `开场 ${(st.openDurationMs / 1000).toFixed(1)}s · 快闪 ${st.flashCount} 张 @${st.flashMinClipMs}–${Math.max(st.flashMinClipMs, st.flashPerClipMs)}ms · 正片 ${st.bodyCount} 段（平均 ${(st.bodyAvgMs / 1000).toFixed(1)}s）` })
     }
-    rows.push({ icon: '✓', label: '转场', text: `叠化 ${tp.transition.durationMs}ms` })
+    // 转场/BGM 音量在解析器里都是"没提取到就回退 DEFAULT_PARAMS 默认值"，而不是留空——
+    // 所以不能只看 tp 里有没有值，要对照 meta.warnings 里对应的固定回退提示，
+    // 否则会出现"✓ 转场 400ms"正上方一条"未找到转场素材"警告的自相矛盾画面。
+    const transitionDefaulted = meta.warnings.some((w) => w.includes('转场'))
+    rows.push(
+      transitionDefaulted
+        ? { icon: '⚠', label: '转场', text: '未识别到，用默认值' }
+        : { icon: '✓', label: '转场', text: `叠化 ${tp.transition.durationMs}ms` },
+    )
     // 曲名来自 parse 响应的 media.bgm[0].title（templateParams 只有音量）
     const song = media?.bgm?.[0]?.title
-    rows.push({ icon: '✓', label: '配乐', text: `${song ? `《${song}》 ` : ''}音量 ${tp.audio.bgmVolume.toFixed(2)}` })
+    const bgmVolumeDefaulted = meta.warnings.some((w) => w.includes('BGM 音量') || w === '音频解析失败')
+    rows.push(
+      bgmVolumeDefaulted
+        ? { icon: '⚠', label: '配乐', text: `${song ? `《${song}》 ` : ''}未识别到音量，用默认值` }
+        : { icon: '✓', label: '配乐', text: `${song ? `《${song}》 ` : ''}音量 ${tp.audio.bgmVolume.toFixed(2)}` },
+    )
     const sfx: string[] = []
     if (tp.audio.sfx.openGear) sfx.push('开场音效')
     if (tp.audio.sfx.transitionDrop) sfx.push('转场水滴')

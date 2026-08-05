@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion'
+import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW } from './motion'
 
 describe('pickMove', () => {
   it('确定性、相邻 seqNo 不撞招', () => {
@@ -58,6 +58,36 @@ describe('transTweens', () => {
   })
   it('shard：驱动 .ts2 碎片层', () => {
     expect(transTweens('shard', 2, 2000)).toContain(".ts2 .shard'")
+  })
+})
+
+describe('transTweens windowSec 参数化（剪映提取的 transition.durationMs 接入渲染窗口）', () => {
+  it('不传 windowSec → 与改动前逐字节一致（仍是 DEFAULT_TRANS_WINDOW=0.72s）', () => {
+    expect(DEFAULT_TRANS_WINDOW).toBe(0.72)
+    for (const tr of TRANS) {
+      const out = transTweens(tr, 2, 2000)
+      expect(out).toBe(transTweens(tr, 2, 2000, DEFAULT_TRANS_WINDOW))
+      expect(out).toContain(`duration: ${DEFAULT_TRANS_WINDOW}`)
+    }
+  })
+  it('crossfade 自定义窗口(0.467s) → 两条 tween 的 duration 都跟随，不再是 0.72', () => {
+    const out = transTweens('crossfade', 2, 2000, 0.467)
+    expect(out).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.467")
+    expect(out).toContain("tl.to('.s1', { opacity: 0, duration: 0.467")
+    expect(out).not.toContain('0.72')
+  })
+  it('wipe 自定义窗口 → duration 与依赖 b+window 的 tl.set 偏移同步（boundary=2s + window=0.467s = 2.467）', () => {
+    const out = transTweens('wipe', 2, 2000, 0.467)
+    expect(out).toContain('duration: 0.467')
+    expect(out).toContain("tl.set('.s1', { opacity: 0 }, 2.467);")
+    expect(out).not.toContain('0.72')
+  })
+  it('shard 自定义窗口 → fromTo duration 与 shardTransTweens 的 hideAt(b+window) 同步', () => {
+    const out = transTweens('shard', 2, 2000, 0.467)
+    expect(out).toContain('duration: 0.467')
+    expect(out).toContain("tl.set('.ts2', { opacity: 0 }, 2.467);")
+    // shard 自身散开动画的 0.5s 不是窗口(W)派生值，不应被 windowSec 影响
+    expect(out).toContain('duration: 0.5')
   })
 })
 

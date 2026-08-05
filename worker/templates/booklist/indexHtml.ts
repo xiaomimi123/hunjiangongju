@@ -2,7 +2,7 @@
 // 所有特效叠在既有 startMs/endMs 之上，不新增时长；契约见 docs/superpowers/specs 2026-07-24。
 import { sec } from './util.js'
 import { selectPreset, seedInt, rootVarsCss } from './theme.js'
-import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
+import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW } from './motion.js'
 import { pickEntrance, captionUnit } from './captionsAnim.js'
 import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml, fontFaceCss, flashCss, subtitleVarsCss } from './layout.js'
 import { flashTimeline } from './templateParams.js'
@@ -214,8 +214,16 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
         const mv = p.motion?.moves?.length ? pickMove(i - 1, 0, p.motion.moves) : 'push-in'
         motionLines.push(moveTweens(mv, n, s.startMs, s.endMs, i === segs.length - 1, p.body.photoScale ?? 1.07))
       }
-      // 固定叠化转场
-      motionLines.push(transTweens('crossfade', n, s.startMs))
+      // 固定叠化转场：honour templateParams.transition.durationMs（原来是死数据，renderer 一直硬编码 0.72s 窗口）。
+      // 只有等于渲染器历史默认值(DEFAULT_TRANS_WINDOW=0.72s)时才不传，让 transTweens 走它自己的默认参数，
+      // 保证「确实没有别的取值要求」的调用逐字节不变；其余情况（含 parseTemplateParams 自身回退的 0.4s）一律传入。
+      // 窗口不得超出当前段自身时长，否则叠化会拖进下一段边界——这里夹住，不产出跨段重叠的 tween。
+      const extractedWindowSec = p.transition.durationMs / 1000
+      const segLenSec = sec(s.endMs - s.startMs)
+      const transWindowSec = extractedWindowSec > 0 && extractedWindowSec !== DEFAULT_TRANS_WINDOW
+        ? Math.min(extractedWindowSec, Math.max(0.05, segLenSec))
+        : undefined
+      motionLines.push(transTweens('crossfade', n, s.startMs, transWindowSec))
     }
   })
 

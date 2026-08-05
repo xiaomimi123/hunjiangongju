@@ -74,6 +74,37 @@ describe('renderIndexHtml — flash 分支调色注入', () => {
   })
 })
 
+describe('renderIndexHtml — flash 分支叠化转场窗口(接入 transition.durationMs)', () => {
+  it('提取到 467ms → 叠化窗口用 0.467，不再是死数据 0.72', () => {
+    const withTrans: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({ mode: 'flash', transition: { durationMs: 467 } }),
+    }
+    const html = renderIndexHtml(withTrans)
+    expect(html).toContain('duration: 0.467')
+    expect(html).not.toContain('duration: 0.72')
+  })
+  it('未提供 transition → parseTemplateParams 回退默认 400ms，渲染按该值(0.4)，同样不再是硬编码 0.72', () => {
+    const html = renderIndexHtml(flashData) // flashData.templateParams = parseTemplateParams({ mode: 'flash' })
+    expect(html).toContain('duration: 0.4')
+    expect(html).not.toContain('duration: 0.72')
+  })
+  it('窗口超过当前段自身时长时夹住，不产出跨段重叠的 tween', () => {
+    const shortSeg: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({ mode: 'flash', transition: { durationMs: 467 } }),
+      segments: [
+        { seqNo: 1, startMs: 0, endMs: 4000, subtitle: '今天分享的是', imageIndex: 0 },
+        { seqNo: 2, startMs: 4000, endMs: 4300, subtitle: '短段', imageIndex: 1,
+          captionBeats: [{ zh: '短段', startMs: 4000, endMs: 4300 }] },
+      ],
+    }
+    const html = renderIndexHtml(shortSeg)
+    expect(html).toContain('duration: 0.3') // 段长 300ms < 467ms 窗口，夹到段长
+    expect(html).not.toContain('duration: 0.467')
+  })
+})
+
 describe('renderIndexHtml — flash 常驻书名头', () => {
   const withBook: BodyData = {
     ...flashData,

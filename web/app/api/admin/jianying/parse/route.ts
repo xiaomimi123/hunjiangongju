@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { parseJianyingDraft } from '@mixcut/db'
+import { parseJianyingDraft, extractDraftMedia } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
@@ -25,5 +25,5 @@ export const POST = handler(async (req) => {
     }
   }
   const { params, meta } = parseJianyingDraft(draft)
-  return NextResponse.json({ templateParams: params, meta })
+  return NextResponse.json({ templateParams: params, meta, media: extractDraftMedia(draft) })
 })

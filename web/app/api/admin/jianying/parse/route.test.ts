@@ -77,6 +77,21 @@ describe('POST /api/admin/jianying/parse', () => {
     const json = await res.json()
     expect(json.error).toContain('draft_content.json')
   })
+
+  it('响应包含 media 清单(BGM/图片)', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
+    const P = '##_draftpath_placeholder_X_##'
+    const draftJson = {
+      materials: {
+        audios: [{ id: 'a1', name: '歌曲A', path: `${P}/audio/song.mp3`, type: 'extract_music' }],
+        videos: [{ id: 'v1', type: 'photo', path: `${P}/video/pic.png` }],
+      },
+    }
+    const res = await POST(req({ draftJson }), { params: {} })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.media).toEqual({ bgm: [{ fileName: 'song.mp3', title: '歌曲A' }], images: ['pic.png'] })
+  })
 })
 
 afterAll(async () => {

@@ -20,7 +20,7 @@ export {
   parseTemplateParams,
   flashTimeline,
 } from './booklist/templateParams'
-export type { TemplateParams, TemplateMode, FlashTimeline } from './booklist/templateParams'
+export type { TemplateParams, TemplateMode, FlashTimeline, GradeParams } from './booklist/templateParams'
 export { parseJianyingDraft } from './booklist/parseJianyingDraft'
 export type { DraftMeta } from './booklist/parseJianyingDraft'
 export { extractDraftMedia, readFrameworkDefaults } from './booklist/draftMedia'

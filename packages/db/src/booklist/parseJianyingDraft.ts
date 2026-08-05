@@ -6,6 +6,7 @@ import { DEFAULT_PARAMS, parseTemplateParams, type TemplateParams } from './temp
 import { pickBgmSegment } from './draftMedia'
 import { extractDraftStructure, type DraftStructure } from './draftStructure'
 import { extractDraftGrade } from './draftGrade'
+import { extractDraftMoves } from './draftMotion'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -463,6 +464,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     warnings.push('调色解析失败')
   }
 
+  // ---- 运镜 ----
+  let moves: ReturnType<typeof extractDraftMoves> = []
+  try {
+    moves = extractDraftMoves(draft)
+  } catch {
+    warnings.push('运镜解析失败')
+  }
+
   const built: Record<string, unknown> = {
     mode: 'flash',
     open: { durationMs: openDurationMs, shatter, titleText: openTitleText, sfx: openGear },
@@ -471,11 +480,16 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       minClipMs: flashMinClipMs,
       bounceIn: DEFAULT_PARAMS.flash.bounceIn,
       titleFontFamily: DEFAULT_PARAMS.flash.titleFontFamily,
+      ...(structure.flashScale !== 1 ? { scale: structure.flashScale } : {}),
     },
     transition: { type: 'dissolve', durationMs: transitionDurationMs },
-    body: { subtitleFontFamily, subtitleColor, subtitlePosY, kenBurns },
+    body: {
+      subtitleFontFamily, subtitleColor, subtitlePosY, kenBurns,
+      ...(structure.bodyScale !== 1 ? { photoScale: structure.bodyScale } : {}),
+    },
     audio: { bgmVolume, sfx: { openGear, transitionDrop } },
     ...(grade ? { grade } : {}),
+    ...(moves.length ? { motion: { moves } } : {}),
   }
 
   const meta: DraftMeta = {

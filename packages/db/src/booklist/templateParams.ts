@@ -1,6 +1,8 @@
 // booklist 模板参数：结构/节奏/转场/字幕/快闪/音效。默认值=从客户剪映工程解出的配方。
 // P2 学习器将产出同结构对象填 framework.overlayTemplate.__templateParams。
 
+import type { MoveId } from './draftMotion'
+
 export type TemplateMode = 'classic' | 'flash'
 
 export interface GradeParams { filterName: string; intensity: number; contrast: number; sharpen: boolean }
@@ -8,11 +10,12 @@ export interface GradeParams { filterName: string; intensity: number; contrast: 
 export interface TemplateParams {
   mode: TemplateMode
   open: { durationMs: number; shatter: boolean; titleText: string; sfx: boolean }
-  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string }
+  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number }
   transition: { type: 'dissolve'; durationMs: number }
-  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off' }
+  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
   grade?: GradeParams
+  motion?: { moves: MoveId[] }
 }
 
 export const DEFAULT_PARAMS: TemplateParams = {
@@ -49,6 +52,7 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       minClipMs: num(flash.minClipMs, D.flash.minClipMs),
       bounceIn: bool(flash.bounceIn, D.flash.bounceIn),
       titleFontFamily: str(flash.titleFontFamily, D.flash.titleFontFamily),
+      ...(typeof flash.scale === 'number' && Number.isFinite(flash.scale) ? { scale: flash.scale } : {}),
     },
     transition: { type: 'dissolve', durationMs: num(tr.durationMs, D.transition.durationMs) },
     body: {
@@ -56,6 +60,7 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       subtitleColor: str(body.subtitleColor, D.body.subtitleColor),
       subtitlePosY: num(body.subtitlePosY, D.body.subtitlePosY),
       kenBurns: body.kenBurns === 'off' ? 'off' : 'subtle',
+      ...(typeof body.photoScale === 'number' && Number.isFinite(body.photoScale) ? { photoScale: body.photoScale } : {}),
     },
     audio: {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),
@@ -68,6 +73,9 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
           contrast: num((r.grade as Record<string, unknown>).contrast, 0),
           sharpen: bool((r.grade as Record<string, unknown>).sharpen, false),
         } }
+      : {}),
+    ...(Array.isArray(obj(r.motion).moves)
+      ? { motion: { moves: (obj(r.motion).moves as unknown[]).filter((x): x is string => typeof x === 'string' && !!x) as MoveId[] } }
       : {}),
   }
 }

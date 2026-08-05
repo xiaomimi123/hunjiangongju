@@ -59,3 +59,30 @@ describe('grade 可选字段', () => {
       .toEqual({ filterName: '', intensity: 0, contrast: 0, sharpen: false })
   })
 })
+
+describe('motion / flash.scale / body.photoScale 可选字段', () => {
+  it('缺省 → 三者 undefined', () => {
+    const p = parseTemplateParams({})
+    expect(p.motion).toBeUndefined()
+    expect(p.flash.scale).toBeUndefined()
+    expect(p.body.photoScale).toBeUndefined()
+  })
+  it('给合法值 → 原样保留', () => {
+    const p = parseTemplateParams({
+      motion: { moves: ['push-in', 'pan-left'] },
+      flash: { scale: 1.1 },
+      body: { photoScale: 1.2978 },
+    })
+    expect(p.motion).toEqual({ moves: ['push-in', 'pan-left'] })
+    expect(p.flash.scale).toBe(1.1)
+    expect(p.body.photoScale).toBe(1.2978)
+  })
+  it('motion.moves 含非字符串 → 过滤掉', () => {
+    const p = parseTemplateParams({ motion: { moves: ['push-in', 42, null, ''] } })
+    expect(p.motion).toEqual({ moves: ['push-in'] })
+  })
+  it('flash.scale 非数字 → 字段不存在', () => {
+    expect(parseTemplateParams({ flash: { scale: 'x' } }).flash.scale).toBeUndefined()
+    expect(parseTemplateParams({ body: { photoScale: NaN } }).body.photoScale).toBeUndefined()
+  })
+})

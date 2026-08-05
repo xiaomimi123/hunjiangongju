@@ -82,6 +82,12 @@ export default function GeneratePage() {
     finally { setDeleting('') }
   }
 
+  // 剪映导入的框架自动预填「素材库优先 + 原工程文件夹」;运营可手动改回 AI。
+  // 供 openModal 的初始选中框架、以及 select onChange 切换框架时共用。
+  function applyFrameworkPrefill(fw: Framework | undefined) {
+    if (fw?.defaultAssetFolder) { setAssetSource('library'); setAssetFolder(fw.defaultAssetFolder) }
+  }
+
   function openModal() {
     setModalErr(''); setSubject(''); setVariables(''); setFrameworkId('')
     setMode('subject'); setBooks([{ ...EMPTY_BOOK_ROW }]); setVoiceId('')
@@ -91,7 +97,7 @@ export default function GeneratePage() {
     setOpen(true)
     api<Framework[]>('/api/frameworks').then((fw) => {
       setFrameworks(fw)
-      if (fw[0]) setFrameworkId(fw[0].id)
+      if (fw[0]) { setFrameworkId(fw[0].id); applyFrameworkPrefill(fw[0]) }
     }).catch((e) => setModalErr((e as Error).message))
     api<Voice[]>('/api/admin/voices').then(setVoices).catch(() => setVoices([]))
     api<AssetsResp>('/api/admin/assets').then((r) => setAssetFolders(r.folders)).catch(() => setAssetFolders([]))
@@ -213,9 +219,7 @@ export default function GeneratePage() {
             <select className="field mt-1" value={frameworkId} onChange={(e) => {
               const id = e.target.value
               setFrameworkId(id)
-              const fw = frameworks.find((f) => f.id === id)
-              // 剪映导入的框架自动预填「素材库优先 + 原工程文件夹」;运营可手动改回 AI
-              if (fw?.defaultAssetFolder) { setAssetSource('library'); setAssetFolder(fw.defaultAssetFolder) }
+              applyFrameworkPrefill(frameworks.find((f) => f.id === id))
             }}>
               {frameworks.length === 0 && <option value="">（暂无框架）</option>}
               {frameworks.map((f) => (

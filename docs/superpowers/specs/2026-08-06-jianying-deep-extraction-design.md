@@ -54,7 +54,7 @@ flash?:  { …现有; scale?: number }                  // 快闪画面基准缩
 body?:   { …现有; photoScale?: number; subtitleEntrance?: EntranceId }
 ```
 
-**① 调色**。提取 `materials.effects`：`type==='filter'` 取 `name`+`value`（强度）、`type==='contrast'` 取 `value`、`type==='sharpen'` 记布尔。渲染层内置一张**具名滤镜近似表**（首版仅收录实测到的 `青橙` = 冷青阴影 + 暖橙高光的经典电影感配方，用 SVG `feColorMatrix` 实现，Chromium 原生、确定性、seek-safe），按 `intensity` 线性插值到中性。**表中没有的滤镜名只套用 contrast/sharpen 数值，并在解析报告里提示「滤镜『X』未内置，已按对比度近似」**——不假装复刻。
+**① 调色**。提取 `materials.effects`：`type==='filter'` 取 `name`+`value`（强度）、`type==='contrast'` 取 `value`、`type==='sharpen'` 记布尔。渲染层内置一张**具名滤镜近似表**（首版仅收录实测到的 `青橙` = 暖橙偏色 + 提饱和的电影感配方），用 CSS `filter` 函数链（`contrast/saturate/sepia/hue-rotate`）实现——Chromium 原生、静态字符串、seek-safe、无额外 DOM；按 `intensity` 在「中性」与「满配方」之间线性插值。草稿自带的 `contrast` 调整叠乘其上。**表中没有的滤镜名只套用 contrast 数值，并在解析报告里提示「滤镜『X』未内置，已按对比度近似」**——不假装复刻。`sharpen` 无 CSS 对应，只提取展示、不参与渲染，报告中标注。
 
 **② 逐段运镜**。读每段 `common_keyframes` 的 `KFTypePositionX/Y`、`KFTypeScaleX/Y`，取首尾差值分类：|Δx| 最大且 >0.02 → `pan-right`/`pan-left`；|Δy| 最大且 >0.02 → `drift-up`（Δy<0 为上移，剪映 y 轴向上为负）/`tilt-settle`；Δscale >0.02 → `push-in`，<-0.02 → `pull-back`；均不显著 → 该段不产出。产出序列 `motion.moves`。渲染层：正片段的运镜改为**优先按 `moves` 顺序循环取**（生成视频分镜数与原工程不一致，严格一一对应无意义；循环保住节奏感），`moves` 为空时回落现有行为。
 

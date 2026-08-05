@@ -41,6 +41,10 @@ export const POST = handler(async (req) => {
     throw new HttpError(400, 'bgmMeta 不是合法 JSON')
   }
 
+  const watermark = String(form.get('watermark') ?? '').trim()
+  const bodyCountRaw = Number(String(form.get('bodyCount') ?? ''))
+  const bodyCount = Number.isInteger(bodyCountRaw) && bodyCountRaw > 0 ? bodyCountRaw : null
+
   const bgmFiles = form.getAll('bgmFiles').filter((f): f is File => f instanceof File)
   const imageFiles = form.getAll('imageFiles').filter((f): f is File => f instanceof File)
 
@@ -98,6 +102,7 @@ export const POST = handler(async (req) => {
   const overlayTemplate: Record<string, unknown> = { __templateParams: normalized }
   if (defaultBgmId) overlayTemplate.__defaultBgmId = defaultBgmId
   if (assetStat.imported + assetStat.reused > 0) overlayTemplate.__defaultAssetFolder = projectName
+  if (watermark) overlayTemplate.watermark = watermark
 
   const fw = await prisma.copyFramework.create({
     data: {
@@ -105,6 +110,7 @@ export const POST = handler(async (req) => {
       frameworkText: '（从剪映草稿导入的快闪模板，仅含画面/节奏参数，无文案框架，使用前请补充/编辑文案框架）',
       overlayTemplate: overlayTemplate as unknown as Prisma.InputJsonValue,
       createdBy: s.userId,
+      ...(bodyCount ? { suggestedSegmentCount: bodyCount } : {}),
     },
   })
   return NextResponse.json({ id: fw.id, bgm: bgmStat, assets: assetStat, skipped })

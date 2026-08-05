@@ -107,4 +107,26 @@ describe('POST /api/admin/jianying/import', () => {
     const res = await call(makeForm({ name: ' ' }))
     expect(res.status).toBe(400)
   })
+
+  it('带 watermark/bodyCount → 落到 overlayTemplate.watermark 与 suggestedSegmentCount', async () => {
+    const form = makeForm({ projectName: '导入测试工程3' })
+    form.set('watermark', '@欧子好读')
+    form.set('bodyCount', '4')
+    const res = await call(form)
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    createdFw.push(j.id)
+    const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+    expect((fw.overlayTemplate as Record<string, unknown>).watermark).toBe('@欧子好读')
+    expect(fw.suggestedSegmentCount).toBe(4)
+  })
+
+  it('不带这两个字段 → 与现状一致（不写入）', async () => {
+    const res = await call(makeForm({ projectName: '导入测试工程4' }))
+    const j = await res.json()
+    createdFw.push(j.id)
+    const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+    expect((fw.overlayTemplate as Record<string, unknown>).watermark).toBeUndefined()
+    expect(fw.suggestedSegmentCount).toBeNull()
+  })
 })

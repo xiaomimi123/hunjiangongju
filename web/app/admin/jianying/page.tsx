@@ -7,6 +7,20 @@ import PageHeader from '@/components/admin/PageHeader'
 // 内置字体集合（与 packages/db/src/booklist/parseJianyingDraft.ts 的 FONT_FAMILY_MAP 保持一致）。
 const BUILTIN_FONTS = ['字由玄真', '三极极宋 超粗新', '莫雪体']
 
+// 以下类型与 packages/db/src/booklist/{draftStructure,templateParams,parseJianyingDraft}.ts 的导出保持一致——
+// 本页是客户端组件，不能 import @mixcut/db（会带入 Prisma/服务端代码），故在此镜像声明。
+type DraftStructure = {
+  openDurationMs: number
+  flashCount: number
+  flashPerClipMs: number
+  flashMinClipMs: number
+  bodyCount: number
+  bodyAvgMs: number
+  flashScale: number
+  bodyScale: number
+  segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number; materialType?: string }[]
+}
+
 type DraftMeta = {
   canvas: { width: number; height: number }
   durationMs: number
@@ -14,9 +28,39 @@ type DraftMeta = {
   fontsNeeded: string[]
   bookTitles: string[]
   warnings: string[]
+  watermark?: string
+  structure: DraftStructure
+}
+
+type GradeParams = { filterName: string; intensity: number; contrast: number; sharpen: boolean }
+
+type TP = {
+  mode: 'classic' | 'flash'
+  open: { durationMs: number; shatter: boolean; titleText: string; sfx: boolean }
+  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number }
+  transition: { type: 'dissolve'; durationMs: number }
+  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string }
+  audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
+  grade?: GradeParams
+  motion?: { moves: string[] }
 }
 
 type Media = { bgm: { fileName: string; title: string }[]; images: string[] }
+
+type Row = { icon: '✓' | '⚠' | '✗'; label: string; text: string }
+
+// 新版剪映(约 6.5+，含 iOS 19.x)加密 draft_content.json（密文不以 { 开头）。
+// 同工程的 Timelines/<id>/template.json 是等价明文时间线，自动回退到它。
+async function readDraftText(files: File[], draftFile: File): Promise<string> {
+  const head = await draftFile.slice(0, 1).text()
+  if (head === '{') return draftFile.text()
+  const plain = files.find((f) => {
+    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? ''
+    return f.name === 'template.json' && rel.includes('/Timelines/')
+  })
+  if (!plain) throw new Error('这个剪映工程是加密的，且没找到可用的明文时间线（Timelines/*/template.json）')
+  return plain.text()
+}
 
 export default function JianyingTemplatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -25,7 +69,7 @@ export default function JianyingTemplatePage() {
   const [parsing, setParsing] = useState(false)
   const [parseErr, setParseErr] = useState('')
   const [meta, setMeta] = useState<DraftMeta | null>(null)
-  const [templateParams, setTemplateParams] = useState<unknown>(null)
+  const [templateParams, setTemplateParams] = useState<TP | null>(null)
 
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -66,7 +110,17 @@ export default function JianyingTemplatePage() {
     const proj = (draftFile as File & { webkitRelativePath?: string }).webkitRelativePath?.split('/')[0] || '剪映工程'
     setProjectName(proj)
     if (!name.trim()) setName(proj)
-    const text = await draftFile.text()
+    let text: string
+    try {
+      text = await readDraftText(files, draftFile)
+    } catch (e) {
+      setParseErr((e as Error).message)
+      setMeta(null)
+      setTemplateParams(null)
+      setMedia(null)
+      setSavedId('')
+      return
+    }
     setRaw(text)
     await parse(text) // parse 改为可接收显式文本参数,避免 setState 异步竞态
   }
@@ -83,7 +137,7 @@ export default function JianyingTemplatePage() {
     try { draftJson = JSON.parse(src) } catch { /* 交给后端按字符串再尝试解析并报错 */ }
     setParsing(true)
     try {
-      const r = await api<{ templateParams: unknown; meta: DraftMeta; media?: Media }>('/api/admin/jianying/parse', { body: { draftJson } })
+      const r = await api<{ templateParams: TP; meta: DraftMeta; media?: Media }>('/api/admin/jianying/parse', { body: { draftJson } })
       setTemplateParams(r.templateParams)
       setMeta(r.meta)
       setMedia(r.media ?? null)
@@ -101,6 +155,8 @@ export default function JianyingTemplatePage() {
       form.set('name', name.trim())
       form.set('projectName', projectName || '剪映工程')
       form.set('templateParams', JSON.stringify(templateParams))
+      if (meta?.watermark) form.set('watermark', meta.watermark)
+      if (meta?.structure?.bodyCount) form.set('bodyCount', String(meta.structure.bodyCount))
       const foundBgm = media.bgm.filter((b) => byName.has(b.fileName))
       form.set('bgmMeta', JSON.stringify(foundBgm))
       for (const b of foundBgm) form.append('bgmFiles', byName.get(b.fileName)!)
@@ -126,6 +182,37 @@ export default function JianyingTemplatePage() {
       setSavedId(r.id)
     } catch (e) { setSaveErr((e as Error).message) }
     finally { setSaving(false) }
+  }
+
+  // 把结构/参数提取结果译成人话——只说渲染器实际会做的事，缺失的一律标「未识别到」或省略,绝不拿默认值充数。
+  function buildReport(meta: DraftMeta, tp: TP): Row[] {
+    const rows: Row[] = []
+    const st = meta.structure
+    if (st && st.bodyCount > 0) {
+      rows.push({ icon: '✓', label: '结构', text: `开场 ${(st.openDurationMs / 1000).toFixed(1)}s · 快闪 ${st.flashCount} 张 @${st.flashMinClipMs}–${Math.max(st.flashMinClipMs, st.flashPerClipMs)}ms · 正片 ${st.bodyCount} 段（平均 ${(st.bodyAvgMs / 1000).toFixed(1)}s）` })
+    }
+    rows.push({ icon: '✓', label: '转场', text: `叠化 ${tp.transition.durationMs}ms` })
+    // 曲名来自 parse 响应的 media.bgm[0].title（templateParams 只有音量）
+    const song = media?.bgm?.[0]?.title
+    rows.push({ icon: '✓', label: '配乐', text: `${song ? `《${song}》 ` : ''}音量 ${tp.audio.bgmVolume.toFixed(2)}` })
+    const sfx: string[] = []
+    if (tp.audio.sfx.openGear) sfx.push('开场音效')
+    if (tp.audio.sfx.transitionDrop) sfx.push('转场水滴')
+    if (sfx.length) rows.push({ icon: '✓', label: '音效', text: sfx.join('、') })
+    if (meta.watermark) rows.push({ icon: '✓', label: '水印', text: meta.watermark })
+    if (tp.grade) {
+      const known = tp.grade.filterName === '青橙'
+      rows.push({
+        icon: known || !tp.grade.filterName ? '✓' : '⚠',
+        label: '调色',
+        text: `${tp.grade.filterName || '仅对比度'} 强度 ${tp.grade.intensity.toFixed(2)} · 对比度 ${tp.grade.contrast.toFixed(2)}`
+          + (known || !tp.grade.filterName ? '' : '（该滤镜未内置，仅按对比度近似）')
+          + (tp.grade.sharpen ? ' · 锐化（无法复刻）' : ''),
+      })
+    }
+    if (tp.motion?.moves?.length) rows.push({ icon: '✓', label: '运镜', text: `${tp.motion.moves.length} 段有关键帧运镜，按顺序循环套用` })
+    if (tp.body.subtitleEntrance) rows.push({ icon: '✓', label: '字幕入场', text: tp.body.subtitleEntrance })
+    return rows
   }
 
   return (
@@ -202,6 +289,20 @@ export default function JianyingTemplatePage() {
             </div>
           </div>
 
+          {templateParams && (
+            <div>
+              <p className="eyebrow">识别结果</p>
+              <ul className="mt-1 space-y-1 text-sm">
+                {buildReport(meta, templateParams).map((row, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span className={`pill ${row.icon === '✓' ? 'pill-ok' : row.icon === '⚠' ? 'pill-warn' : 'pill-bad'}`}>{row.icon}</span>
+                    <span><b>{row.label}</b>：{row.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div>
             <p className="eyebrow">需要的字体</p>
             {meta.fontsNeeded.length === 0 ? (
@@ -223,6 +324,7 @@ export default function JianyingTemplatePage() {
                 })}
               </ul>
             )}
+            <p className="mt-2"><span className="pill pill-bad">✗</span> <span className="text-sm text-ink3">装饰图层/剪映内置商用字体/艺术蒙版——超出模板能力，未复刻</span></p>
           </div>
 
           {meta.warnings.length > 0 && (

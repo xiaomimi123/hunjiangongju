@@ -17,8 +17,16 @@ function arr(x: unknown): unknown[] {
   return Array.isArray(x) ? x : []
 }
 
-/** 取一条关键帧曲线的首尾值差；点数 < 2 或数据异常 → 0 */
+/**
+ * 取候选属性(props，可能多条，如 ScaleX/ScaleY 都算"缩放")里各自的首尾值差，
+ * 返回绝对值最大的那条（同幅度取先出现者，结果确定）。
+ * 不能只取第一条命中的属性：JSON 里 ScaleY 可能排在 ScaleX 前面，若两者符号相反，
+ * "先出现者优先"会让分类结果取决于素材导出时的字段顺序，而不是真正主导的缩放方向。
+ * 点数 < 2 或无匹配属性 → 0。
+ */
 function deltaOf(kfs: unknown[], props: string[]): number {
+  let best = 0
+  let bestAbs = -1
   for (const raw of kfs) {
     const k = obj(raw)
     const prop = typeof k.property_type === 'string' ? k.property_type : ''
@@ -29,9 +37,13 @@ function deltaOf(kfs: unknown[], props: string[]): number {
       const vs = arr(p.values)
       return typeof vs[0] === 'number' ? (vs[0] as number) : 0
     }
-    return val(pts[pts.length - 1]) - val(pts[0])
+    const d = val(pts[pts.length - 1]) - val(pts[0])
+    if (Math.abs(d) > bestAbs) {
+      bestAbs = Math.abs(d)
+      best = d
+    }
   }
-  return 0
+  return best
 }
 
 export function extractDraftMoves(draft: unknown): MoveId[] {
@@ -50,6 +62,9 @@ export function extractDraftMoves(draft: unknown): MoveId[] {
     const dx = deltaOf(kfs, ['KFTypePositionX'])
     const dy = deltaOf(kfs, ['KFTypePositionY'])
     const dz = deltaOf(kfs, ['KFTypeScaleX', 'KFTypeScaleY'])
+    // 幅度相等时的裁决优先级由数组书写顺序决定：横移(dx) > 竖移(dy) > 缩放(dz)。
+    // Array.prototype.sort 自 ES2019 起保证 stable，幅度相等(如 |dx|===|dz| 精确相等)
+    // 时会保留原数组顺序，即优先选横移——这不是巧合，是本函数依赖的行为。
     const mags: [number, MoveId][] = [
       [Math.abs(dx), dx >= 0 ? 'pan-right' : 'pan-left'],
       [Math.abs(dy), dy < 0 ? 'drift-up' : 'tilt-settle'],

@@ -49,4 +49,14 @@ describe('extractDraftMoves', () => {
     ] }] }
     expect(extractDraftMoves(d)).toEqual(['pan-right'])
   })
+  it('ScaleX/ScaleY 符号相反时取幅度更大者，不受数组书写顺序影响', () => {
+    const d = { tracks: [{ type: 'video', attribute: 1, segments: [
+      { target_timerange: { duration: 1000 } },
+      { target_timerange: { duration: 6_000_000 }, common_keyframes: [
+        kf('KFTypeScaleX', [[0, 1.0], [6000, 1.05]]), // Δ+0.05，排在前面但幅度小
+        kf('KFTypeScaleY', [[0, 1.3], [6000, 1.0]]),  // Δ-0.3，排在后面但幅度大 → 应被选中
+      ] },
+    ] }] }
+    expect(extractDraftMoves(d)).toEqual(['pull-back'])
+  })
 })

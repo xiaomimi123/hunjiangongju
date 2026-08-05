@@ -25,18 +25,66 @@ function basename(p: unknown): string | undefined {
   return b || undefined
 }
 
-export function extractDraftMedia(draft: unknown): DraftMediaWanted {
-  const materials = obj(obj(draft).materials)
-  const bgm: { fileName: string; title: string }[] = []
-  const seenBgm = new Set<string>()
+export interface BgmPick { materialId: string; name: string; volume: number; fileName?: string }
+
+/**
+ * BGM 判据：排除 type==='sound' 的音效轨；在剩余音轨里取「音量有值且 < 1.0」中总覆盖时长最长者。
+ * 依据：剪映里 BGM 必被压在人声之下（实测 新模板 0.4425 / 旧样例 0.692），人声轨音量 >= 1 或缺省。
+ */
+export function pickBgmSegment(draft: unknown): BgmPick | null {
+  const d = obj(draft)
+  const materials = obj(d.materials)
+  const audios = new Map<string, Record<string, unknown>>()
   for (const raw of arr(materials.audios)) {
     const a = obj(raw)
-    const name = typeof a.name === 'string' ? a.name : ''
-    if (!/歌曲/.test(name) || /提取/.test(name)) continue
-    const fileName = basename(a.path)
-    if (!fileName || seenBgm.has(fileName)) continue
-    seenBgm.add(fileName)
-    bgm.push({ fileName, title: name })
+    if (typeof a.id === 'string') audios.set(a.id, a)
+  }
+  const acc = new Map<string, { dur: number; volume: number }>()
+  for (const rawTrack of arr(d.tracks)) {
+    const track = obj(rawTrack)
+    if (track.type !== 'audio') continue
+    for (const rawSeg of arr(track.segments)) {
+      const seg = obj(rawSeg)
+      const mid = typeof seg.material_id === 'string' ? seg.material_id : undefined
+      if (!mid) continue
+      const mat = audios.get(mid)
+      if (!mat || mat.type === 'sound') continue
+      const volume = typeof seg.volume === 'number' ? seg.volume : undefined
+      if (volume === undefined || volume >= 1) continue
+      const dur = typeof obj(seg.target_timerange).duration === 'number' ? (obj(seg.target_timerange).duration as number) : 0
+      const prev = acc.get(mid)
+      acc.set(mid, { dur: (prev?.dur ?? 0) + dur, volume })
+    }
+  }
+  let bestId: string | undefined
+  let best = { dur: -1, volume: 0 }
+  for (const [mid, v] of Array.from(acc)) {
+    if (v.dur > best.dur) { bestId = mid; best = v }
+  }
+  if (!bestId) return null
+  const mat = audios.get(bestId) ?? {}
+  const name = typeof mat.name === 'string' ? mat.name : ''
+  const fileName = basename(mat.path)
+  return { materialId: bestId, name, volume: best.volume, ...(fileName ? { fileName } : {}) }
+}
+
+export function extractDraftMedia(draft: unknown): DraftMediaWanted {
+  const materials = obj(obj(draft).materials)
+  const picked = pickBgmSegment(draft)
+  let bgm: { fileName: string; title: string }[] = []
+  if (picked?.fileName) {
+    bgm = [{ fileName: picked.fileName, title: picked.name || picked.fileName }]
+  } else {
+    // 向后兼容：没有 tracks/volume 信息（如只给了 materials 清单）时，退回按名称判据
+    for (const raw of arr(materials.audios)) {
+      const a = obj(raw)
+      const name = typeof a.name === 'string' ? a.name : ''
+      if (!/歌曲/.test(name) || /提取/.test(name)) continue
+      const fileName = basename(a.path)
+      if (!fileName) continue
+      bgm = [{ fileName, title: name }]
+      break
+    }
   }
   const images: string[] = []
   const seenImg = new Set<string>()

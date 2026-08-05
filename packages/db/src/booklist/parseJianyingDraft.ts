@@ -3,6 +3,7 @@
 // 缺失/异常时回退 DEFAULT_PARAMS 对应值。最终 params 再过一遍 parseTemplateParams 兜底。
 
 import { DEFAULT_PARAMS, parseTemplateParams, type TemplateParams } from './templateParams'
+import { pickBgmSegment } from './draftMedia'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -11,6 +12,7 @@ export interface DraftMeta {
   fontsNeeded: string[] // 去重的字体名（不含路径）
   bookTitles: string[] // 从文字素材《》抽取
   warnings: string[]
+  watermark?: string // 文字里以 @ 开头的一行（如「@欧子好读」）
 }
 
 // ---- 纯函数 helpers（导出以便单测/复用） ----
@@ -98,11 +100,12 @@ function parseTexts(materials: Record<string, unknown>): Map<string, ParsedText>
   return out
 }
 
+// 收集「文字/贴纸轨」段（track.type 为 'sticker' 或 'text'，兼容不同剪映模板导出习惯）
 function collectStickerSegs(tracks: unknown[]): StickerSeg[] {
   const out: StickerSeg[] = []
   for (const rawTrack of tracks) {
     const track = obj(rawTrack)
-    if (track.type !== 'sticker') continue
+    if (track.type !== 'sticker' && track.type !== 'text') continue
     for (const rawSeg of arr(track.segments)) {
       const seg = obj(rawSeg)
       const materialId = typeof seg.material_id === 'string' ? seg.material_id : undefined
@@ -218,6 +221,17 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     warnings.push('bookTitles 解析失败')
   }
 
+  // 水印：文字里以 @ 开头的一行（如「@欧子好读」）→ 供导入时写进 overlayTemplate.watermark
+  let watermark: string | undefined
+  try {
+    for (const t of Array.from(textsById.values())) {
+      const line = t.text.trim()
+      if (line.startsWith('@') && line.length > 1) { watermark = line; break }
+    }
+  } catch {
+    warnings.push('水印解析失败')
+  }
+
   // ---- sticker 段 ----
   let stickers: StickerSeg[] = []
   try {
@@ -233,9 +247,13 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   let openDurationMs = DEFAULT_PARAMS.open.durationMs
   let openTitleMaterialId: string | undefined
   try {
-    const candidates = stickers
+    const isWatermarkText = (text: string) => text.trim().startsWith('@') && text.trim().length > 1
+    const base = stickers
       .map((s) => ({ s, t: textsById.get(s.materialId) }))
-      .filter((x) => x.t && !isBookName(x.t.text) && x.s.y < 0)
+      .filter((x) => x.t && !isBookName(x.t.text) && !isWatermarkText(x.t.text))
+    // 优先取 y<0（沿用原模板"标题上浮"约定）；若无符合项（如另一模板 y 号约定不同），退而取任意候选
+    const preferred = base.filter((x) => x.s.y < 0)
+    const candidates = preferred.length > 0 ? preferred : base
     if (candidates.length > 0) {
       candidates.sort((a, b) => a.s.start - b.s.start)
       const chosen = candidates[0]
@@ -262,7 +280,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
         for (const rawAnim of arr(ma.animations)) {
           const anim = obj(rawAnim)
           const name = typeof anim.name === 'string' ? anim.name : ''
-          if (/破镜|收拢/.test(name)) {
+          if (/破镜|收拢|玻璃|聚集|碎/.test(name)) {
             found = true
             break
           }
@@ -408,28 +426,11 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     if (audioSegs.length === 0) {
       warnings.push('未找到音频轨道，BGM 音量/音效回退默认值')
     } else {
-      // BGM 候选：名称含"歌曲"且不含"提取"，避开剪映自动生成的"提取音乐..."参考轨
-      // （"提取音乐"里含"音乐"这个子串，若仍按 /歌曲|音乐/ 匹配会被误选中）
-      const songCandidates = audioSegs.filter((s) => /歌曲/.test(s.name) && !/提取/.test(s.name))
-      let bgmChosen: AudioSeg | undefined
-      if (songCandidates.length > 0) {
-        songCandidates.sort((a, b) => b.durationUs - a.durationUs)
-        bgmChosen = songCandidates[0]
-      } else {
-        // 没有可识别的"歌曲"候选：退而求其次，取时长最长且有明确 volume 的音轨
-        const withVolume = audioSegs.filter((s) => typeof s.volume === 'number')
-        if (withVolume.length > 0) {
-          withVolume.sort((a, b) => b.durationUs - a.durationUs)
-          bgmChosen = withVolume[0]
-        }
-      }
-      if (bgmChosen && typeof bgmChosen.volume === 'number') {
-        bgmVolume = bgmChosen.volume
-      } else {
-        warnings.push('未找到有效 BGM 音量，回退默认 BGM 音量')
-      }
+      const picked = pickBgmSegment(draft)
+      if (picked) bgmVolume = picked.volume
+      else warnings.push('未找到有效 BGM 音量，回退默认 BGM 音量')
 
-      openGear = audioSegs.some((s) => /齿轮|旋钮/.test(s.name))
+      openGear = audioSegs.some((s) => /齿轮|旋钮|鼠标|单击|点击/.test(s.name))
       transitionDrop = audioSegs.some((s) => /水滴/.test(s.name))
     }
   } catch {
@@ -457,6 +458,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     fontsNeeded,
     bookTitles,
     warnings,
+    ...(watermark ? { watermark } : {}),
   }
 
   return { params: parseTemplateParams(built), meta }

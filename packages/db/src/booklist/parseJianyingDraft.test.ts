@@ -112,3 +112,46 @@ describe('parseJianyingDraft', () => {
     expect(meta.warnings.some((w) => /material_animations|动画素材/.test(w))).toBe(true)
   })
 })
+
+const P = '##_draftpath_placeholder_X_##'
+function textDraft(trackType: 'text' | 'sticker') {
+  return {
+    canvas_config: { width: 834, height: 1112 },
+    duration: 33_500_000,
+    materials: {
+      texts: [
+        { id: 't1', content: JSON.stringify({ text: '今天分享的是', styles: [{ font: { path: 'x/font.ttf' }, fill: { content: { solid: { color: [1, 1, 1] } } } }] }) },
+        { id: 't2', content: JSON.stringify({ text: '@欧子好读', styles: [{ font: { path: 'a/SourceHanSerifCN-Heavy.otf' }, fill: { content: { solid: { color: [1, 1, 1] } } } }] }) },
+      ],
+      material_animations: [{ id: 'an1', animations: [{ name: '玻璃聚集', type: 'in', duration: 1_300_000 }] }],
+      audios: [{ id: 'sfx1', name: '鼠标单击', type: 'sound', path: `${P}/audio/click.mp3` }],
+    },
+    tracks: [
+      { type: trackType, segments: [
+        { material_id: 't1', target_timerange: { start: 200_000, duration: 1_300_000 }, clip: { transform: { y: 0.374 } }, extra_material_refs: [] },
+        { material_id: 't2', target_timerange: { start: 2_967_000, duration: 28_933_000 }, clip: { transform: { y: -0.793 } }, extra_material_refs: [] },
+      ] },
+      { type: 'audio', segments: [{ material_id: 'sfx1', target_timerange: { start: 5_167_000, duration: 367_000 } }] },
+    ],
+  }
+}
+
+describe('文字轨兼容 text 与 sticker', () => {
+  it.each(['text', 'sticker'] as const)('%s 轨都能读出开场标题', (tt) => {
+    const { params } = parseJianyingDraft(textDraft(tt))
+    expect(params.open.titleText).toBe('今天分享的是')
+  })
+  it.each(['text', 'sticker'] as const)('%s 轨都能读出 @ 水印', (tt) => {
+    const { meta } = parseJianyingDraft(textDraft(tt))
+    expect(meta.watermark).toBe('@欧子好读')
+  })
+})
+
+describe('开场动画与音效识别放宽', () => {
+  it('「玻璃聚集」算碎裂开场', () => {
+    expect(parseJianyingDraft(textDraft('text')).params.open.shatter).toBe(true)
+  })
+  it('「鼠标单击」算开场音效', () => {
+    expect(parseJianyingDraft(textDraft('text')).params.audio.sfx.openGear).toBe(true)
+  })
+})

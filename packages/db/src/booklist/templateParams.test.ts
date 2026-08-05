@@ -42,3 +42,20 @@ describe('flashTimeline', () => {
     expect(t.perClipMs).toBe(0)
   })
 })
+
+describe('grade 可选字段', () => {
+  it('缺省 → grade 为 undefined,其余字段与既有默认一致', () => {
+    const p = parseTemplateParams({})
+    expect(p.grade).toBeUndefined()
+    expect(p.body.subtitleColor).toBe(DEFAULT_PARAMS.body.subtitleColor)
+  })
+  it('合法 grade 原样保留并数值兜底', () => {
+    expect(parseTemplateParams({ grade: { filterName: '青橙', intensity: 0.5, contrast: -0.2, sharpen: true } }).grade)
+      .toEqual({ filterName: '青橙', intensity: 0.5, contrast: -0.2, sharpen: true })
+  })
+  it('非法 grade（非对象/字段类型错）→ 丢弃或字段回落', () => {
+    expect(parseTemplateParams({ grade: 'x' }).grade).toBeUndefined()
+    expect(parseTemplateParams({ grade: { filterName: 42, intensity: 'a', contrast: null, sharpen: 1 } }).grade)
+      .toEqual({ filterName: '', intensity: 0, contrast: 0, sharpen: false })
+  })
+})

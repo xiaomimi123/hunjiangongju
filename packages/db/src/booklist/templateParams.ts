@@ -3,6 +3,8 @@
 
 export type TemplateMode = 'classic' | 'flash'
 
+export interface GradeParams { filterName: string; intensity: number; contrast: number; sharpen: boolean }
+
 export interface TemplateParams {
   mode: TemplateMode
   open: { durationMs: number; shatter: boolean; titleText: string; sfx: boolean }
@@ -10,6 +12,7 @@ export interface TemplateParams {
   transition: { type: 'dissolve'; durationMs: number }
   body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off' }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
+  grade?: GradeParams
 }
 
 export const DEFAULT_PARAMS: TemplateParams = {
@@ -58,6 +61,14 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),
       sfx: { openGear: bool(sfx.openGear, D.audio.sfx.openGear), transitionDrop: bool(sfx.transitionDrop, D.audio.sfx.transitionDrop) },
     },
+    ...(r.grade && typeof r.grade === 'object' && !Array.isArray(r.grade)
+      ? { grade: {
+          filterName: str((r.grade as Record<string, unknown>).filterName, ''),
+          intensity: num((r.grade as Record<string, unknown>).intensity, 0),
+          contrast: num((r.grade as Record<string, unknown>).contrast, 0),
+          sharpen: bool((r.grade as Record<string, unknown>).sharpen, false),
+        } }
+      : {}),
   }
 }
 

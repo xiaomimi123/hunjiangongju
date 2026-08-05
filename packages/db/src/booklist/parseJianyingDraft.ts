@@ -5,6 +5,7 @@
 import { DEFAULT_PARAMS, parseTemplateParams, type TemplateParams } from './templateParams'
 import { pickBgmSegment } from './draftMedia'
 import { extractDraftStructure, type DraftStructure } from './draftStructure'
+import { extractDraftGrade } from './draftGrade'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -454,6 +455,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     warnings.push('音频解析失败')
   }
 
+  // ---- 调色 ----
+  let grade: ReturnType<typeof extractDraftGrade> = null
+  try {
+    grade = extractDraftGrade(draft)
+  } catch {
+    warnings.push('调色解析失败')
+  }
+
   const built: Record<string, unknown> = {
     mode: 'flash',
     open: { durationMs: openDurationMs, shatter, titleText: openTitleText, sfx: openGear },
@@ -466,6 +475,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     transition: { type: 'dissolve', durationMs: transitionDurationMs },
     body: { subtitleFontFamily, subtitleColor, subtitlePosY, kenBurns },
     audio: { bgmVolume, sfx: { openGear, transitionDrop } },
+    ...(grade ? { grade } : {}),
   }
 
   const meta: DraftMeta = {

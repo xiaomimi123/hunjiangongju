@@ -221,7 +221,7 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
 
   // 开场标题 + 快闪卡（落在第0段窗口内）
   const openHtml = openTitleHtml(p.open.titleText)
-  const cardsHtml = flashCardsHtml(covers, p.flash.titleFontFamily)
+  const cardsHtml = flashCardsHtml(covers, p.flash.titleFontFamily, p.flash.scale)
   const flashTweens = [openTitleTweens(t.openEndMs), flashCardsTweens(covers, t, p.flash.bounceIn)].join('\n')
 
   // 正片字幕：仅第1..N段（第0段视觉是快闪，不出底部字幕）

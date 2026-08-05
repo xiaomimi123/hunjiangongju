@@ -11,8 +11,8 @@ export interface DraftStructure {
   flashMinClipMs: number
   bodyCount: number
   bodyAvgMs: number
-  flashScale: number // 快闪段 clip.scale.x 中位数——只取素材 type==='photo' 的段（无则 1）
-  bodyScale: number  // 正片段 clip.scale.x 中位数——只取素材 type==='photo' 的段（无则 1）
+  flashScale: number // 快闪段「相对填满(cover)」缩放中位数——只取素材 type==='photo' 的段，换算见 coverRelativeScale（无则 1）
+  bodyScale: number  // 正片段「相对填满(cover)」缩放中位数——只取素材 type==='photo' 的段，换算见 coverRelativeScale（无则 1）
   segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number; materialType?: string }[]
 }
 
@@ -42,6 +42,30 @@ function materialTypeById(materials: Record<string, unknown>): Map<string, strin
   }
   return out
 }
+// material_id → materials.videos[].{width,height}（原始素材像素尺寸，供口径换算用）。
+function materialDimsById(materials: Record<string, unknown>): Map<string, { width: number; height: number }> {
+  const out = new Map<string, { width: number; height: number }>()
+  for (const raw of arr(materials.videos)) {
+    const v = obj(raw)
+    if (typeof v.id === 'string' && typeof v.width === 'number' && v.width > 0 && typeof v.height === 'number' && v.height > 0) {
+      out.set(v.id, { width: v.width, height: v.height })
+    }
+  }
+  return out
+}
+// 剪映 clip.scale=1 语义是「素材完整套入画布」(contain)，不是「填满画布」(cover)。素材宽高比
+// 与画布不一致时，raw scale 里混了补偿宽高比差异的部分；换算成「相对填满」口径
+// (raw / (coverFill/containFit)) 才是创作者真正的构图缩放意图——AI 生成图按画布比例出图,不需要这层补偿。
+// 画布/素材尺寸缺失或非正 → 无法换算,原样返回 raw（不丢段）。
+function coverRelativeScale(rawScale: number, srcW: number | undefined, srcH: number | undefined, canvasW: number, canvasH: number): number {
+  if (!(typeof srcW === 'number' && srcW > 0 && typeof srcH === 'number' && srcH > 0) || !(canvasW > 0 && canvasH > 0)) {
+    return rawScale
+  }
+  const containFit = Math.min(canvasW / srcW, canvasH / srcH)
+  const coverFill = Math.max(canvasW / srcW, canvasH / srcH)
+  if (!(containFit > 0)) return rawScale
+  return rawScale / (coverFill / containFit)
+}
 
 const EMPTY: DraftStructure = {
   openDurationMs: 0, flashCount: 0, flashPerClipMs: 0, flashMinClipMs: 0,
@@ -54,14 +78,22 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
     const tracks = arr(d.tracks).map(obj)
     const main = tracks.find((t) => t.type === 'video' && t.attribute === 1) ?? tracks.find((t) => t.type === 'video')
     if (!main) return EMPTY
-    const typeById = materialTypeById(obj(d.materials))
+    const materials = obj(d.materials)
+    const typeById = materialTypeById(materials)
+    const dimsById = materialDimsById(materials)
+    const cc = obj(d.canvas_config)
+    const canvasW = typeof cc.width === 'number' && cc.width > 0 ? cc.width : 720
+    const canvasH = typeof cc.height === 'number' && cc.height > 0 ? cc.height : 960
     const segs = arr(main.segments).map(obj).map((s) => {
       const tt = obj(s.target_timerange)
       const scale = obj(obj(s.clip).scale).x
       const materialId = typeof s.material_id === 'string' ? s.material_id : undefined
+      const rawScale = typeof scale === 'number' && scale > 0 ? scale : 1
+      const dims = materialId ? dimsById.get(materialId) : undefined
       return {
         durationMs: typeof tt.duration === 'number' ? Math.round(tt.duration / 1000) : 0,
-        scale: typeof scale === 'number' && scale > 0 ? scale : 1,
+        scale: rawScale,
+        relScale: coverRelativeScale(rawScale, dims?.width, dims?.height, canvasW, canvasH),
         materialType: materialId ? typeById.get(materialId) : undefined,
       }
     })
@@ -91,8 +123,8 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
       flashMinClipMs: flashDurs.length ? Math.min(...flashDurs) : 0,
       bodyCount: bodyDurs.length,
       bodyAvgMs: avg(bodyDurs),
-      flashScale: median(segs.filter((s, k) => roles[k] === 'flash' && isPhoto(s)).map((s) => s.scale)),
-      bodyScale: median(segs.filter((s, k) => roles[k] === 'body' && isPhoto(s)).map((s) => s.scale)),
+      flashScale: median(segs.filter((s, k) => roles[k] === 'flash' && isPhoto(s)).map((s) => s.relScale)),
+      bodyScale: median(segs.filter((s, k) => roles[k] === 'body' && isPhoto(s)).map((s) => s.relScale)),
       segments: segs.map((s, k) => ({ index: k, role: roles[k], durationMs: s.durationMs, scale: s.scale, materialType: s.materialType })),
     }
   } catch {

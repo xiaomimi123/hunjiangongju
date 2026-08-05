@@ -18,14 +18,18 @@ export function openTitleTweens(openEndMs: number): string {
   ].join('\n')
 }
 
-export function flashCardsHtml(covers: FlashCover[], titleFontFamily: string): string {
+// coverScale：从剪映草稿提取的 flash.scale（Task 4），静态 CSS transform 烘焙在 .fc-cover 上
+// （该元素本身无 transform；GSAP 的 bounce 只动画父级 .flashcard 的 scale/opacity，两者独立叠加、seek-safe）。
+// 缺省或恰为 1 时不输出任何 transform，保证零回归。
+export function flashCardsHtml(covers: FlashCover[], titleFontFamily: string, coverScale?: number): string {
+  const scaleStyle = typeof coverScale === 'number' && coverScale !== 1 ? `;transform:scale(${coverScale})` : ''
   return covers
     .map((c, i) => {
       const n = i + 1
       const author = c.author && c.author.trim() ? `\n        <div class="fc-author">${esc(c.author)}</div>` : ''
       return (
         `    <div class="flashcard fc${n}" data-layout-ignore>\n` +
-        `      <div class="fc-cover" style="background-image:url('${esc(c.coverSrc)}')"></div>\n` +
+        `      <div class="fc-cover" style="background-image:url('${esc(c.coverSrc)}')${scaleStyle}"></div>\n` +
         `      <div class="fc-title" style="font-family:'${esc(titleFontFamily)}'">《${esc(c.title)}》</div>${author}\n` +
         `    </div>`
       )

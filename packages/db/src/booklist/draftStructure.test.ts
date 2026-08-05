@@ -93,3 +93,46 @@ describe('extractDraftStructure：缩放基准只取 photo 素材段（排除 vi
     expect(s.bodyScale).toBe(1) // 全是 video 素材，photo 段为空 → 回退默认 1（而不是 2/3 的中位数 2.5）
   })
 })
+
+// 剪映 clip.scale=1 语义是"素材完整套入画布内"(contain)，不是"填满画布"(cover)。
+// 素材宽高比与画布不一致时，原始 scale 里混了"补偿宽高比差异"的部分，要换算成"相对填满口径"
+// (rawScale / (coverFill/containFit)) 才是创作者真正的构图缩放意图；AI 生成图按画布比例出图,不需要这层补偿。
+describe('extractDraftStructure：缩放换算为「相对填满(cover)」口径', () => {
+  it('素材宽高比与画布一致 → 相对填满口径下原始 scale 原样通过', () => {
+    const d = {
+      canvas_config: { width: 720, height: 960 }, // 3:4
+      materials: { videos: [{ id: 'p1', type: 'photo', width: 900, height: 1200 }] }, // 也是 3:4
+      tracks: [{ type: 'video', attribute: 1, segments: [
+        { material_id: 'open0', target_timerange: { duration: 1_000_000 }, clip: { scale: { x: 1 } } },
+        { material_id: 'p1', target_timerange: { duration: 5_000_000 }, clip: { scale: { x: 1.25 } } },
+      ] }],
+    }
+    const s = extractDraftStructure(d)
+    expect(s.bodyScale).toBeCloseTo(1.25, 6)
+  })
+  it('素材比画布更「高瘦」→ 换算把宽高比补偿部分除掉', () => {
+    const d = {
+      canvas_config: { width: 800, height: 1000 }, // 0.8
+      materials: { videos: [{ id: 'p1', type: 'photo', width: 1000, height: 2000 }] }, // 0.5，比画布更高瘦
+      tracks: [{ type: 'video', attribute: 1, segments: [
+        { material_id: 'open0', target_timerange: { duration: 1_000_000 }, clip: { scale: { x: 1 } } },
+        { material_id: 'p1', target_timerange: { duration: 5_000_000 }, clip: { scale: { x: 1.6 } } },
+      ] }],
+    }
+    const s = extractDraftStructure(d)
+    // containFit=min(800/1000,1000/2000)=0.5；coverFill=max(...)=0.8；换算 = 1.6/(0.8/0.5) = 1.0
+    expect(s.bodyScale).toBeCloseTo(1.0, 6)
+  })
+  it('素材缺 width/height → 该段回退用原始 scale（不丢段）', () => {
+    const d = {
+      canvas_config: { width: 720, height: 960 },
+      materials: { videos: [{ id: 'p1', type: 'photo' }] }, // 无 width/height
+      tracks: [{ type: 'video', attribute: 1, segments: [
+        { material_id: 'open0', target_timerange: { duration: 1_000_000 }, clip: { scale: { x: 1 } } },
+        { material_id: 'p1', target_timerange: { duration: 5_000_000 }, clip: { scale: { x: 1.3 } } },
+      ] }],
+    }
+    const s = extractDraftStructure(d)
+    expect(s.bodyScale).toBeCloseTo(1.3, 6)
+  })
+})

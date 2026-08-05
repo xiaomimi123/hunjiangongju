@@ -4,6 +4,7 @@
 
 import { DEFAULT_PARAMS, parseTemplateParams, type TemplateParams } from './templateParams'
 import { pickBgmSegment } from './draftMedia'
+import { extractDraftStructure, type DraftStructure } from './draftStructure'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -13,6 +14,7 @@ export interface DraftMeta {
   bookTitles: string[] // 从文字素材《》抽取
   warnings: string[]
   watermark?: string // 文字里以 @ 开头的一行（如「@欧子好读」）
+  structure: DraftStructure // 主视频轨节奏切出的 开场/快闪/正片 三段结构（Task 8 页面报告用）
 }
 
 // ---- 纯函数 helpers（导出以便单测/复用） ----
@@ -142,6 +144,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
         fontsNeeded: [],
         bookTitles: [],
         warnings,
+        structure: extractDraftStructure(draft),
       },
     }
   }
@@ -319,6 +322,16 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     warnings.push('书名快闪解析失败')
   }
 
+  // 画面节奏优先：主视频轨切出的三段结构比「靠《书名》文字段」稳（空白模板没有书名也能切）。
+  let structure = extractDraftStructure(draft)
+  try {
+    if (structure.openDurationMs > 0) openDurationMs = structure.openDurationMs
+    if (structure.flashCount > 0) {
+      flashPerClipMs = structure.flashPerClipMs
+      flashMinClipMs = structure.flashMinClipMs
+    }
+  } catch { warnings.push('画面节奏结构解析失败') }
+
   // ---- 正片字幕样式 ----
   let subtitleFontFamily = DEFAULT_PARAMS.body.subtitleFontFamily
   let subtitleColor = DEFAULT_PARAMS.body.subtitleColor
@@ -462,6 +475,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     fontsNeeded,
     bookTitles,
     warnings,
+    structure,
     ...(watermark ? { watermark } : {}),
   }
 

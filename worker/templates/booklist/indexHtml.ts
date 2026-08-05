@@ -7,6 +7,7 @@ import { pickEntrance, captionUnit } from './captionsAnim.js'
 import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml, fontFaceCss, flashCss, subtitleVarsCss } from './layout.js'
 import { flashTimeline } from './templateParams.js'
 import { openTitleHtml, openTitleTweens, flashCardsHtml, flashCardsTweens } from './flashMontage.js'
+import { gradeCss } from './grade.js'
 
 export interface BodyOverlay {
   title: string
@@ -145,6 +146,8 @@ export function renderIndexHtml(data: BodyData): string {
   const scrim = `    <div class="scrim" data-layout-ignore></div>`
 
   const allTweens = [motionLines.join('\n'), bookHeaderTweens, capTweenParts.join('\n')].filter(Boolean).join('\n')
+  const gradeCssStr = gradeCss(data.templateParams?.grade)
+  const gradeStyleBlock = gradeCssStr ? `\n${gradeCssStr}` : ''
 
   return `<!doctype html>
 <html lang="zh">
@@ -154,7 +157,7 @@ export function renderIndexHtml(data: BodyData): string {
   <title>booklist body</title>
   <style>
 ${rootVarsCss(preset)}
-${baseCss(preset)}
+${baseCss(preset)}${gradeStyleBlock}
   </style>
 </head>
 <body>
@@ -258,6 +261,8 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
   const watermark = watermarkHtml(data.overlay.watermark)
   const fontsCss = fontFaceCss(data.fonts ?? [])
   const allTweens = [motionLines.join('\n'), flashTweens, bookHeaderTweens, capTweenParts.join('\n')].filter(Boolean).join('\n')
+  const gradeCssStr = gradeCss(p.grade)
+  const gradeStyleBlock = gradeCssStr ? `\n${gradeCssStr}` : ''
 
   return `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8" />
@@ -268,7 +273,7 @@ ${rootVarsCss(preset)}
 ${subtitleVarsCss(p.body)}
 ${fontsCss}
 ${baseCss(preset)}
-${flashCss()}
+${flashCss()}${gradeStyleBlock}
 </style></head>
 <body>
 <main id="root" data-composition-id="main" data-start="0" data-duration="${lastEndSec}" data-width="${width}" data-height="${height}">

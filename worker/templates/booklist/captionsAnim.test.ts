@@ -8,6 +8,17 @@ describe('pickEntrance', () => {
   })
 })
 
+describe('pickEntrance 固定入场', () => {
+  it('给了合法 fixed 就恒定返回它', () => {
+    expect(pickEntrance(0, 0, 'char-stagger')).toBe('char-stagger')
+    expect(pickEntrance(7, 3, 'char-stagger')).toBe('char-stagger')
+  })
+  it('非法/未给 → 回落原轮换', () => {
+    expect(pickEntrance(2, 1, 'nope')).toBe(pickEntrance(2, 1))
+    expect(pickEntrance(2, 1)).toBe(pickEntrance(2, 1, undefined))
+  })
+})
+
 describe('captionUnit', () => {
   it('产出 .capN 容器与中文，转义特殊字符', () => {
     const u = captionUnit({ n: 1, entrance: 'fade-up', zh: '第一句 <x>', startMs: 0, endMs: 2000 })

@@ -79,3 +79,38 @@ describe('shardOpeningTweens', () => {
     expect(out).toContain("stagger: { amount: 0.45, from: 'center' } }, 0);")
   })
 })
+
+describe('baseScale 默认值保持现有输出逐字节一致', () => {
+  it.each(['push-in', 'pull-back', 'pan-right', 'pan-left', 'drift-up', 'tilt-settle'] as const)('%s 不传 baseScale 与传 1.07 输出相同', (mv) => {
+    expect(moveTweens(mv, 2, 1000, 5000, false)).toBe(moveTweens(mv, 2, 1000, 5000, false, 1.07))
+  })
+  it('push-in 默认仍是 1.035 → 1.105', () => {
+    const s = moveTweens('push-in', 2, 1000, 5000, false)
+    expect(s).toContain('scale: 1.035')
+    expect(s).toContain('scale: 1.105')
+  })
+})
+
+describe('baseScale 改变推拉基准', () => {
+  it('baseScale 1.3 的 push-in 围绕 1.3 推', () => {
+    const s = moveTweens('push-in', 2, 1000, 5000, false, 1.3)
+    expect(s).toContain('scale: 1.265')
+    expect(s).toContain('scale: 1.335')
+  })
+})
+
+describe('pickMove 序列覆盖', () => {
+  it('给了 moves 就按顺序循环取', () => {
+    const moves = ['pan-right', 'push-in']
+    expect(pickMove(0, 0, moves)).toBe('pan-right')
+    expect(pickMove(1, 0, moves)).toBe('push-in')
+    expect(pickMove(2, 0, moves)).toBe('pan-right')
+  })
+  it('moves 为空/未给 → 回落原轮换', () => {
+    expect(pickMove(3, 1, [])).toBe(pickMove(3, 1))
+    expect(pickMove(3, 1, undefined)).toBe(pickMove(3, 1))
+  })
+  it('moves 含非法值 → 跳过非法项', () => {
+    expect(pickMove(0, 0, ['不存在', 'push-in'])).toBe('push-in')
+  })
+})

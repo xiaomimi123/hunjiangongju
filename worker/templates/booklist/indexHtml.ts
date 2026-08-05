@@ -209,7 +209,11 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       motionLines.push(`  tl.set('.s1', { opacity: 1 }, 0);`)
       if (p.open.shatter) motionLines.push(shardOpeningTweens())
     } else {
-      if (p.body.kenBurns === 'subtle') motionLines.push(moveTweens('push-in', n, s.startMs, s.endMs, i === segs.length - 1))
+      if (p.body.kenBurns === 'subtle') {
+        // 剪映草稿提取到运镜序列时按顺序循环用（分镜数与原工程不一定一致，循环保节奏感）；否则维持原「轻推」
+        const mv = p.motion?.moves?.length ? pickMove(i - 1, 0, p.motion.moves) : 'push-in'
+        motionLines.push(moveTweens(mv, n, s.startMs, s.endMs, i === segs.length - 1, p.body.photoScale ?? 1.07))
+      }
       // 固定叠化转场
       motionLines.push(transTweens('crossfade', n, s.startMs))
     }
@@ -229,7 +233,7 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       ? s.captionBeats : [{ zh: s.subtitle, en: s.subtitleEn, startMs: s.startMs, endMs: s.endMs }]
     for (const b of beats) {
       capIdx++
-      const unit = captionUnit({ n: capIdx, entrance: pickEntrance(capIdx - 1, offset), zh: b.zh, en: (b as { en?: string }).en, startMs: b.startMs, endMs: b.endMs })
+      const unit = captionUnit({ n: capIdx, entrance: pickEntrance(capIdx - 1, offset, p.body.subtitleEntrance), zh: b.zh, en: (b as { en?: string }).en, startMs: b.startMs, endMs: b.endMs })
       capHtmlParts.push(unit.html); capTweenParts.push(unit.tweens)
     }
   })

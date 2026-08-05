@@ -4,7 +4,9 @@ import { sec, esc } from './util.js'
 export type MoveId = 'push-in' | 'pull-back' | 'pan-right' | 'pan-left' | 'drift-up' | 'tilt-settle'
 export const MOVES: MoveId[] = ['push-in', 'pull-back', 'pan-right', 'pan-left', 'drift-up', 'tilt-settle']
 
-export function pickMove(seqNo: number, offset: number): MoveId {
+export function pickMove(seqNo: number, offset: number, moves?: string[]): MoveId {
+  const valid = (moves ?? []).filter((m): m is MoveId => (MOVES as string[]).includes(m))
+  if (valid.length > 0) return valid[((seqNo % valid.length) + valid.length) % valid.length]
   return MOVES[(((seqNo + offset) % MOVES.length) + MOVES.length) % MOVES.length]
 }
 
@@ -13,27 +15,28 @@ export function pickMove(seqNo: number, offset: number): MoveId {
  * pushDur 比段长多 1.2s，保证段末仍在运动（避免定格死板）。所有值字面量。
  * .photo 有 inset:-30px 余量，横摇/上移的 ±24px 不会露底。
  */
-export function moveTweens(move: MoveId, n: number, startMs: number, endMs: number, isLast: boolean): string {
+export function moveTweens(move: MoveId, n: number, startMs: number, endMs: number, isLast: boolean, baseScale = 1.07): string {
   const startSec = sec(startMs)
   const segLenSec = Math.max(0.1, sec(endMs - startMs))
   const dur = Math.round((segLenSec + 1.2) * 1000) / 1000
   const sel = `'.s${n} .photo'`
   const t = (from: string, to: string) =>
     `  tl.fromTo(${sel}, ${from}, { ${to}, duration: ${dur}, ease: 'sine.inOut' }, ${startSec});`
-  const pushTo = isLast ? 1.16 : 1.105
+  const B = baseScale
+  const r = (x: number) => Math.round(x * 1000) / 1000
   switch (move) {
     case 'push-in':
-      return t(`{ scale: 1.035 }`, `scale: ${pushTo}`)
+      return t(`{ scale: ${r(B - 0.035)} }`, `scale: ${r(isLast ? B + 0.09 : B + 0.035)}`)
     case 'pull-back':
-      return t(`{ scale: ${isLast ? 1.2 : 1.14} }`, `scale: 1.04`)
+      return t(`{ scale: ${r(isLast ? B + 0.13 : B + 0.07)} }`, `scale: ${r(B - 0.03)}`)
     case 'pan-right':
-      return t(`{ scale: 1.1, x: -24 }`, `x: 24`)
+      return t(`{ scale: ${r(B + 0.03)}, x: -24 }`, `x: 24`)
     case 'pan-left':
-      return t(`{ scale: 1.1, x: 24 }`, `x: -24`)
+      return t(`{ scale: ${r(B + 0.03)}, x: 24 }`, `x: -24`)
     case 'drift-up':
-      return t(`{ scale: 1.1, y: 24 }`, `y: -24`)
+      return t(`{ scale: ${r(B + 0.03)}, y: 24 }`, `y: -24`)
     case 'tilt-settle':
-      return t(`{ scale: 1.12, rotation: -2 }`, `scale: 1.06, rotation: 0`)
+      return t(`{ scale: ${r(B + 0.05)}, rotation: -2 }`, `scale: ${r(B - 0.01)}, rotation: 0`)
   }
 }
 

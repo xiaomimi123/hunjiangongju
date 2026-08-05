@@ -5,7 +5,8 @@ export type EntranceId = 'fade-up' | 'mask-reveal' | 'char-stagger' | 'slide-in'
 // char-stagger 的无头 seek 兼容性由集成验证（Task 8）确认；若失效从此数组移除即完成降级。
 export const ENTRANCES: EntranceId[] = ['fade-up', 'mask-reveal', 'char-stagger', 'slide-in']
 
-export function pickEntrance(capIndex: number, offset: number): EntranceId {
+export function pickEntrance(capIndex: number, offset: number, fixed?: string): EntranceId {
+  if (fixed && (ENTRANCES as string[]).includes(fixed)) return fixed as EntranceId
   return ENTRANCES[(((capIndex + offset) % ENTRANCES.length) + ENTRANCES.length) % ENTRANCES.length]
 }
 

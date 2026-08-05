@@ -11,9 +11,9 @@ export interface DraftStructure {
   flashMinClipMs: number
   bodyCount: number
   bodyAvgMs: number
-  flashScale: number
-  bodyScale: number
-  segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number }[]
+  flashScale: number // 快闪段 clip.scale.x 中位数——只取素材 type==='photo' 的段（无则 1）
+  bodyScale: number  // 正片段 clip.scale.x 中位数——只取素材 type==='photo' 的段（无则 1）
+  segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number; materialType?: string }[]
 }
 
 function obj(x: unknown): Record<string, unknown> {
@@ -31,6 +31,17 @@ function median(xs: number[]): number {
 function avg(xs: number[]): number {
   return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0
 }
+// material_id → materials.videos[].type（剪映把 photo/video 素材都放在 materials.videos[] 里，靠 type 区分）。
+// AI 生成图会替换 photo 素材位，video 素材是创作者自己的实拍/成片镜头，不是"图片位"，
+// 缩放基准（flashScale/bodyScale）只应参考 photo 段，否则 video 段的满幅 scale=1 会拉偏中位数。
+function materialTypeById(materials: Record<string, unknown>): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const raw of arr(materials.videos)) {
+    const v = obj(raw)
+    if (typeof v.id === 'string' && typeof v.type === 'string') out.set(v.id, v.type)
+  }
+  return out
+}
 
 const EMPTY: DraftStructure = {
   openDurationMs: 0, flashCount: 0, flashPerClipMs: 0, flashMinClipMs: 0,
@@ -39,15 +50,19 @@ const EMPTY: DraftStructure = {
 
 export function extractDraftStructure(draft: unknown): DraftStructure {
   try {
-    const tracks = arr(obj(draft).tracks).map(obj)
+    const d = obj(draft)
+    const tracks = arr(d.tracks).map(obj)
     const main = tracks.find((t) => t.type === 'video' && t.attribute === 1) ?? tracks.find((t) => t.type === 'video')
     if (!main) return EMPTY
+    const typeById = materialTypeById(obj(d.materials))
     const segs = arr(main.segments).map(obj).map((s) => {
       const tt = obj(s.target_timerange)
       const scale = obj(obj(s.clip).scale).x
+      const materialId = typeof s.material_id === 'string' ? s.material_id : undefined
       return {
         durationMs: typeof tt.duration === 'number' ? Math.round(tt.duration / 1000) : 0,
         scale: typeof scale === 'number' && scale > 0 ? scale : 1,
+        materialType: materialId ? typeById.get(materialId) : undefined,
       }
     })
     if (segs.length === 0) return EMPTY
@@ -68,6 +83,7 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
 
     const flashDurs = segs.filter((_, k) => roles[k] === 'flash').map((s) => s.durationMs)
     const bodyDurs = segs.filter((_, k) => roles[k] === 'body').map((s) => s.durationMs)
+    const isPhoto = (s: { materialType?: string }) => s.materialType === 'photo'
     return {
       openDurationMs: segs[0].durationMs,
       flashCount: flashDurs.length,
@@ -75,9 +91,9 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
       flashMinClipMs: flashDurs.length ? Math.min(...flashDurs) : 0,
       bodyCount: bodyDurs.length,
       bodyAvgMs: avg(bodyDurs),
-      flashScale: median(segs.filter((_, k) => roles[k] === 'flash').map((s) => s.scale)),
-      bodyScale: median(segs.filter((_, k) => roles[k] === 'body').map((s) => s.scale)),
-      segments: segs.map((s, k) => ({ index: k, role: roles[k], durationMs: s.durationMs, scale: s.scale })),
+      flashScale: median(segs.filter((s, k) => roles[k] === 'flash' && isPhoto(s)).map((s) => s.scale)),
+      bodyScale: median(segs.filter((s, k) => roles[k] === 'body' && isPhoto(s)).map((s) => s.scale)),
+      segments: segs.map((s, k) => ({ index: k, role: roles[k], durationMs: s.durationMs, scale: s.scale, materialType: s.materialType })),
     }
   } catch {
     return EMPTY

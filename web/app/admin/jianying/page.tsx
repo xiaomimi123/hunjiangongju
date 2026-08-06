@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import { looksLikePlainJsonHead } from '@/lib/draftText'
 import PageHeader from '@/components/admin/PageHeader'
 
 // 内置字体集合（与 packages/db/src/booklist/parseJianyingDraft.ts 的 FONT_FAMILY_MAP 保持一致）。
@@ -65,11 +66,9 @@ const ENTRANCE_LABELS: Record<string, string> = {
 // 同工程的 Timelines/<id>/template.json 是等价明文时间线，自动回退到它。
 async function readDraftText(files: File[], draftFile: File): Promise<string> {
   // 切 1 字节可能正好切在 UTF-8 BOM(EF BB BF)中间,解出乱码/替换字符——带 BOM 的合法明文
-  // draft_content.json 会被误判成密文。多切几字节,剥掉 BOM/空白后再判断是否以 { 开头。
-  const BOM = String.fromCharCode(0xfeff)
+  // draft_content.json 会被误判成密文。多切几字节,再交给 looksLikePlainJsonHead 判断。
   const headRaw = await draftFile.slice(0, 8).text()
-  const head = (headRaw.startsWith(BOM) ? headRaw.slice(1) : headRaw).trimStart()
-  if (head.startsWith('{')) return draftFile.text()
+  if (looksLikePlainJsonHead(headRaw)) return draftFile.text()
   const plain = files.find((f) => {
     const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath ?? ''
     return f.name === 'template.json' && rel.includes('/Timelines/')
@@ -77,6 +76,9 @@ async function readDraftText(files: File[], draftFile: File): Promise<string> {
   if (!plain) throw new Error('这个剪映工程是加密的，且没找到可用的明文时间线（Timelines/*/template.json）')
   return plain.text()
 }
+
+// 单独上传/粘贴入口没有同工程的 Timelines 兜底可用——检测到密文时直接指路到「选择剪映工程文件夹」。
+const ENCRYPTED_DRAFT_HINT = '这份内容看起来是加密的剪映草稿（新版剪映约 6.5+ / iOS 19.x 起默认加密 draft_content.json），请改用上方「选择剪映工程文件夹」整体上传，会自动查找同工程内的明文时间线'
 
 export default function JianyingTemplatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -106,6 +108,16 @@ export default function JianyingTemplatePage() {
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    // 单文件入口没有同工程的 Timelines 明文时间线可回退——密文头就直接指路，不把密文送后端换一个 400。
+    const headRaw = await file.slice(0, 8).text()
+    if (!looksLikePlainJsonHead(headRaw)) {
+      setParseErr(ENCRYPTED_DRAFT_HINT)
+      setMeta(null)
+      setTemplateParams(null)
+      setMedia(null)
+      setSavedId('')
+      return
+    }
     const text = await file.text()
     setRaw(text)
   }
@@ -149,6 +161,9 @@ export default function JianyingTemplatePage() {
     setSavedId('')
     setMedia(null)
     if (!src.trim()) { setParseErr('请上传 draft_content.json 或粘贴其内容'); return }
+    // 粘贴入口同样没有 Timelines 兜底——密文（不以 { 开头）直接指路，不送后端换一个不可操作的 400。
+    // 只挡"看起来不是 JSON"的密文；看起来像 JSON 但解析失败的内容仍照旧交给下面的 JSON.parse/服务端处理。
+    if (!looksLikePlainJsonHead(src)) { setParseErr(ENCRYPTED_DRAFT_HINT); return }
     let draftJson: unknown = src
     try { draftJson = JSON.parse(src) } catch { /* 交给后端按字符串再尝试解析并报错 */ }
     setParsing(true)

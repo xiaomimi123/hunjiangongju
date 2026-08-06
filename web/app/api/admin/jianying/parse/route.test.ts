@@ -78,6 +78,15 @@ describe('POST /api/admin/jianying/parse', () => {
     expect(json.error).toContain('draft_content.json')
   })
 
+  it('draftJson 是密文字符串（不以 { 开头）→ 400 提示疑似加密工程,改传整个文件夹', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
+    const res = await POST(req({ draftJson: 'U2FsdGVkX1+notActuallyJson==' }), { params: {} })
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toContain('加密')
+    expect(json.error).toContain('文件夹')
+  })
+
   it('响应包含 media 清单(BGM/图片)', async () => {
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
     const P = '##_draftpath_placeholder_X_##'

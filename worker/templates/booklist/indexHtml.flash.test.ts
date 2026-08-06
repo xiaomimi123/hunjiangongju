@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderIndexHtml, type BodyData } from './indexHtml'
-import { parseTemplateParams } from './templateParams'
+import { parseTemplateParams, DEFAULT_PARAMS } from './templateParams'
 
 const flashData: BodyData = {
   size: { width: 720, height: 960 },
@@ -75,19 +75,34 @@ describe('renderIndexHtml — flash 分支调色注入', () => {
 })
 
 describe('renderIndexHtml — flash 分支叠化转场窗口(接入 transition.durationMs)', () => {
-  it('提取到 467ms → 叠化窗口用 0.467，不再是死数据 0.72', () => {
+  // 回归锁：transition.durationMs 等于 parseTemplateParams 自己的默认值(400ms)时，
+  // 必须视为"没有真提取到"，不覆盖，窗口保持渲染器历史默认 0.72s——已有框架/未提取到转场的
+  // 工程输出必须逐字节不变。这条测试是 fix round 1 漏掉、fix round 2 补上的守卫。
+  it('durationMs 等于解析器默认值(400ms) → 视为未提取到，窗口仍是 0.72（不覆盖，兼容所有已有框架）', () => {
+    expect(DEFAULT_PARAMS.transition.durationMs).toBe(400)
+    const html = renderIndexHtml(flashData) // flashData.templateParams = parseTemplateParams({ mode: 'flash' })，未给 transition → 走默认值 400ms
+    expect(html).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.72")
+    expect(html).toContain("tl.to('.s1', { opacity: 0, duration: 0.72")
+  })
+  it('真提取到 467ms(新模板样本) → 叠化窗口用 0.467', () => {
     const withTrans: BodyData = {
       ...flashData,
       templateParams: parseTemplateParams({ mode: 'flash', transition: { durationMs: 467 } }),
     }
     const html = renderIndexHtml(withTrans)
-    expect(html).toContain('duration: 0.467')
-    expect(html).not.toContain('duration: 0.72')
+    expect(html).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.467")
+    expect(html).toContain("tl.to('.s1', { opacity: 0, duration: 0.467")
+    expect(html).not.toContain("duration: 0.72, ease: 'sine.inOut' }, 4)")
   })
-  it('未提供 transition → parseTemplateParams 回退默认 400ms，渲染按该值(0.4)，同样不再是硬编码 0.72', () => {
-    const html = renderIndexHtml(flashData) // flashData.templateParams = parseTemplateParams({ mode: 'flash' })
-    expect(html).toContain('duration: 0.4')
-    expect(html).not.toContain('duration: 0.72')
+  it('真提取到 500ms(老模板样本) → 叠化窗口用 0.5', () => {
+    const withTrans: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({ mode: 'flash', transition: { durationMs: 500 } }),
+    }
+    const html = renderIndexHtml(withTrans)
+    expect(html).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.5")
+    expect(html).toContain("tl.to('.s1', { opacity: 0, duration: 0.5")
+    expect(html).not.toContain("duration: 0.72, ease: 'sine.inOut' }, 4)")
   })
   it('窗口超过当前段自身时长时夹住，不产出跨段重叠的 tween', () => {
     const shortSeg: BodyData = {

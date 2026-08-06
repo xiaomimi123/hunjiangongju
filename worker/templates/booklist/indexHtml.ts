@@ -2,10 +2,10 @@
 // 所有特效叠在既有 startMs/endMs 之上，不新增时长；契约见 docs/superpowers/specs 2026-07-24。
 import { sec } from './util.js'
 import { selectPreset, seedInt, rootVarsCss } from './theme.js'
-import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW } from './motion.js'
+import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
 import { pickEntrance, captionUnit } from './captionsAnim.js'
 import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml, fontFaceCss, flashCss, subtitleVarsCss } from './layout.js'
-import { flashTimeline } from './templateParams.js'
+import { flashTimeline, DEFAULT_PARAMS } from './templateParams.js'
 import { openTitleHtml, openTitleTweens, flashCardsHtml, flashCardsTweens } from './flashMontage.js'
 import { gradeCss } from './grade.js'
 
@@ -215,12 +215,19 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
         motionLines.push(moveTweens(mv, n, s.startMs, s.endMs, i === segs.length - 1, p.body.photoScale ?? 1.07))
       }
       // 固定叠化转场：honour templateParams.transition.durationMs（原来是死数据，renderer 一直硬编码 0.72s 窗口）。
-      // 只有等于渲染器历史默认值(DEFAULT_TRANS_WINDOW=0.72s)时才不传，让 transTweens 走它自己的默认参数，
-      // 保证「确实没有别的取值要求」的调用逐字节不变；其余情况（含 parseTemplateParams 自身回退的 0.4s）一律传入。
-      // 窗口不得超出当前段自身时长，否则叠化会拖进下一段边界——这里夹住，不产出跨段重叠的 tween。
+      // transition.durationMs 不是可选字段——parseTemplateParams 在没提取到时也会填 DEFAULT_PARAMS 的 400ms，
+      // 所以不能拿它是否等于渲染器的 DEFAULT_TRANS_WINDOW(0.72) 来判断"是否真提取到"：那样几乎每个框架
+      // （包括所有已有、未走本次改动前逻辑重新导出的框架）都会被判定为"不同于默认值"而被覆盖，
+      // 把已上线框架的转场从 720ms 静默改成 400ms——这是本批次明确不允许的行为变化。
+      // 正确判断依据是"是否不同于解析器自己的默认值"：只有 durationMs !== DEFAULT_PARAMS.transition.durationMs
+      // 时才代表这是从工程里真提取出来的值，才覆盖；等于默认值时不传，交给 transTweens 走 0.72 的老默认，
+      // 保证已有框架/未提取到转场的输出逐字节不变。
+      // 不可避免的取舍：如果某个工程的转场恰好真的是 400ms（=解析器默认值），会被误判为"未提取"而不覆盖——
+      // 没有额外的"是否真提取到"标记位可用，两害相权，保留已有输出不变更重要。
+      // 窗口同时不得超出当前段自身时长，否则叠化会拖进下一段边界——这里夹住，不产出跨段重叠的 tween。
       const extractedWindowSec = p.transition.durationMs / 1000
       const segLenSec = sec(s.endMs - s.startMs)
-      const transWindowSec = extractedWindowSec > 0 && extractedWindowSec !== DEFAULT_TRANS_WINDOW
+      const transWindowSec = p.transition.durationMs !== DEFAULT_PARAMS.transition.durationMs
         ? Math.min(extractedWindowSec, Math.max(0.05, segLenSec))
         : undefined
       motionLines.push(transTweens('crossfade', n, s.startMs, transWindowSec))

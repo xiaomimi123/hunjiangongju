@@ -108,9 +108,19 @@ export default function JianyingTemplatePage() {
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    // 单文件入口没有同工程的 Timelines 明文时间线可回退——密文头就直接指路，不把密文送后端换一个 400。
-    const headRaw = await file.slice(0, 8).text()
-    if (!looksLikePlainJsonHead(headRaw)) {
+    // 单文件入口没有同工程的 Timelines 明文时间线可回退——但空/空白文件不是"加密"，是"没内容"，
+    // 必须先排掉这种情况（否则操作会去找一个根本没问题的文件夹），再检查密文头，
+    // 命中密文才指路到「选择剪映工程文件夹」。
+    const text = await file.text()
+    if (!text.trim()) {
+      setParseErr('请上传 draft_content.json 或粘贴其内容')
+      setMeta(null)
+      setTemplateParams(null)
+      setMedia(null)
+      setSavedId('')
+      return
+    }
+    if (!looksLikePlainJsonHead(text)) {
       setParseErr(ENCRYPTED_DRAFT_HINT)
       setMeta(null)
       setTemplateParams(null)
@@ -118,7 +128,6 @@ export default function JianyingTemplatePage() {
       setSavedId('')
       return
     }
-    const text = await file.text()
     setRaw(text)
   }
 

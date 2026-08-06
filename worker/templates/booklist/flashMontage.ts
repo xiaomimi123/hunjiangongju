@@ -20,9 +20,11 @@ export function openTitleTweens(openEndMs: number): string {
 
 // coverScale：从剪映草稿提取的 flash.scale（Task 4），静态 CSS transform 烘焙在 .fc-cover 上
 // （该元素本身无 transform；GSAP 的 bounce 只动画父级 .flashcard 的 scale/opacity，两者独立叠加、seek-safe）。
-// 缺省或恰为 1 时不输出任何 transform，保证零回归。
+// 缺省或恰为 1 时不输出任何 transform，保证零回归。coverRelativeScale 的提取口径只会把原始缩放往下调，
+// 所以 <1 的值是可达的；.fc-cover 是 position:absolute;inset:0;background-size:cover，缩小反而会露出
+// overflow:hidden 的 .flashcard 卡片下方的场景——只在 >1（放大不露底）时才输出 transform。
 export function flashCardsHtml(covers: FlashCover[], titleFontFamily: string, coverScale?: number): string {
-  const scaleStyle = typeof coverScale === 'number' && coverScale !== 1 ? `;transform:scale(${coverScale})` : ''
+  const scaleStyle = typeof coverScale === 'number' && coverScale > 1 ? `;transform:scale(${coverScale})` : ''
   return covers
     .map((c, i) => {
       const n = i + 1

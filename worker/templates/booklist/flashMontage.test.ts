@@ -50,4 +50,8 @@ describe('flashCards', () => {
     expect(h).not.toContain('function')
     expect(h).not.toContain('=>')
   })
+  it('coverScale < 1 → 不输出 transform（缩小会露出 overflow:hidden 卡片下的场景，M-3）', () => {
+    const h = flashCardsHtml(covers, 'flash-title', 0.9)
+    expect(h).not.toContain('transform')
+  })
 })

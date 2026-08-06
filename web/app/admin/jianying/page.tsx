@@ -49,6 +49,18 @@ type Media = { bgm: { fileName: string; title: string }[]; images: string[] }
 
 type Row = { icon: '✓' | '⚠' | '✗'; label: string; text: string }
 
+// = packages/db/src/booklist/templateParams.ts DEFAULT_PARAMS.transition.durationMs。
+// 本页是客户端组件，不能 import @mixcut/db（见上方类型镜像声明的说明），故内联该值。
+const TRANSITION_DEFAULT_MS = 400
+
+// 剪映内置的四种入场动画 id → 中文标签；未识别的 id 原样显示，不臆造译名。
+const ENTRANCE_LABELS: Record<string, string> = {
+  'char-stagger': '逐字浮现',
+  'fade-up': '淡入上移',
+  'mask-reveal': '遮罩展开',
+  'slide-in': '侧向滑入',
+}
+
 // 新版剪映(约 6.5+，含 iOS 19.x)加密 draft_content.json（密文不以 { 开头）。
 // 同工程的 Timelines/<id>/template.json 是等价明文时间线，自动回退到它。
 async function readDraftText(files: File[], draftFile: File): Promise<string> {
@@ -193,12 +205,17 @@ export default function JianyingTemplatePage() {
     const rows: Row[] = []
     const st = meta.structure
     if (st && st.bodyCount > 0) {
-      rows.push({ icon: '✓', label: '结构', text: `开场 ${(st.openDurationMs / 1000).toFixed(1)}s · 快闪 ${st.flashCount} 张 @${st.flashMinClipMs}–${Math.max(st.flashMinClipMs, st.flashPerClipMs)}ms · 正片 ${st.bodyCount} 段（平均 ${(st.bodyAvgMs / 1000).toFixed(1)}s）` })
+      // flashPerClipMs/flashMinClipMs 只是原工程节奏的描述——渲染器实际按「书目数均分第0段窗口」
+      // 重新计算每卡时长（见 flashTimeline），minClipMs 只当下限用，不会照抄这里的节奏。
+      rows.push({ icon: '✓', label: '结构', text: `开场 ${(st.openDurationMs / 1000).toFixed(1)}s · 快闪 ${st.flashCount} 张 @${st.flashMinClipMs}–${Math.max(st.flashMinClipMs, st.flashPerClipMs)}ms（原工程节奏；成片按实际书目数均分） · 正片 ${st.bodyCount} 段（平均 ${(st.bodyAvgMs / 1000).toFixed(1)}s）` })
     }
     // 转场/BGM 音量在解析器里都是"没提取到就回退 DEFAULT_PARAMS 默认值"，而不是留空——
     // 所以不能只看 tp 里有没有值，要对照 meta.warnings 里对应的固定回退提示，
     // 否则会出现"✓ 转场 400ms"正上方一条"未找到转场素材"警告的自相矛盾画面。
-    const transitionDefaulted = meta.warnings.some((w) => w.includes('转场'))
+    // 反过来同样要防"假 ✓"：真实转场恰好等于解析器默认值(400ms)时不会推 warning，但渲染器
+    // 把 400ms 视同"未提取到"而不覆盖、仍按 0.72s 老默认渲染——这种情况也必须标 ⚠，否则报告说
+    // "✓ 叠化 400ms"而实际渲染的是 720ms，自相矛盾。
+    const transitionDefaulted = meta.warnings.some((w) => w.includes('转场')) || tp.transition.durationMs === TRANSITION_DEFAULT_MS
     rows.push(
       transitionDefaulted
         ? { icon: '⚠', label: '转场', text: '未识别到，用默认值' }
@@ -219,16 +236,24 @@ export default function JianyingTemplatePage() {
     if (meta.watermark) rows.push({ icon: '✓', label: '水印', text: meta.watermark })
     if (tp.grade) {
       const known = tp.grade.filterName === '青橙'
-      rows.push({
-        icon: known || !tp.grade.filterName ? '✓' : '⚠',
-        label: '调色',
-        text: `${tp.grade.filterName || '仅对比度'} 强度 ${tp.grade.intensity.toFixed(2)} · 对比度 ${tp.grade.contrast.toFixed(2)}`
-          + (known || !tp.grade.filterName ? '' : '（该滤镜未内置，仅按对比度近似）')
-          + (tp.grade.sharpen ? ' · 锐化（无法复刻）' : ''),
-      })
+      // gradeCss 在「无内置配方(known=false) 且 草稿对比度=0」时产出空串——渲染完全不出 filter 声明。
+      // 那种情况下即使 sharpen=true 也不该标 ✓（锐化本来就标了「无法复刻」），必须整行改成 ⚠，
+      // 否则会出现"✓ 调色 仅对比度 强度 0.00 · 对比度 0.00 · 锐化（无法复刻）"——听起来复刻了什么，其实什么都没复刻。
+      const noRecipe = !known && tp.grade.contrast === 0
+      rows.push(
+        noRecipe
+          ? { icon: '⚠', label: '调色', text: '无可复刻的调色（仅锐化，无法复刻）' }
+          : {
+              icon: known || !tp.grade.filterName ? '✓' : '⚠',
+              label: '调色',
+              text: `${tp.grade.filterName || '仅对比度'} 强度 ${tp.grade.intensity.toFixed(2)} · 对比度 ${tp.grade.contrast.toFixed(2)}`
+                + (known || !tp.grade.filterName ? '' : '（该滤镜未内置，仅按对比度近似）')
+                + (tp.grade.sharpen ? ' · 锐化（无法复刻）' : ''),
+            },
+      )
     }
     if (tp.motion?.moves?.length) rows.push({ icon: '✓', label: '运镜', text: `${tp.motion.moves.length} 段有关键帧运镜，按顺序循环套用` })
-    if (tp.body.subtitleEntrance) rows.push({ icon: '✓', label: '字幕入场', text: tp.body.subtitleEntrance })
+    if (tp.body.subtitleEntrance) rows.push({ icon: '✓', label: '字幕入场', text: ENTRANCE_LABELS[tp.body.subtitleEntrance] ?? tp.body.subtitleEntrance })
     return rows
   }
 

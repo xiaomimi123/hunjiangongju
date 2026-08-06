@@ -7,7 +7,7 @@ describe('gradeCss', () => {
   })
   it('具名滤镜「青橙」按强度插值，且叠乘草稿对比度', () => {
     const css = gradeCss({ filterName: '青橙', intensity: 0.5, contrast: -0.2, sharpen: false })
-    expect(css).toContain('.scene .photo')
+    expect(css).toContain('.scene .photo, .scene .bg-fill, .flashcard .fc-cover, .shatter .shard, .tshatter .shard')
     expect(css).toContain('filter:')
     // 强度 0.5 → sepia 0.09 (满配方 0.18 的一半)
     expect(css).toContain('sepia(0.09)')

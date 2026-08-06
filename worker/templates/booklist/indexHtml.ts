@@ -209,7 +209,11 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       motionLines.push(`  tl.set('.s1', { opacity: 1 }, 0);`)
       if (p.open.shatter) motionLines.push(shardOpeningTweens())
     } else {
-      if (p.body.kenBurns === 'subtle') {
+      // kenBurns（来自 material_animations[].material_type 含 'video'）和 motion.moves（来自 common_keyframes）
+      // 是两个独立信号：草稿可能纯靠关键帧做运镜、同时只有文字动画（判成 kenBurns:'off'）。只看 kenBurns 会让
+      // 这类草稿的 moves/photoScale 被整段丢弃——渲染器一直是静止画面，报告却照常说"运镜 N 段…按顺序循环套用"。
+      // 所以只要 moves 非空就必须走运镜分支，不能被 kenBurns==='off' 挡住。
+      if (p.body.kenBurns === 'subtle' || (p.motion?.moves?.length ?? 0) > 0) {
         // 剪映草稿提取到运镜序列时按顺序循环用（分镜数与原工程不一定一致，循环保节奏感）；否则维持原「轻推」
         const mv = p.motion?.moves?.length ? pickMove(i - 1, 0, p.motion.moves) : 'push-in'
         motionLines.push(moveTweens(mv, n, s.startMs, s.endMs, i === segs.length - 1, p.body.photoScale ?? 1.07))
@@ -220,15 +224,18 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       // （包括所有已有、未走本次改动前逻辑重新导出的框架）都会被判定为"不同于默认值"而被覆盖，
       // 把已上线框架的转场从 720ms 静默改成 400ms——这是本批次明确不允许的行为变化。
       // 正确判断依据是"是否不同于解析器自己的默认值"：只有 durationMs !== DEFAULT_PARAMS.transition.durationMs
-      // 时才代表这是从工程里真提取出来的值，才覆盖；等于默认值时不传，交给 transTweens 走 0.72 的老默认，
-      // 保证已有框架/未提取到转场的输出逐字节不变。
+      // 时才代表这是从工程里真提取出来的值，才覆盖；等于默认值时不传，交给 transTweens 走 0.72 的老默认。
+      // 注意这只保证"未提取到转场时长的框架输出不变"——不是"已有框架输出不变"：凡是已经走过剪映导入页
+      // 拿到真实提取值的框架（例如老样例解出的 500ms），这里会把它的叠化窗口从此前写死的 0.72s
+      // 改成工程实测值，这正是本批次要接线的行为变化，只是此前的注释/设计文档把它错误地描述成了"不变"。
       // 不可避免的取舍：如果某个工程的转场恰好真的是 400ms（=解析器默认值），会被误判为"未提取"而不覆盖——
-      // 没有额外的"是否真提取到"标记位可用，两害相权，保留已有输出不变更重要。
-      // 窗口同时不得超出当前段自身时长，否则叠化会拖进下一段边界——这里夹住，不产出跨段重叠的 tween。
+      // 没有额外的"是否真提取到"标记位可用，两害相权，保留"未提取到"这条路径的输出不变更重要。
+      // 窗口同时不得超出当前段自身时长（否则叠化会拖进下一段边界），也不能低至 0（否则等价于硬切，没有叠化
+      // 效果）——这里双向夹住，下限 0.05s。
       const extractedWindowSec = p.transition.durationMs / 1000
       const segLenSec = sec(s.endMs - s.startMs)
       const transWindowSec = p.transition.durationMs !== DEFAULT_PARAMS.transition.durationMs
-        ? Math.min(extractedWindowSec, Math.max(0.05, segLenSec))
+        ? Math.max(0.05, Math.min(extractedWindowSec, Math.max(0.05, segLenSec)))
         : undefined
       motionLines.push(transTweens('crossfade', n, s.startMs, transWindowSec))
     }

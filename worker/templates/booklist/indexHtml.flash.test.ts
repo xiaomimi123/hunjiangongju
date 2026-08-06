@@ -65,7 +65,7 @@ describe('renderIndexHtml — flash 分支调色注入', () => {
     }
     const html = renderIndexHtml(withGrade)
     expect(html).toContain(
-      '.scene .photo, .flashcard .fc-cover { filter: contrast(0.834) saturate(1.126) sepia(0.091) hue-rotate(-5.03deg); }'
+      '.scene .photo, .scene .bg-fill, .flashcard .fc-cover, .shatter .shard, .tshatter .shard { filter: contrast(0.834) saturate(1.126) sepia(0.091) hue-rotate(-5.03deg); }'
     )
   })
   it('templateParams.grade 缺省 → 渲染 HTML 不含任何调色 filter 声明', () => {
@@ -117,6 +117,41 @@ describe('renderIndexHtml — flash 分支叠化转场窗口(接入 transition.d
     const html = renderIndexHtml(shortSeg)
     expect(html).toContain('duration: 0.3') // 段长 300ms < 467ms 窗口，夹到段长
     expect(html).not.toContain('duration: 0.467')
+  })
+})
+
+describe('renderIndexHtml — flash 分支 kenBurns:off 但有 motion.moves 时仍出运镜（I-1）', () => {
+  // kenBurns 来自 material_animations（文字动画信号）、moves 来自 common_keyframes（关键帧信号），
+  // 二者相互独立：草稿可能只有文字动画（kenBurns:'off'）却纯靠关键帧做运镜（moves 非空）。
+  // 此前只看 kenBurns==='subtle' 会把这类草稿的运镜整段丢弃，正片变成静止画面。
+  it('kenBurns:off + moves 非空 → 渲染 HTML 仍含 .sN .photo 的 scale/position tween', () => {
+    const withMoves: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({ mode: 'flash', body: { kenBurns: 'off' }, motion: { moves: ['pan-right'] } }),
+    }
+    const html = renderIndexHtml(withMoves)
+    expect(html).toContain("tl.fromTo('.s2 .photo'")
+    expect(html).toMatch(/'\.s2 \.photo'.*scale:/)
+  })
+  it('kenBurns:off + moves 为空（老框架/未提取到）→ 仍维持零回归，不出运镜 tween', () => {
+    const noMoves: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({ mode: 'flash', body: { kenBurns: 'off' } }),
+    }
+    const html = renderIndexHtml(noMoves)
+    expect(html).not.toContain("tl.fromTo('.s2 .photo'")
+  })
+})
+
+describe('renderIndexHtml — flash 分支叠化转场窗口下限（M-4）', () => {
+  it('真提取到 durationMs=0 → 叠化窗口下限夹到 0.05，不产出 duration: 0 的硬切', () => {
+    const zeroTrans: BodyData = {
+      ...flashData,
+      templateParams: parseTemplateParams({ mode: 'flash', transition: { durationMs: 0 } }),
+    }
+    const html = renderIndexHtml(zeroTrans)
+    expect(html).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.05")
+    expect(html).not.toContain('duration: 0,')
   })
 })
 

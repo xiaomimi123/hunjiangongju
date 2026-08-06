@@ -35,6 +35,8 @@ export function gradeCss(grade: GradeParams | undefined): string {
   if (r3(r.sepia) !== 0) fns.push(`sepia(${r3(r.sepia)})`)
   if (r3(r.hueRotate) !== 0) fns.push(`hue-rotate(${r3(r.hueRotate)}deg)`)
   if (fns.length === 0) return ''
-  // 同时作用于正片画面与快闪书封，保证全片同一调性
-  return `    .scene .photo, .flashcard .fc-cover { filter: ${fns.join(' ')}; }`
+  // 同时作用于正片画面、正片底衬、快闪书封、以及玻璃碎片开场/转场的碎片层，保证全片同一调性——
+  // 遗漏 .bg-fill/.shard 会让玻璃碎裂开场手替换成正片、或 shard 转场时，未调色的碎片/底衬和已调色的
+  // .photo 同框叠化，出现明显的色调跳变（青橙尤其明显），非画布比例素材的letterbox 边缘也会露出未调色的模糊底衬。
+  return `    .scene .photo, .scene .bg-fill, .flashcard .fc-cover, .shatter .shard, .tshatter .shard { filter: ${fns.join(' ')}; }`
 }

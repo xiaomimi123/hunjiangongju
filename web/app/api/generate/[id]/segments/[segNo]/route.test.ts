@@ -51,9 +51,14 @@ async function makeTask() {
 // 现场用 ffmpeg CLI 生成一张真实小图（不经 fluent-ffmpeg，避免其能力探测误判），
 // 用于换图上传，验证 PATCH 触发的 makeThumb 真的能跑通解码。
 async function realPngBytes(color: string): Promise<Buffer> {
-  const tmp = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'seg-src-')), 'x.png')
-  await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=64x64`, '-frames:v', '1', '-update', '1', tmp])
-  return fs.readFile(tmp)
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'seg-src-'))
+  try {
+    const tmp = path.join(dir, 'x.png')
+    await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=64x64`, '-frames:v', '1', '-update', '1', tmp])
+    return await fs.readFile(tmp)
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
 }
 
 function patchReq(taskId: string, fd: FormData) {

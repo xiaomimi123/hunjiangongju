@@ -8,6 +8,7 @@ import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
 import { DATA_DIR } from '@/lib/paths'
+import { makeThumb } from '@/lib/thumb'
 
 const AUDIO_EXT = new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg'])
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
@@ -96,7 +97,14 @@ export const POST = handler(async (req) => {
     }
     const id = randomUUID()
     const rel = `assets/${id}${path.extname(f.name).toLowerCase()}`
-    await fs.writeFile(path.join(DATA_DIR, rel), Buffer.from(await f.arrayBuffer()))
+    const abs = path.join(DATA_DIR, rel)
+    await fs.writeFile(abs, Buffer.from(await f.arrayBuffer()))
+    // 缩略图是锦上添花，绝不能因它失败拖垮批量导入：ffmpeg 缺失、损坏输入等一律吞掉只记 warning。
+    try {
+      await makeThumb(abs)
+    } catch (err) {
+      console.warn(`[jianying/import] makeThumb 异常(已忽略) ${abs}: ${(err as Error).message}`)
+    }
     await prisma.stockAsset.create({ data: { id, kind: 'image', name: assetName, folder: projectName, fileUrl: `/api/files/${rel}` } })
     assetStat.imported++
   }

@@ -3,8 +3,12 @@ import { NextRequest } from 'next/server'
 import os from 'os'
 import path from 'path'
 import fs from 'fs/promises'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { prisma } from '@mixcut/db'
 import { HttpError } from '@/lib/auth'
+
+const execFileAsync = promisify(execFile)
 
 // 路由内部通过 DATA_DIR 常量落盘，需在导入路由前设好，指向临时目录（测试结束整体清理）。
 const tmpDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jianying-import-route-test-'))
@@ -50,6 +54,19 @@ function makeForm(over: Partial<Record<string, string>> = {}) {
   form.append('bgmFiles', new File([new Uint8Array([1, 2, 3])], 'song.mp3', { type: 'audio/mpeg' }))
   form.append('imageFiles', new File([new Uint8Array([9, 9])], 'pic.png', { type: 'image/png' }))
   return form
+}
+
+// 现场用 ffmpeg CLI 生成一张真实小图（同 worker/src/thumb.test.ts / segments route.test.ts
+// 的既有做法），用于验证 makeThumb 真的能对导入的图片跑通解码产出缩略图。
+async function realPngBytes(color: string): Promise<Buffer> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'jianying-import-src-'))
+  try {
+    const tmp = path.join(dir, 'x.png')
+    await execFileAsync('ffmpeg', ['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=64x64`, '-frames:v', '1', '-update', '1', tmp])
+    return await fs.readFile(tmp)
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
+  }
 }
 
 function req(form: FormData) {
@@ -164,5 +181,38 @@ describe('POST /api/admin/jianying/import', () => {
       const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
       expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBeUndefined()
     }
+  })
+
+  it('导入的图片素材同时生成 .thumb.webp 缩略图（否则该素材永远回退原图，Task 5 的性能优化不适用于剪映导入的图库）', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-thumb-1', role: 'operator' })
+    const form = makeForm({ projectName: '导入测试工程-缩略图' })
+    // 替换掉默认桩图片,换成真实可解码的 png
+    form.delete('imageFiles')
+    form.append('imageFiles', new File([await realPngBytes('green')], 'pic.png', { type: 'image/png' }))
+    const res = await call(form)
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    createdFw.push(j.id)
+    const asset = await prisma.stockAsset.findFirstOrThrow({ where: { folder: '导入测试工程-缩略图', name: 'pic' } })
+    createdAssets.push(asset.id)
+    const thumbAbs = path.join(tmpDataDir, 'assets', `${asset.id}.thumb.webp`)
+    const stat = await fs.stat(thumbAbs)
+    expect(stat.size).toBeGreaterThan(0)
+  })
+
+  it('图片无法被 ffmpeg 解码（makeThumb 失败）时，导入本身仍成功（缩略图失败不拖垮批量导入）', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-thumb-2', role: 'operator' })
+    const form = makeForm({ projectName: '导入测试工程-缩略图失败' })
+    form.delete('imageFiles')
+    // 扩展名/MIME 都合法但内容是随机字节，ffmpeg 解码必然失败。
+    const garbage = Buffer.from(Array.from({ length: 500 }, () => Math.floor(Math.random() * 256)))
+    form.append('imageFiles', new File([garbage], 'bad.png', { type: 'image/png' }))
+    const res = await call(form)
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    createdFw.push(j.id)
+    expect(j.assets).toEqual({ imported: 1, reused: 0 })
+    const asset = await prisma.stockAsset.findFirstOrThrow({ where: { folder: '导入测试工程-缩略图失败', name: 'bad' } })
+    createdAssets.push(asset.id)
   })
 })

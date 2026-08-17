@@ -6,6 +6,16 @@ import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
 import { pickAssetsForSegments, readAssetSource } from './stockAssets'
 import { describeScenes, buildSegmentImagePrompt } from './scenePrompts'
+import { makeThumb } from '../thumb'
+
+// 缩略图是锦上添花，绝不能因它失败拖垮生成/上传主流程：ffmpeg 缺失、损坏输入等一律吞掉只记 warning。
+async function makeThumbSafely(abs: string): Promise<void> {
+  try {
+    await makeThumb(abs)
+  } catch (err) {
+    console.warn(`[gen] makeThumb 异常(已忽略) ${abs}: ${(err as Error).message}`)
+  }
+}
 
 // 画风提示词留空时的默认兜底：厚涂油画质感，避免生成画面过于平淡。
 export const DEFAULT_IMAGE_STYLE = '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物'
@@ -66,6 +76,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
       const ext = path.extname(asset.fileUrl) || '.jpg'
       const abs = path.join(dir, `${seg.seqNo}${ext}`)
       await fs.copyFile(urlToAbs(asset.fileUrl), abs)
+      await makeThumbSafely(abs)
       imageUrl = `/api/files/gen/${genTaskId}/${seg.seqNo}${ext}`
     } else {
       // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildSegmentImagePrompt
@@ -89,6 +100,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
 
       const abs = path.join(dir, `${seg.seqNo}.png`)
       await fs.writeFile(abs, png)
+      await makeThumbSafely(abs)
       imageUrl = `/api/files/gen/${genTaskId}/${seg.seqNo}.png`
     }
 

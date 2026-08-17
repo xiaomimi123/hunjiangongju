@@ -6,6 +6,7 @@ import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { DATA_DIR } from '@/lib/paths'
+import { makeThumb } from '@/lib/thumb'
 
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm'])
@@ -62,6 +63,14 @@ export const POST = handler(async (req) => {
     const rel = `assets/${id}${ext}`
     const abs = path.join(DATA_DIR, rel)
     await fs.writeFile(abs, Buffer.from(await file.arrayBuffer()))
+    // 缩略图是锦上添花，绝不能因它失败拖垮上传主流程：ffmpeg 缺失、损坏输入等一律吞掉只记 warning。
+    if (kind === 'image') {
+      try {
+        await makeThumb(abs)
+      } catch (err) {
+        console.warn(`[assets] makeThumb 异常(已忽略) ${abs}: ${(err as Error).message}`)
+      }
+    }
     const asset = await prisma.stockAsset.create({
       data: { id, kind, name, folder, fileUrl: `/api/files/${rel}` },
     })

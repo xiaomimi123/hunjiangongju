@@ -67,10 +67,15 @@
 ### B 侧
 
 **B1 缓存头**：`/api/files/*` 增加
-- `Cache-Control: private, max-age=31536000, immutable`（**必须 `private`**：这些资源需登录才能访问，不可进共享缓存）
+- `Cache-Control: private, no-cache`（**必须 `private`**：这些资源需登录才能访问，不可进共享缓存；**不能用 `immutable`/长 `max-age`**——见下方修正说明）
 - `ETag`（由 `文件大小-mtimeMs` 派生）与 `Last-Modified`，并处理 `If-None-Match`/`If-Modified-Since` 返回 `304`。
 - Range 分片响应（视频）沿用现有逻辑，同样带上校验头。
-- 重新生成单段图片时前端已带 `?t=` 时间戳（`edit/page.tsx`），旧缓存自然失效，**immutable 是安全的**。
+- **修正（fix round 1）**：最初设计写的是 `immutable` + 一年 `max-age`，并假设「重新生成单段图片时前端已带 `?t=` 时间戳（`edit/page.tsx`），旧缓存自然失效，immutable 是安全的」——**这个假设是错的**。`?t=` 破缓存只在 `web/app/admin/generate/[id]/edit/page.tsx` 这一个页面生效；其余所有消费方（`web/app/(student)/works/[id]/page.tsx` 学生详情页、学生首页/素材库、管理端任务详情页等，也就是**学员实际观看/下载视频的页面**）都用裸 URL 访问同一路径。而以下三条流程会在**同一 URL 原地覆盖文件**：
+  1. `web/app/api/generate/[id]/segments/[segNo]/route.ts`（约 44-49 行）：手动换图，覆盖 `gen/<taskId>/<seqNo>.png`；
+  2. `worker/src/gen/generateImage.ts`（约 90-92 行）：AI 重新生成图片，同样覆盖 `gen/<genTaskId>/<seqNo>.png`；
+  3. `worker/src/gen/renderVideo.ts`（约 187 行）：reset-to-edit 后重新渲染，覆盖 `gen/<genTaskId>/final.mp4`。
+  
+  若声明 `immutable`，浏览器在换图/重新渲染后仍可能长期展示旧内容且刷新也无法感知，比本任务要修的「加载慢」更糟。因此最终实现改为 `private, no-cache`：允许浏览器缓存，但每次都必须带 `ETag`/`If-Modified-Since` 回源校验；未变化时命中 `304`（响应体极小，重复打开页面仍不必重下几 MB 的 PNG/MP4），一旦文件被覆盖则立即拿到新内容。放弃的只是「完全跳过往返请求」的收益，换来内容正确性。
 
 **B2 缩略图**：
 - 生成图落盘后，用 ffmpeg 同时产出 `<seq>.thumb.webp`（宽 360、等比、质量约 78，预计 30–60KB）。
@@ -114,7 +119,7 @@ web/app/admin/assets/page.tsx             ← 同上
 
 ## 七、风险与取舍
 
-- **`immutable` 与重新生成**：依赖前端 `?t=` 破缓存。若将来新增不带时间戳的图片更新入口，需同步调整。
+- **不用 `immutable`**：`/api/files/*` 服务的文件并非「写一次永不变」——手动换图（`segments/[segNo]/route.ts`）、AI 重新生成图片（`worker/src/gen/generateImage.ts`）、reset-to-edit 后重新渲染视频（`worker/src/gen/renderVideo.ts`）都会在同一 URL 原地覆盖文件，且只有 `edit/page.tsx` 一处消费方带 `?t=` 破缓存，学生端等其余消费方都是裸 URL。改用 `private, no-cache` 换取「始终校验、内容一变就能立即看到」，代价是保留一次网络往返（但命中未变化时是几乎零流量的 304），这是当前多处原地覆盖场景下更安全的取舍。
 - **缩略图占用磁盘**：每张多约 30–60KB，量级远小于原图，可接受。
 - **`private` 缓存**：CDN/共享缓存不会缓存这些图，符合鉴权要求；带宽收益来自浏览器本地缓存与体积下降，而非边缘缓存。
 - **主题词质量**：由 LLM 给出，可能不稳定；不做强约束，取不到即回退，后台可人工改 `theme`。

@@ -48,13 +48,13 @@ describe('GET /api/files/[...path]', () => {
     expect(res.status).toBe(401)
   })
 
-  it('已登录 → 200 响应带 ETag、Last-Modified、Cache-Control 且含 private 与 immutable', async () => {
+  it('已登录 → 200 响应带 ETag、Last-Modified、Cache-Control 且含 private，不含 immutable（文件会被原地覆盖，不能声明永不变）', async () => {
     getSessionMock.mockResolvedValueOnce({ userId: 'u1', role: 'operator' })
     const res = await GET(req(`http://localhost/api/files/${REL}`), { params: { path: REL.split('/') } })
     expect(res.status).toBe(200)
     const cacheControl = res.headers.get('cache-control') ?? ''
     expect(cacheControl).toContain('private')
-    expect(cacheControl).toContain('immutable')
+    expect(cacheControl).not.toContain('immutable')
     expect(cacheControl).not.toContain('public')
     expect(res.headers.get('etag')).toBeTruthy()
     expect(res.headers.get('last-modified')).toBeTruthy()

@@ -33,10 +33,18 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
   const type = MIME[path.extname(abs).toLowerCase()] ?? 'application/octet-stream'
   const download = req.nextUrl.searchParams.get('download')
 
-  // 强缓存 + 条件请求校验：必须放在鉴权与路径校验之后，避免未登录请求靠 If-None-Match 猜出 304 绕过登录。
+  // 条件请求校验：必须放在鉴权与路径校验之后，避免未登录请求靠 If-None-Match 猜出 304 绕过登录。
   const etag = `W/"${size}-${stat.mtimeMs}"`
   const lastModified = new Date(stat.mtimeMs).toUTCString()
-  const cacheControl = 'private, max-age=31536000, immutable'
+  // 不能用 immutable / 长 max-age：这个路由服务的文件并非"写一次永不变"，同一 URL 会被原地覆盖——
+  //   1) web/app/api/generate/[id]/segments/[segNo]/route.ts 手动换图，覆盖 gen/<taskId>/<seqNo>.png
+  //   2) worker/src/gen/generateImage.ts AI 重新生成图片，同样覆盖 gen/<genTaskId>/<seqNo>.png
+  //   3) worker/src/gen/renderVideo.ts reset-to-edit 后重新渲染，覆盖 gen/<genTaskId>/final.mp4
+  // 除 admin/generate/[id]/edit 页面会加 ?t= 破缓存外，学生端(works/[id] 等)全部用裸 URL 访问，
+  // immutable 会让浏览器在换图/重新渲染后仍长期展示旧内容且刷新也无法感知。
+  // 用 private, no-cache：允许缓存但每次都必须带 ETag/If-Modified-Since 回源校验，
+  // 未变化时 304（几乎零流量），变化后立即拿到新内容。
+  const cacheControl = 'private, no-cache'
   const ifNoneMatch = req.headers.get('if-none-match')
   const ifModifiedSince = req.headers.get('if-modified-since')
   let notModified = false

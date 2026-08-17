@@ -26,6 +26,7 @@ import {
   parseBookList,
   dedupeBooks,
   resolveBookCount,
+  isSameBook,
   type PickedBook,
 } from '@mixcut/db'
 import { readScriptMode } from './generateScript'
@@ -36,16 +37,10 @@ function normalizeTitleLocal(title: string): string {
   return String(title ?? '').replace(/[《》]/g, '').trim()
 }
 
-// 分隔符用转义 NUL（源码里是 \, x, 0, 0 四个可打印 ASCII 字符，运行时才是 NUL 字节），
-// 与 bookPick.ts 的 dedupeBooks 去重 key 统一：NUL 不可能出现在真实书名/作者里，
-// 用空格等可打印字符当分隔符则不然（"活着 " + "余" 与 "活着" + " 余" 会撞出同一个 key）。
-function bookKey(b: { title: string; author: string }): string {
-  return `${normalizeTitleLocal(b.title)}\x00${b.author.trim()}`
-}
-
+// 用 isSameBook（副标题前缀感知）而非精确字符串比较：三级兜底允许学员那本从候选池"借"作者，
+// 借用后学员书用的是原始短标题、候选里保留的是全名版标题，精确匹配会漏判导致同一本书重复出现。
 function excludeBook(pool: PickedBook[], book: { title: string; author: string }): PickedBook[] {
-  const key = bookKey(book)
-  return pool.filter((b) => bookKey(b) !== key)
+  return pool.filter((b) => !isSameBook(b, book))
 }
 
 /** variables.books 已存在且非空 → 运营手填模式，本步骤不得介入 */
@@ -55,9 +50,14 @@ export function hasManualBooks(variables: unknown): boolean {
   return Array.isArray(books) && books.length > 0
 }
 
-/** 学员输入是否真实存在的联网查证 prompt：命中返回作者姓名，否则只回 NO */
+/** 学员输入是否真实存在的联网查证 prompt：命中返回「作者|主题词」，否则只回 NO */
 export function buildVerifySubjectPrompt(subject: string): string {
-  return `请判断《${subject}》是否是一本真实存在的书。如果是，请只回复该书的作者姓名，不要输出任何其它文字；如果不是真实存在的书或你无法确认，请只回复 NO。`
+  return [
+    `请判断《${subject}》是否是一本真实存在的书。`,
+    '如果是，请严格按「作者|主题词」的格式回复：作者姓名（多位作者用、分隔）在前，跟一个竖线 |，',
+    '之后是概括该书主题的词语（2-6 字，如"自我成长""职场""亲密关系"），不要输出任何其它文字；',
+    '如果不是真实存在的书或你无法确认，请只回复 NO。',
+  ].join('')
 }
 
 /** 解析查证响应：NO / 空 / 明显是解释性长文本（非纯作者名）一律视为查证不通过 */
@@ -71,6 +71,45 @@ export function parseVerifiedAuthor(raw: string): string | null {
   // 真实作者名不含换行/中英文标点、且不会太长；命中任一特征视为"解释性文字"而非纯作者名，剔除。
   if (author.length > 20 || /[\n，。；：、！？,.;:!?]/.test(author)) return null
   return author
+}
+
+// parseVerifiedBook 用于剥离查证响应里包裹作者/主题词的书名号、引号：真实作者名/主题词不会
+// 天然带这些符号，模型偶尔会加上，剥掉即可，不视为异常。
+const WRAP_CHARS = new Set(['《', '》', '「', '」', '『', '』', '"', "'", '“', '”', '‘', '’'])
+
+function stripWrap(raw: string): string {
+  const s = raw.trim()
+  let start = 0
+  let end = s.length
+  while (start < end && WRAP_CHARS.has(s[start])) start++
+  while (end > start && WRAP_CHARS.has(s[end - 1])) end--
+  return s.slice(start, end).trim()
+}
+
+// prompt 要求主题词 2-6 字，留一点富余避免把稍长但合理的主题词误伤；明显超长（多半是模型没
+// 遵守格式、把解释性文字塞进来了）才丢弃，此时仍保留已解析出的作者。
+const MAX_THEME_LEN = 8
+
+/** 解析查证响应里的「作者|主题词」：取不到主题词时 theme 为 undefined；NO/空/无作者一律返回空对象 */
+export function parseVerifiedBook(raw: string): { author?: string; theme?: string } {
+  if (typeof raw !== 'string') return {}
+  const trimmed = raw.trim()
+  if (!trimmed) return {}
+  if (/^no$/i.test(trimmed)) return {}
+
+  const sepIdx = trimmed.indexOf('|')
+  const authorRaw = sepIdx === -1 ? trimmed : trimmed.slice(0, sepIdx)
+  const themeRaw = sepIdx === -1 ? '' : trimmed.slice(sepIdx + 1)
+
+  const author = stripWrap(authorRaw)
+  if (!author || /^no$/i.test(author) || author.length > 40 || /\n/.test(author)) return {}
+
+  const result: { author?: string; theme?: string } = { author }
+  const theme = stripWrap(themeRaw)
+  if (theme && theme.length <= MAX_THEME_LEN) {
+    result.theme = theme
+  }
+  return result
 }
 
 /** 候选书二次校验 prompt：只要求回 YES/NO */
@@ -109,32 +148,63 @@ export function buildMockBookList(subject: string, n: number): BookOut[] {
   return [studentBook, ...rest].slice(0, Math.max(1, n))
 }
 
-/** 解析学员输入：库内命中直接用；未命中联网查证；查不到则以原文为书名、作者留空继续 */
-async function resolveStudentBook(subject: string): Promise<BookOut> {
+/** 解析学员输入：三级兜底。
+ * 0. 库内精确命中 → 直接用（不发起任何联网调用）。
+ * 1. 联网查证「作者|主题词」，失败或未拿到作者时重试一次（最多两次调用）。
+ * 2. 仍无作者 → 从调用方传入的候选池里按 isSameBook 命中"全名版"，借用其 author/points。
+ * 3. 仍无 → 书名用原文、作者留空，不写入 BookLibrary。
+ * 返回同时带上本次采用的 theme（查证成功给出主题词则用它，否则回退 subject），供调用方在
+ * collectCandidates 里统一用来做召回与写库，不再让主题词退化成学员的原始输入。 */
+async function resolveStudentBook(subject: string, candidates: PickedBook[]): Promise<{ book: BookOut; theme: string }> {
   try {
     const hit = await findBookByTitle(subject)
-    if (hit) return { title: hit.title, author: hit.author, ...(hit.points ? { points: hit.points } : {}) }
+    if (hit) {
+      return {
+        book: { title: hit.title, author: hit.author, ...(hit.points ? { points: hit.points } : {}) },
+        theme: subject,
+      }
+    }
   } catch (err) {
     console.warn('[gen] select-books: findBookByTitle 失败，继续走联网查证', err)
   }
 
-  try {
-    const raw = await llmComplete({ prompt: buildVerifySubjectPrompt(subject), enableSearch: true, maxTokens: 60 })
-    const author = parseVerifiedAuthor(raw)
-    if (author) {
-      try {
-        const saved = await upsertBook({ title: subject, author, theme: subject, source: 'ai' })
-        return { title: saved.title, author: saved.author, ...(saved.points ? { points: saved.points } : {}) }
-      } catch (err) {
-        console.warn('[gen] select-books: upsertBook(学员书) 失败，仍使用查证结果', err)
-        return { title: normalizeTitleLocal(subject), author }
-      }
+  let parsed: { author?: string; theme?: string } = {}
+  for (let attempt = 0; attempt < 2 && !parsed.author; attempt++) {
+    try {
+      const raw = await llmComplete({ prompt: buildVerifySubjectPrompt(subject), enableSearch: true, maxTokens: 60 })
+      parsed = parseVerifiedBook(raw)
+    } catch (err) {
+      console.warn('[gen] select-books: 学员输入联网查证失败', err)
+      parsed = {}
     }
-  } catch (err) {
-    console.warn('[gen] select-books: 学员输入联网查证失败，回退原文', err)
   }
 
-  return { title: normalizeTitleLocal(subject), author: '' }
+  const theme = parsed.theme ?? subject
+  let author = parsed.author ?? ''
+  let points: string | undefined
+
+  if (!author) {
+    const match = candidates.find((c) => isSameBook({ title: subject, author: '' }, c))
+    if (match) {
+      author = match.author
+      points = match.points
+    }
+  }
+
+  if (!author) {
+    return { book: { title: normalizeTitleLocal(subject), author: '' }, theme }
+  }
+
+  try {
+    const saved = await upsertBook({ title: subject, author, theme, ...(points ? { points } : {}), source: 'ai' })
+    return {
+      book: { title: saved.title, author: saved.author, ...(saved.points ? { points: saved.points } : {}) },
+      theme,
+    }
+  } catch (err) {
+    console.warn('[gen] select-books: upsertBook(学员书) 失败，仍使用查证结果', err)
+    return { book: { title: normalizeTitleLocal(subject), author, ...(points ? { points } : {}) }, theme }
+  }
 }
 
 /** 候选池：书库同主题召回 + 不足时联网推荐并二次校验；学员那本始终被排除在外（外层负责固定排第一） */
@@ -218,11 +288,21 @@ export async function selectBooks(genTaskId: string): Promise<void> {
     return
   }
 
-  const studentBook = await resolveStudentBook(subject)
+  // 三级兜底第 2 级用的候选池：纯书库读取（零网络成本），此时学员输入还没查证出主题词，
+  // 只能先按 subject 兜底召回——万一之前已有同名全名版沉淀在库里，靠 isSameBook 命中借作者。
+  let fallbackCandidates: PickedBook[] = []
+  try {
+    const rows = await findBooksByTheme(subject, n * 2)
+    fallbackCandidates = rows.map((r) => ({ title: r.title, author: r.author, ...(r.points ? { points: r.points } : {}) }))
+  } catch (err) {
+    console.warn('[gen] select-books: 学员书三级兜底候选池读取失败', err)
+  }
+
+  const { book: studentBook, theme } = await resolveStudentBook(subject, fallbackCandidates)
 
   let books: BookOut[] = [studentBook]
   if (n > 1) {
-    const pool = await collectCandidates(subject, studentBook, n)
+    const pool = await collectCandidates(theme, studentBook, n)
     const picked = pickSubset(pool, n - 1, genTaskId)
     books = [studentBook, ...picked]
   }

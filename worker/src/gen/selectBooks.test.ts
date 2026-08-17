@@ -21,6 +21,7 @@ import {
   selectBooks,
   hasManualBooks,
   parseVerifiedAuthor,
+  parseVerifiedBook,
   buildVerifySubjectPrompt,
   parseYesNo,
   buildVerifyCandidatePrompt,
@@ -108,6 +109,26 @@ describe('纯函数：parseVerifiedAuthor', () => {
     expect(parseVerifiedAuthor('余华')).toBe('余华')
     expect(parseVerifiedAuthor('作者：余华')).toBe('余华')
     expect(parseVerifiedAuthor(' 岸见一郎 ')).toBe('岸见一郎')
+  })
+})
+
+describe('纯函数：parseVerifiedBook', () => {
+  it('解析 作者|主题词', () => {
+    expect(parseVerifiedBook('岸见一郎、古贺史健|自我成长')).toEqual({ author: '岸见一郎、古贺史健', theme: '自我成长' })
+  })
+  it('只有作者(无分隔符) → 仅 author', () => {
+    expect(parseVerifiedBook('余华')).toEqual({ author: '余华' })
+  })
+  it('NO / 空 → 空对象', () => {
+    expect(parseVerifiedBook('NO')).toEqual({})
+    expect(parseVerifiedBook('   ')).toEqual({})
+  })
+  it('主题词过长时丢弃主题词但保留作者', () => {
+    const long = '这是一个非常长的主题描述超过限制'
+    expect(parseVerifiedBook(`余华|${long}`)).toEqual({ author: '余华' })
+  })
+  it('去掉包裹的书名号/引号与首尾空白', () => {
+    expect(parseVerifiedBook(' 「余华」 | 「文学」 ')).toEqual({ author: '余华', theme: '文学' })
   })
 })
 
@@ -311,6 +332,116 @@ describe('selectBooks：规则3 —— 学员输入本身始终作为第一本�
     // 不能出现重复：学员那本不会又混进候选部分
     const keys = books.map((b) => `${b.title}\x00${b.author}`)
     expect(new Set(keys).size).toBe(books.length)
+  })
+})
+
+describe('selectBooks：学员书作者三级兜底', () => {
+  it('查证第一次失败、第二次成功 → 只调用两次查证，作者取到（n=1 避免 collectCandidates 引入额外调用）', async () => {
+    const studentTitle = '重试成功测试书'
+    const fw = await makeFramework(1)
+    const task = await makeTask(studentTitle, fw.id)
+    mockLlmComplete.mockRejectedValueOnce(new Error('第一次查证失败')).mockResolvedValueOnce('查证作者甲|重试主题词')
+    trackTheme('重试主题词')
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).toHaveBeenCalledTimes(2)
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const books = (fresh.variables as { books: { title: string; author: string }[] }).books
+    expect(books[0]).toEqual({ title: studentTitle, author: '查证作者甲' })
+  })
+
+  it('查证两次都失败 → 从候选池按 isSameBook 命中全名版借用作者（n=1 避免额外调用）', async () => {
+    const studentTitle = '候选借用测试书'
+    trackTheme(studentTitle)
+    // 预先沉淀一条"全名版"：与学员输入构成副标题前缀关系，theme 恰为 subject（三级兜底此时只能按 subject 兜底召回）
+    await upsertBook({ title: `${studentTitle}：完整版`, author: '借用作者', theme: studentTitle, points: '借用要点' })
+
+    const fw = await makeFramework(1)
+    const task = await makeTask(studentTitle, fw.id)
+    mockLlmComplete.mockRejectedValue(new Error('查证服务不可用'))
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).toHaveBeenCalledTimes(2)
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const books = (fresh.variables as { books: { title: string; author: string }[] }).books
+    expect(books[0]).toEqual({ title: studentTitle, author: '借用作者', points: '借用要点' })
+  })
+
+  it('三级都拿不到 → author 为空且该书未写入 BookLibrary', async () => {
+    const studentTitle = '三级失败测试书'
+    const fw = await makeFramework(1)
+    const task = await makeTask(studentTitle, fw.id)
+    mockLlmComplete.mockRejectedValue(new Error('查证服务不可用'))
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const books = (fresh.variables as { books: { title: string; author: string }[] }).books
+    expect(books[0]).toEqual({ title: studentTitle, author: '' })
+    expect(await prisma.bookLibrary.count({ where: { title: studentTitle } })).toBe(0)
+  })
+
+  it('查证返回「作者|主题词」→ 写库与后续召回都用主题词，而非 subject', async () => {
+    const subject = '主题词召回测试书'
+    const theme = '成长主题词'
+    trackTheme(theme)
+    // 预先沉淀两本已归入该主题词下的候选：只有 collectCandidates 用 theme（而非 subject）召回才会命中
+    await upsertBook({ title: '主题候选甲', author: '候选作者甲', theme })
+    await upsertBook({ title: '主题候选乙', author: '候选作者乙', theme })
+
+    const fw = await makeFramework(3)
+    const task = await makeTask(subject, fw.id)
+    mockLlmComplete.mockResolvedValueOnce(`查证作者乙|${theme}`)
+
+    await selectBooks(task.id)
+
+    // need = n-1-pool.length = 2-2 = 0，书库候选已够，不必再联网推荐 → 只有 1 次查证调用
+    expect(mockLlmComplete).toHaveBeenCalledTimes(1)
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const books = (fresh.variables as { books: { title: string; author: string }[] }).books
+    expect(books.length).toBe(3)
+    expect(books[0]).toEqual({ title: subject, author: '查证作者乙' })
+    const titles = books.map((b) => b.title)
+    expect(titles).toContain('主题候选甲')
+    expect(titles).toContain('主题候选乙')
+
+    const savedRow = await prisma.bookLibrary.findFirst({ where: { title: subject } })
+    expect(savedRow?.theme).toBe(theme)
+  })
+
+  it('查证只返回作者（无主题词）→ theme 回退为 subject，不硬失败', async () => {
+    const subject = '仅作者回退测试书'
+    trackTheme(subject)
+    const fw = await makeFramework(1)
+    const task = await makeTask(subject, fw.id)
+    mockLlmComplete.mockResolvedValueOnce('仅作者甲')
+
+    await selectBooks(task.id)
+
+    const savedRow = await prisma.bookLibrary.findFirst({ where: { title: subject } })
+    expect(savedRow?.author).toBe('仅作者甲')
+    expect(savedRow?.theme).toBe(subject)
+  })
+
+  it('（回归）通过查证成功拿到作者的新路径，学员书仍固定排第一', async () => {
+    const subject = '新路径固定第一测试书'
+    const theme = '新路径主题词'
+    trackTheme(theme)
+    for (const t of ['新路径候选1', '新路径候选2', '新路径候选3', '新路径候选4']) {
+      await upsertBook({ title: t, author: `作者-${t}`, theme })
+    }
+    const fw = await makeFramework(3)
+    const task = await makeTask(subject, fw.id)
+    mockLlmComplete.mockResolvedValueOnce(`固定作者|${theme}`)
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const books = (fresh.variables as { books: { title: string; author: string }[] }).books
+    expect(books.length).toBe(3)
+    expect(books[0]).toEqual({ title: subject, author: '固定作者' })
   })
 })
 

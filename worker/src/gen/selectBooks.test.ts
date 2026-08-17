@@ -309,7 +309,7 @@ describe('selectBooks：规则3 —— 学员输入本身始终作为第一本�
     expect(books.length).toBe(3)
     expect(books[0]).toEqual({ title: studentTitle, author: '固定第一作者' })
     // 不能出现重复：学员那本不会又混进候选部分
-    const keys = books.map((b) => `${b.title} ${b.author}`)
+    const keys = books.map((b) => `${b.title}\x00${b.author}`)
     expect(new Set(keys).size).toBe(books.length)
   })
 })

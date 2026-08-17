@@ -40,11 +40,13 @@ function pill(status: string): { tone: string; label: string } {
 
 type Segment = { seqNo: number; scriptText: string; imageUrl: string | null }
 type RenderTask = { id: string; status: string; videoUrl: string | null; subtitleUrl: string | null }
+type Book = { title: string; author: string }
 type GenTask = {
   id: string; subject: string; status: string
   framework: { id: string; name: string | null } | null
   segments: Segment[]
   renderTasks: RenderTask[]
+  books?: Book[]
 }
 
 const RENDER_TERMINAL = ['EXPORTED', 'QC_FAILED', 'FAILED']
@@ -129,6 +131,19 @@ export default function WorkDetailPage() {
         </ol>
         {working && <p className="mt-3 text-center text-xs text-ink3">正在自动生成，页面会实时刷新…</p>}
       </div>
+
+      {task.books && task.books.length > 0 && (
+        <section className="space-y-2">
+          <p className="eyebrow">本条选用的书目</p>
+          <ul className="card divide-y divide-line p-4">
+            {task.books.map((b, i) => (
+              <li key={`${b.title}-${i}`} className="py-2 text-sm text-ink2 first:pt-0 last:pb-0">
+                《{b.title}》{b.author && <span className="text-ink3">　{b.author}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {preview && (
         <div className="space-y-3">

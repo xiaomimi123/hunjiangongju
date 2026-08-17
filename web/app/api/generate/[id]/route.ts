@@ -22,6 +22,22 @@ export const GET = handler(async (_req, { params }) => {
     },
   })
   if (!task || (task.createdBy && task.createdBy !== session.userId)) throw new HttpError(404, '生成任务不存在')
+
+  // 学员不下发完整 variables：里面可能有运营字段（voiceId/assetSource/assetFolder/scriptMode/__bgmId 等）。
+  // 学员只需要知道本条选用了哪些真实书目，因此只投影 books 的 title/author。
+  if (session.role !== 'operator') {
+    const { variables, ...rest } = task
+    const rawBooks = variables && typeof variables === 'object' && !Array.isArray(variables)
+      ? (variables as Record<string, unknown>).books
+      : undefined
+    const books = Array.isArray(rawBooks)
+      ? rawBooks
+          .filter((b): b is { title: string; author?: string } => !!b && typeof b === 'object' && typeof (b as { title?: unknown }).title === 'string')
+          .map((b) => ({ title: b.title, author: typeof b.author === 'string' ? b.author : '' }))
+      : []
+    return NextResponse.json(books.length > 0 ? { ...rest, books } : rest)
+  }
+
   return NextResponse.json(task)
 })
 

@@ -119,6 +119,35 @@ export function buildScriptPrompt(args: {
   ].join('\n')
 }
 
+export type MarkedLine = { bookIdx: number; text: string }
+
+// 半角 | 与全角 ｜ 都接受：LLM 中文输出常给全角。
+const BOOK_MARK_RE = /^\s*(\d+)\s*[|｜]\s*(.+)$/
+
+/**
+ * 纯函数：解析 LLM 按「书序号|文案」格式输出的行。
+ * 全有或全无——任一非空行不匹配格式、或序号不在 0..bookCount，整体返回 null 表示须回退位置均分。
+ * 半解析会产出比均分更难预料的错位，故不做部分采用。
+ * 序号 0 = 开场白（无书名头）；序号 k = 第 k 本书。
+ * 不变式：返回的每条 text 均非空且已 trim——主流程据此保证 trimToBudget 裁剪后
+ * 文案数组与序号数组仍逐项配对（trimToBudget 内部会 filter(Boolean)，空串会让两者错位）。
+ */
+export function parseBookMarkedLines(lines: string[], bookCount: number): MarkedLine[] | null {
+  const nonEmpty = lines.map((l) => l.trim()).filter(Boolean)
+  if (nonEmpty.length === 0) return null
+  const out: MarkedLine[] = []
+  for (const line of nonEmpty) {
+    const m = BOOK_MARK_RE.exec(line)
+    if (!m) return null
+    const bookIdx = Number(m[1])
+    if (!Number.isInteger(bookIdx) || bookIdx < 0 || bookIdx > bookCount) return null
+    const text = m[2].trim()
+    if (!text) return null
+    out.push({ bookIdx, text })
+  }
+  return out
+}
+
 /**
  * 纯函数：把 `segCount` 个按序生成的分段，均匀、连续地分配到 `bookCount` 本书下标（0-based）。
  * 用于 books 模式——LLM 按书单顺序逐句撰写，本函数只按位置做整除分配，不解析文案内容。

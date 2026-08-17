@@ -32,7 +32,7 @@ export { extractDraftMoves } from './booklist/draftMotion'
 export type { MoveId } from './booklist/draftMotion'
 export { extractSubtitleEntrance } from './booklist/draftTextAnim'
 export type { EntranceId } from './booklist/draftTextAnim'
-export { findBookByTitle, findBooksByTheme, upsertBook } from './booklist/bookLibrary'
+export { findBookByTitle, findBooksByTheme, upsertBook, normalizeTitle } from './booklist/bookLibrary'
 export type { BookRow } from './booklist/bookLibrary'
 export {
   seedFrom,

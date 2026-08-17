@@ -1,14 +1,8 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { prisma } from '@mixcut/db'
+import { prisma, normalizeTitle } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
-
-// 与 packages/db/src/booklist/bookLibrary.ts 的 normalizeTitle 保持一致：
-// 去掉书名号《》与首尾空白，避免改出一条 upsertBook 召回逻辑永远匹配不到的行。
-function normalizeTitle(title: string): string {
-  return title.replace(/[《》]/g, '').trim()
-}
 
 // 行内改书名/作者/主题/要点：这是运营纠错 AI 幻觉书目的主要入口（错作者/查无此书），
 // 各字段独立可选传入；改到与另一行撞 (title, author) 唯一约束 → 409。

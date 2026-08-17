@@ -11,8 +11,9 @@ export interface BookRow {
   source: string
 }
 
-/** 规范化书名：去掉书名号《》与首尾空白，用于统一存储与查询。 */
-function normalizeTitle(title: string): string {
+/** 规范化书名：去掉书名号《》与首尾空白，用于统一存储与查询。
+ * 导出供 web 后台路由（书库增删改查）复用，保证与这里的存储/召回规范化逻辑不会跑偏。 */
+export function normalizeTitle(title: string): string {
   return title.replace(/[《》]/g, '').trim()
 }
 

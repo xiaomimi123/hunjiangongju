@@ -1,14 +1,8 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { prisma } from '@mixcut/db'
+import { prisma, normalizeTitle } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
-
-// 与 packages/db/src/booklist/bookLibrary.ts 的 normalizeTitle 保持一致：
-// 去掉书名号《》与首尾空白，避免这里建的行与 upsertBook 的召回逻辑对不上。
-function normalizeTitle(title: string): string {
-  return title.replace(/[《》]/g, '').trim()
-}
 
 // 书库列表：?theme= 过滤该主题下的书目；始终返回全量去重 themes 清单（供筛选器下拉使用）。
 export const GET = handler(async (req) => {

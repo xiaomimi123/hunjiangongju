@@ -1,5 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { prisma, redisConnection, setGenerationStatus, setSourceStatus, transitionRender } from '@mixcut/db'
+import { selectBooks } from './selectBooks'
 import { generateScript } from './generateScript'
 import { generateImage } from './generateImage'
 import { generateTts } from './generateTts'
@@ -15,6 +16,8 @@ import { extractFramework } from './extractFramework'
 async function dispatch(job: Job): Promise<void> {
   console.log(`[gen] ${job.name}`, job.data)
   switch (job.name) {
+    case 'select-books':
+      return selectBooks(job.data.genTaskId)
     case 'generate-script':
       return generateScript(job.data.genTaskId)
     case 'generate-image':

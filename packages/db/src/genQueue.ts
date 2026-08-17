@@ -2,6 +2,7 @@ import { Queue } from 'bullmq'
 import { redisConnection } from './queue'
 
 export type GenJobName =
+  | 'select-books'
   | 'generate-script' | 'generate-image' | 'generate-tts'
   | 'align-captions' | 'render-visuals' | 'render-video' | 'run-gen-qc'
   | 'download-douyin' | 'transcribe' | 'detect-scenes' | 'extract-framework'

@@ -48,7 +48,7 @@ export const POST = handler(async (req) => {
       autoRender,
     },
   })
-  await enqueueGen('generate-script', { genTaskId: task.id })
+  await enqueueGen('select-books', { genTaskId: task.id })
   return NextResponse.json({ id: task.id })
 })
 

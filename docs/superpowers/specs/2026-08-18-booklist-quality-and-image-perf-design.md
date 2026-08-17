@@ -1,6 +1,6 @@
 # 选书质量修正 + 图片加载优化 设计
 
-> 状态：设计定稿待评审 · 2026-08-18 · 分支 feat/shudan-m1
+> 状态：已实现 · 2026-08-18 · 分支 feat/shudan-m1
 > 目标：修正线上首跑暴露的三个选书缺陷；并把图片加载从「每次全量下大图」改为「小图 + 长期缓存」。
 
 ---
@@ -55,8 +55,9 @@
 
 ### A 侧
 
-**A1 学员书作者兜底三级**：
-1. 联网查证（现状）；失败或取不到作者时 **重试一次**（同一提示词，短超时）。
+**A1 学员书作者兜底**（**实现落地为 4 级**，比最初设计多了第 0 级）：
+0.（实现新增）先查书库精确命中（`findBookByTitle`，标题完全一致）→ 直接用该行的作者/要点，**不发起任何联网调用**。这一级设计阶段未预料到——书库沉淀到一定规模后，学员填的书名本身可能已经被查证过、原样躺在库里，此时应直接复用而不是又打一次联网查证。
+1. 未命中 → 联网查证（现状）；失败或取不到作者时 **重试一次**（同一提示词；**未做超时差异化**，两次调用完全相同，仅是重试）。
 2. 仍无作者 → 在本次候选池里找**书名包含关系**的书（如全名版），取其作者与要点。
 3. 仍无 → 保留 `author: ''`，但记 warning，且**不写入书库**（避免污染）。
 
@@ -88,16 +89,19 @@
 ## 四、架构与改动面
 
 ```
-packages/db/src/booklist/bookPick.ts      ← 新增 isSameBook；dedupeBooks 改用它
-worker/src/gen/selectBooks.ts             ← 学员书三级兜底；主题词；写库用主题词
-worker/src/gen/generateImage.ts           ← 落盘后产出缩略图
-worker/src/thumb.ts (新)                  ← ffmpeg 缩略图封装(worker)
-web/lib/thumb.ts (新)                     ← 同上(web,素材上传用)
-web/app/api/admin/assets/route.ts         ← 上传时产出缩略图
-web/app/api/files/[...path]/route.ts      ← 缓存头 + 304
-web/app/admin/generate/[id]/page.tsx      ← 网格用缩略图(回退原图)
-web/app/admin/generate/[id]/edit/page.tsx ← 同上
-web/app/admin/assets/page.tsx             ← 同上
+packages/db/src/booklist/bookPick.ts               ← 新增 isSameBook；dedupeBooks 改用它
+worker/src/gen/selectBooks.ts                       ← 学员书作者兜底(含库内精确命中快路径)；主题词；写库用主题词
+worker/src/gen/generateImage.ts                     ← 落盘后产出缩略图
+worker/src/thumb.ts (新)                            ← ffmpeg 缩略图封装(worker)：makeThumb + thumbUrl
+web/lib/thumb.ts (新)                               ← makeThumb(web,素材上传/剪映导入/换图用)；重导出 thumbUrl 兼容旧引用
+web/lib/thumbUrl.ts (新，设计阶段未列出)              ← thumbUrl 纯字符串函数单独拆出，不带 fluent-ffmpeg/fs，供客户端网格组件安全 import
+web/app/api/admin/assets/route.ts                   ← 上传时产出缩略图
+web/app/api/admin/jianying/import/route.ts (设计阶段未列出) ← 剪映工程导入素材时同步产出缩略图
+web/app/api/generate/[id]/segments/[segNo]/route.ts (设计阶段未列出) ← 手动换图后重新生成缩略图，替换旧的
+web/app/api/files/[...path]/route.ts                ← 缓存头 + 304
+web/app/admin/generate/[id]/page.tsx                ← 网格用缩略图(回退原图)
+web/app/admin/generate/[id]/edit/page.tsx           ← 同上
+web/app/admin/assets/page.tsx                       ← 同上
 ```
 
 不新增数据库字段、不改渲染层、不改模板参数。
@@ -112,7 +116,7 @@ web/app/admin/assets/page.tsx             ← 同上
 ## 六、测试
 
 - 纯函数：`isSameBook` 的前缀/分隔符/作者空值/误吞反例（「活着」vs「活着之上」必须判为不同书）；`dedupeBooks` 合并时保留信息更全者且学员书仍在首位。
-- `selectBooks`：作者兜底三级各自触发；主题词取到/取不到；主题词用于写库与召回；学员书无作者时不写库。
+- `selectBooks`：作者兜底各级（含库内精确命中的第 0 级）各自触发；主题词取到/取不到；主题词用于写库与召回；学员书无作者时不写库。
 - 缩略图：生成成功产出文件、失败不抛错、原图仍在。
 - `/api/files`：首次 200 带 `ETag`/`Cache-Control: private,...`；带 `If-None-Match` 命中返回 304 且无响应体；Range 请求仍正确。
 - 回归：现有全部测试绿；渲染层与模板参数输出不变。

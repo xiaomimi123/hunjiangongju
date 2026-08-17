@@ -1,0 +1,206 @@
+'use client'
+import { useCallback, useEffect, useState } from 'react'
+import { api } from '@/lib/fetcher'
+import PageHeader from '@/components/admin/PageHeader'
+
+type Book = {
+  id: string
+  title: string
+  author: string
+  theme: string | null
+  points: string | null
+  source: string
+  createdAt: string
+}
+type ListResp = { books: Book[]; themes: string[] }
+
+const emptyForm = { title: '', author: '', theme: '', points: '' }
+
+export default function BooksPage() {
+  const [books, setBooks] = useState<Book[] | null>(null)
+  const [themes, setThemes] = useState<string[]>([])
+  const [filterTheme, setFilterTheme] = useState('')
+  const [form, setForm] = useState(emptyForm)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const [editingId, setEditingId] = useState('')
+  const [editTitle, setEditTitle] = useState('')
+  const [editAuthor, setEditAuthor] = useState('')
+  const [editTheme, setEditTheme] = useState('')
+  const [editPoints, setEditPoints] = useState('')
+
+  const load = useCallback(async (theme: string) => {
+    try {
+      const q = theme ? `?theme=${encodeURIComponent(theme)}` : ''
+      const r = await api<ListResp>(`/api/admin/books${q}`)
+      setBooks(r.books)
+      setThemes(r.themes)
+    } catch (e) { setErr((e as Error).message) }
+  }, [])
+  useEffect(() => { load(filterTheme) }, [load, filterTheme])
+
+  async function create() {
+    setErr('')
+    const title = form.title.trim()
+    const author = form.author.trim()
+    if (!title || !author) { setErr('书名与作者不能为空'); return }
+    setBusy(true)
+    try {
+      await api('/api/admin/books', {
+        method: 'POST',
+        body: {
+          title,
+          author,
+          theme: form.theme.trim() || undefined,
+          points: form.points.trim() || undefined,
+        },
+      })
+      setForm(emptyForm)
+      await load(filterTheme)
+    } catch (e) { setErr((e as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  async function del(id: string) {
+    if (!confirm('确认删除该书目？删除后 AI 选书将不再复用这条记录。')) return
+    setErr('')
+    try { await api(`/api/admin/books/${id}`, { method: 'DELETE' }); await load(filterTheme) }
+    catch (e) { setErr((e as Error).message) }
+  }
+
+  function startEdit(b: Book) {
+    setEditingId(b.id)
+    setEditTitle(b.title)
+    setEditAuthor(b.author)
+    setEditTheme(b.theme ?? '')
+    setEditPoints(b.points ?? '')
+  }
+  function cancelEdit() {
+    setEditingId('')
+    setEditTitle('')
+    setEditAuthor('')
+    setEditTheme('')
+    setEditPoints('')
+  }
+  async function saveEdit(id: string) {
+    setErr('')
+    const title = editTitle.trim()
+    const author = editAuthor.trim()
+    if (!title || !author) { setErr('书名与作者不能为空'); return }
+    try {
+      await api(`/api/admin/books/${id}`, {
+        method: 'PATCH',
+        body: { title, author, theme: editTheme.trim(), points: editPoints.trim() },
+      })
+      cancelEdit()
+      await load(filterTheme)
+    } catch (e) { setErr((e as Error).message) }
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title="书库" subtitle="AI 选书结果与人工新增的 书名+作者 沉淀在此，联网查证仍可能出错，发现问题在这里改或删" />
+      {err && <p className="pill pill-bad">{err}</p>}
+
+      <div className="card space-y-3 p-4">
+        <p className="eyebrow">新增书目</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="mb-1 block text-xs text-ink3">书名</span>
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="如 活着"
+              className="field w-40" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-ink3">作者</span>
+            <input value={form.author} onChange={(e) => setForm({ ...form, author: e.target.value })} placeholder="如 余华"
+              className="field w-32" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-ink3">主题（可选）</span>
+            <input value={form.theme} onChange={(e) => setForm({ ...form, theme: e.target.value })} placeholder="如 文学"
+              className="field w-32" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs text-ink3">要点（可选）</span>
+            <input value={form.points} onChange={(e) => setForm({ ...form, points: e.target.value })} placeholder="核心卖点/摘要"
+              className="field w-56" />
+          </label>
+          <button onClick={create} disabled={busy} className="btn-primary">
+            {busy ? '新增中…' : '＋ 新增'}
+          </button>
+        </div>
+        <p className="text-xs text-ink3">书名会自动去除书名号《》并去除首尾空白；同一 书名+作者 不能重复新增。</p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="eyebrow">主题筛选</span>
+        <select className="field w-48" value={filterTheme} onChange={(e) => setFilterTheme(e.target.value)}>
+          <option value="">全部</option>
+          {themes.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
+        </select>
+      </div>
+
+      <section className="space-y-3">
+        <p className="eyebrow">书目（{books?.length ?? 0}）</p>
+        {books && books.length === 0 && (
+          <p className="card p-6 text-center text-sm text-ink3">还没有书目，等 AI 选书沉淀，或者在上面手动新增一条。</p>
+        )}
+        {!books && <p className="card p-6 text-center text-sm text-ink3">加载中…</p>}
+        {books && books.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs text-ink3">
+                  <th className="py-2 pr-3">书名</th>
+                  <th className="py-2 pr-3">作者</th>
+                  <th className="py-2 pr-3">主题</th>
+                  <th className="py-2 pr-3">要点</th>
+                  <th className="py-2 pr-3">来源</th>
+                  <th className="py-2 pr-3 text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {books.map((b) => (
+                  <tr key={b.id} className="border-b border-line/60">
+                    {editingId === b.id ? (
+                      <>
+                        <td className="py-2 pr-3"><input className="field w-full text-xs" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="书名" /></td>
+                        <td className="py-2 pr-3"><input className="field w-full text-xs" value={editAuthor} onChange={(e) => setEditAuthor(e.target.value)} placeholder="作者" /></td>
+                        <td className="py-2 pr-3"><input className="field w-full text-xs" value={editTheme} onChange={(e) => setEditTheme(e.target.value)} placeholder="主题" /></td>
+                        <td className="py-2 pr-3"><input className="field w-full text-xs" value={editPoints} onChange={(e) => setEditPoints(e.target.value)} placeholder="要点" /></td>
+                        <td className="py-2 pr-3 text-ink3">{b.source}</td>
+                        <td className="py-2 pr-3">
+                          <div className="flex justify-end gap-1.5">
+                            <button onClick={cancelEdit} className="btn-ghost px-2 py-1 text-xs">取消</button>
+                            <button onClick={() => saveEdit(b.id)} className="btn-primary px-2 py-1 text-xs">保存</button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-2 pr-3 font-medium">{b.title}</td>
+                        <td className="py-2 pr-3">{b.author}</td>
+                        <td className="py-2 pr-3 text-ink3">{b.theme || '—'}</td>
+                        <td className="max-w-xs truncate py-2 pr-3 text-ink3" title={b.points ?? ''}>{b.points || '—'}</td>
+                        <td className="py-2 pr-3 text-ink3">{b.source === 'ai' ? 'AI' : '人工'}</td>
+                        <td className="py-2 pr-3">
+                          <div className="flex justify-end gap-1.5">
+                            <button onClick={() => startEdit(b)} className="btn-ghost px-2 py-1 text-xs">编辑</button>
+                            <button onClick={() => del(b.id)} className="btn-danger px-2 py-1 text-xs">删除</button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}

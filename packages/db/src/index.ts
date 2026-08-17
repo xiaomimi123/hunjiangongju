@@ -34,3 +34,13 @@ export { extractSubtitleEntrance } from './booklist/draftTextAnim'
 export type { EntranceId } from './booklist/draftTextAnim'
 export { findBookByTitle, findBooksByTheme, upsertBook } from './booklist/bookLibrary'
 export type { BookRow } from './booklist/bookLibrary'
+export {
+  seedFrom,
+  pickSubset,
+  ANGLES,
+  pickAngle,
+  parseBookList,
+  dedupeBooks,
+  resolveBookCount,
+} from './booklist/bookPick'
+export type { PickedBook } from './booklist/bookPick'

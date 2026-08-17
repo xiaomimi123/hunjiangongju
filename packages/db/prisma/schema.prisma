@@ -219,3 +219,15 @@ model AiCapabilityConfig {
   updatedAt  DateTime @updatedAt @map("updated_at")
   @@map("ai_capability_config")
 }
+
+model BookLibrary {
+  id        String   @id @default(uuid())
+  title     String
+  author    String
+  theme     String?
+  points    String?
+  source    String   @default("ai")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([title, author])
+  @@map("book_library")
+}

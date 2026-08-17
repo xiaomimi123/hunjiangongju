@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import { GenPill } from '../../genStatus'
+import { thumbUrl } from '@/lib/thumbUrl'
 
 type Segment = { seqNo: number; scriptText: string; imageUrl: string | null }
 type GenTask = {
@@ -136,7 +137,18 @@ export default function GenerateEditPage() {
               <div key={s.seqNo} className="card overflow-hidden">
                 <div className="relative aspect-[3/4] bg-surface2">
                   {src
-                    ? <img src={src} alt={`第${s.seqNo}段`} className="h-full w-full object-cover" />
+                    ? <img
+                        src={thumbUrl(src)}
+                        alt={`第${s.seqNo}段`}
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          const el = e.currentTarget
+                          if (el.dataset.fallback) return // 已回退过一次，避免原图也 404 时的无限重试
+                          el.dataset.fallback = '1'
+                          el.src = src
+                        }}
+                      />
                     : <div className="grid h-full w-full place-items-center text-xs text-ink3">无配图</div>}
                   <span className="num absolute left-2 top-2 rounded-md bg-ink/60 px-1.5 py-0.5 text-[11px] text-white">#{s.seqNo}</span>
                 </div>

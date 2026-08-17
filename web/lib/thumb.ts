@@ -1,6 +1,12 @@
 import ffmpeg from 'fluent-ffmpeg'
 import path from 'path'
 import fs from 'fs/promises'
+import { thumbUrl } from './thumbUrl'
+
+// 重导出：thumbUrl 的实现挪到了 ./thumbUrl.ts（纯函数、无 Node-only 依赖），这样客户端
+// 组件可以只 import 那个文件而不拖入本文件的 fluent-ffmpeg/fs。此处保留导出以兼容任何
+// 仍从 '@/lib/thumb' 引用 thumbUrl 的服务端代码。
+export { thumbUrl }
 
 function thumbPathFor(srcAbs: string): string {
   const ext = path.extname(srcAbs)
@@ -28,16 +34,4 @@ export async function makeThumb(srcAbs: string): Promise<boolean> {
     await fs.unlink(dst).catch(() => {})
     return false
   }
-}
-
-/** 由原图 URL 推导缩略图 URL：/api/files/gen/x/3.png → /api/files/gen/x/3.thumb.webp */
-export function thumbUrl(originalUrl: string): string {
-  // 先剥离查询串/hash 再推导扩展名，否则 "3.png?t=169999.123" 会被 path.extname
-  // 误判成 ".123"；推导完成后把原查询串原样拼回，不破坏调用方的 cache-busting。
-  const qIdx = originalUrl.search(/[?#]/)
-  const base = qIdx === -1 ? originalUrl : originalUrl.slice(0, qIdx)
-  const suffix = qIdx === -1 ? '' : originalUrl.slice(qIdx)
-  const ext = path.extname(base)
-  if (!ext) return originalUrl
-  return base.slice(0, -ext.length) + '.thumb.webp' + suffix
 }

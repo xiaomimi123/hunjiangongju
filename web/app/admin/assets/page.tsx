@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
+import { thumbUrl } from '@/lib/thumbUrl'
 
 type Asset = { id: string; kind: string; name: string; folder: string | null; fileUrl: string; createdAt: string }
 type ListResp = { assets: Asset[]; folders: string[] }
@@ -108,7 +109,18 @@ export default function AssetsPage() {
               <div key={a.id} className="card overflow-hidden">
                 {a.kind === 'image' ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={a.fileUrl} alt={a.name} className="h-32 w-full object-cover" />
+                  <img
+                    src={thumbUrl(a.fileUrl)}
+                    alt={a.name}
+                    loading="lazy"
+                    className="h-32 w-full object-cover"
+                    onError={(e) => {
+                      const el = e.currentTarget
+                      if (el.dataset.fallback) return // 已回退过一次，避免原图也 404 时的无限重试
+                      el.dataset.fallback = '1'
+                      el.src = a.fileUrl
+                    }}
+                  />
                 ) : (
                   <div className="flex h-32 w-full flex-col items-center justify-center gap-1 bg-surface2 text-ink3">
                     <span className="text-xs">视频素材</span>

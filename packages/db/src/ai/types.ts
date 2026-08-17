@@ -1,4 +1,10 @@
-export type LlmOpts = { system?: string; prompt: string; maxTokens?: number }
+export type LlmOpts = {
+  system?: string
+  prompt: string
+  maxTokens?: number
+  temperature?: number
+  enableSearch?: boolean
+}
 export type ImageOpts = { prompt: string; size?: string; negativePrompt?: string }
 export type TtsOpts = { text: string; voice?: string; voiceId?: string }
 export type AsrOpts = { audioUrl: string }

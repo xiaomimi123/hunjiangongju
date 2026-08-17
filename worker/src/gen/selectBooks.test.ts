@@ -147,6 +147,16 @@ describe('纯函数：parseVerifiedBook', () => {
   it('（fix round 1 Minor 1）合法的顿号分隔多作者仍然通过', () => {
     expect(parseVerifiedBook('岸见一郎、古贺史健')).toEqual({ author: '岸见一郎、古贺史健' })
   })
+
+  it('（fix round 2）真实作者名（含缩写点/间隔号/方括号国籍前缀）都应通过，不被误判为解释性文字', () => {
+    expect(parseVerifiedBook('岸见一郎、古贺史健')).toEqual({ author: '岸见一郎、古贺史健' })
+    expect(parseVerifiedBook('维克多·E·弗兰克尔')).toEqual({ author: '维克多·E·弗兰克尔' })
+    expect(parseVerifiedBook('[日]村上春树')).toEqual({ author: '[日]村上春树' })
+    expect(parseVerifiedBook('余华')).toEqual({ author: '余华' })
+    // 回归点：半角句点是西方作者名缩写的正常写法（J.K. Rowling 的中文版通常就印成"J.K.罗琳"），
+    // fix round 1 把裸 "." 当句子标点拒绝，误伤了这类名字——不能再退回那个状态。
+    expect(parseVerifiedBook('J.K.罗琳')).toEqual({ author: 'J.K.罗琳' })
+  })
 })
 
 describe('纯函数：parseYesNo', () => {

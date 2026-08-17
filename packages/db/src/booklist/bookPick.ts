@@ -86,17 +86,48 @@ export function parseBookList(raw: string): PickedBook[] {
   return result
 }
 
-/** 合并候选并按 (规范化书名+作者) 去重，先来先留 */
+// 副标题分隔符：全名版书名通常是「主标题<分隔符>副标题」。只有在分隔符处截断才算同一本，
+// 否则「活着」会误吞「活着之上」。
+const SUBTITLE_SEP = /^[：:—\-（(\s]/
+
+/** 同一本书判定：规范化书名后一方是另一方的「副标题前缀」，且作者一致或一方为空 */
+export function isSameBook(a: PickedBook, b: PickedBook): boolean {
+  if (!a || !b || typeof a.title !== 'string' || typeof b.title !== 'string') return false
+  const ta = normalizeTitle(a.title)
+  const tb = normalizeTitle(b.title)
+  if (!ta || !tb) return false
+  const aa = (a.author ?? '').trim()
+  const ab = (b.author ?? '').trim()
+  // 作者都非空且不同 → 直接判为不同书（同名不同作者是不同版本/不同书）
+  if (aa && ab && aa !== ab) return false
+  if (ta === tb) return true
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta]
+  if (!long.startsWith(short)) return false
+  return SUBTITLE_SEP.test(long.slice(short.length))
+}
+
+/** 候选的信息完整度：有作者优先于无作者；同为有/无作者时，有 points 优先 */
+function completeness(b: PickedBook): number {
+  let score = 0
+  if ((b.author ?? '').trim()) score += 2
+  if (b.points) score += 1
+  return score
+}
+
+/** 合并候选并用 isSameBook 去重：命中时保留信息更全的一条，位置不变（先出现的位置） */
 export function dedupeBooks(list: PickedBook[]): PickedBook[] {
   if (!Array.isArray(list)) return []
-  const seen = new Set<string>()
   const result: PickedBook[] = []
   for (const b of list) {
     if (!b || typeof b.title !== 'string' || typeof b.author !== 'string') continue
-    const key = `${normalizeTitle(b.title)}\x00${b.author.trim()}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push(b)
+    const idx = result.findIndex((r) => isSameBook(r, b))
+    if (idx === -1) {
+      result.push(b)
+      continue
+    }
+    if (completeness(b) > completeness(result[idx])) {
+      result[idx] = b
+    }
   }
   return result
 }

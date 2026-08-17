@@ -41,6 +41,7 @@ export {
   pickAngle,
   parseBookList,
   dedupeBooks,
+  isSameBook,
   resolveBookCount,
 } from './booklist/bookPick'
 export type { PickedBook } from './booklist/bookPick'

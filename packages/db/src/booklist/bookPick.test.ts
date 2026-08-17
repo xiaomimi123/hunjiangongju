@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { seedFrom, pickSubset, pickAngle, ANGLES, parseBookList, dedupeBooks, resolveBookCount } from './bookPick'
+import { seedFrom, pickSubset, pickAngle, ANGLES, parseBookList, dedupeBooks, resolveBookCount, isSameBook } from './bookPick'
 
 describe('稳定随机', () => {
   it('同 seed 结果一致，异 seed 结果不同', () => {
@@ -111,6 +111,61 @@ describe('dedupeBooks', () => {
   })
   it('同书名不同作者视为不同书', () => {
     expect(dedupeBooks([{ title: 'A', author: '甲' }, { title: 'A', author: '乙' }]).length).toBe(2)
+  })
+})
+
+describe('isSameBook', () => {
+  it('副标题前缀 + 一方作者为空 → 同一本', () => {
+    expect(isSameBook(
+      { title: '被讨厌的勇气', author: '' },
+      { title: '被讨厌的勇气：自我启发之父阿德勒的哲学课', author: '岸见一郎、古贺史健' },
+    )).toBe(true)
+  })
+  it('副标题前缀 + 作者一致 → 同一本', () => {
+    expect(isSameBook(
+      { title: '活着', author: '余华' },
+      { title: '活着（新版）', author: '余华' },
+    )).toBe(true)
+  })
+  it('前缀但无副标题分隔符 → 不同书（防误吞）', () => {
+    expect(isSameBook({ title: '活着', author: '余华' }, { title: '活着之上', author: '阎连科' })).toBe(false)
+    expect(isSameBook({ title: '活着', author: '' }, { title: '活着之上', author: '' })).toBe(false)
+  })
+  it('作者明确不同 → 不同书', () => {
+    expect(isSameBook(
+      { title: '哈姆雷特', author: '莎士比亚' },
+      { title: '哈姆雷特：注释本', author: '朱生豪' },
+    )).toBe(false)
+  })
+  it('完全同名同作者 → 同一本', () => {
+    expect(isSameBook({ title: '《活着》', author: ' 余华 ' }, { title: '活着', author: '余华' })).toBe(true)
+  })
+  it('毫不相干 → 不同书', () => {
+    expect(isSameBook({ title: 'A', author: '甲' }, { title: 'B', author: '乙' })).toBe(false)
+  })
+})
+
+describe('dedupeBooks 合并同一本书', () => {
+  it('短名无作者 + 全名有作者 → 只留一条,取信息更全者,位置不变', () => {
+    const out = dedupeBooks([
+      { title: '被讨厌的勇气', author: '' },
+      { title: '活出生命的意义', author: '弗兰克尔' },
+      { title: '被讨厌的勇气：自我启发之父阿德勒的哲学课', author: '岸见一郎、古贺史健', points: 'X' },
+    ])
+    expect(out).toHaveLength(2)
+    expect(out[0]).toEqual({ title: '被讨厌的勇气：自我启发之父阿德勒的哲学课', author: '岸见一郎、古贺史健', points: 'X' })
+    expect(out[1].title).toBe('活出生命的意义')
+  })
+  it('两条都有作者时保留先出现的', () => {
+    const out = dedupeBooks([
+      { title: '活着', author: '余华', points: '先' },
+      { title: '活着：新版', author: '余华', points: '后' },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].points).toBe('先')
+  })
+  it('不同书不合并（回归）', () => {
+    expect(dedupeBooks([{ title: '活着', author: '余华' }, { title: '活着之上', author: '阎连科' }])).toHaveLength(2)
   })
 })
 

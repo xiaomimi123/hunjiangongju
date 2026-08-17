@@ -69,6 +69,18 @@ async function realPngBytes(color: string): Promise<Buffer> {
   }
 }
 
+// makeForm() 默认带一份 bgmFiles/bgmMeta，只要没有 400 在写入前拦下、也没有命中同
+// folder+name 的既有 BGM 复用，POST 就会新建一条 bgm_library 行——必须在这里补记
+// id，afterAll 才清得掉，否则会像本文件之前那样往共享测试库里永久堆积孤儿行。
+async function trackBgm(folder: string, name = '歌曲A') {
+  createdBgm.push((await prisma.bgmLibrary.findFirstOrThrow({ where: { folder, name } })).id)
+}
+
+// 同理：makeForm() 默认也带一张 imageFiles(pic.png)，同样会新建一条 stock_asset 行。
+async function trackAsset(folder: string, name = 'pic') {
+  createdAssets.push((await prisma.stockAsset.findFirstOrThrow({ where: { folder, name } })).id)
+}
+
 function req(form: FormData) {
   return new NextRequest('http://localhost/api/admin/jianying/import', { method: 'POST', body: form })
 }
@@ -133,6 +145,8 @@ describe('POST /api/admin/jianying/import', () => {
     expect(res.status).toBe(200)
     const j = await res.json()
     createdFw.push(j.id)
+    await trackBgm('导入测试工程3')
+    await trackAsset('导入测试工程3')
     const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
     expect((fw.overlayTemplate as Record<string, unknown>).watermark).toBe('@欧子好读')
     expect(fw.suggestedSegmentCount).toBe(4)
@@ -142,6 +156,8 @@ describe('POST /api/admin/jianying/import', () => {
     const res = await call(makeForm({ projectName: '导入测试工程4' }))
     const j = await res.json()
     createdFw.push(j.id)
+    await trackBgm('导入测试工程4')
+    await trackAsset('导入测试工程4')
     const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
     expect((fw.overlayTemplate as Record<string, unknown>).watermark).toBeUndefined()
     expect(fw.suggestedSegmentCount).toBeNull()
@@ -156,6 +172,8 @@ describe('POST /api/admin/jianying/import', () => {
     expect(res.status).toBe(200)
     const j = await res.json()
     createdFw.push(j.id)
+    await trackBgm('导入测试工程5')
+    await trackAsset('导入测试工程5')
     const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
     expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBe(13)
   })
@@ -165,6 +183,8 @@ describe('POST /api/admin/jianying/import', () => {
     const res = await call(makeForm({ projectName: '导入测试工程6' }))
     const j = await res.json()
     createdFw.push(j.id)
+    await trackBgm('导入测试工程6')
+    await trackAsset('导入测试工程6')
     const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
     expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBeUndefined()
   })
@@ -178,6 +198,8 @@ describe('POST /api/admin/jianying/import', () => {
       expect(res.status).toBe(200)
       const j = await res.json()
       createdFw.push(j.id)
+      await trackBgm(`导入测试工程7-${bad}`)
+      await trackAsset(`导入测试工程7-${bad}`)
       const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
       expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBeUndefined()
     }
@@ -193,6 +215,7 @@ describe('POST /api/admin/jianying/import', () => {
     expect(res.status).toBe(200)
     const j = await res.json()
     createdFw.push(j.id)
+    await trackBgm('导入测试工程-缩略图')
     const asset = await prisma.stockAsset.findFirstOrThrow({ where: { folder: '导入测试工程-缩略图', name: 'pic' } })
     createdAssets.push(asset.id)
     const thumbAbs = path.join(tmpDataDir, 'assets', `${asset.id}.thumb.webp`)
@@ -211,6 +234,7 @@ describe('POST /api/admin/jianying/import', () => {
     expect(res.status).toBe(200)
     const j = await res.json()
     createdFw.push(j.id)
+    await trackBgm('导入测试工程-缩略图失败')
     expect(j.assets).toEqual({ imported: 1, reused: 0 })
     const asset = await prisma.stockAsset.findFirstOrThrow({ where: { folder: '导入测试工程-缩略图失败', name: 'bad' } })
     createdAssets.push(asset.id)

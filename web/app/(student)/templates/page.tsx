@@ -80,7 +80,7 @@ export default function FrameworkLibraryPage() {
             <p className="eyebrow mb-1.5">选题 <span className="text-flame">*</span></p>
             <input className="field" value={subject} onChange={(e) => setSubject(e.target.value)}
               placeholder="填一个书名或主题，例如《被讨厌的勇气》或「治愈内耗」" />
-            <p className="mt-1 text-xs text-ink3">系统会自动配齐同主题的真实书目并生成文案</p>
+            <p className="mt-1 text-xs text-ink3">系统会联网查证并自动配齐同主题的书目再生成文案，偶尔仍可能有误，发现不对可反馈</p>
           </div>
           <div>
             <p className="eyebrow mb-1.5">标题（可选）</p>

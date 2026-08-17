@@ -44,6 +44,10 @@ export const POST = handler(async (req) => {
   const watermark = String(form.get('watermark') ?? '').trim()
   const bodyCountRaw = Number(String(form.get('bodyCount') ?? ''))
   const bodyCount = Number.isInteger(bodyCountRaw) && bodyCountRaw > 0 ? bodyCountRaw : null
+  // 快闪书封位数：来自解析出的 structure.flashCount，供 resolveBookCount 优先读取，
+  // 决定 AI 配齐书目的目标本数（§3.5）。同 bodyCount 一样是可选字段，缺省/非法一律不写。
+  const flashCountRaw = Number(String(form.get('flashCount') ?? ''))
+  const flashCount = Number.isInteger(flashCountRaw) && flashCountRaw > 0 ? flashCountRaw : null
 
   const bgmFiles = form.getAll('bgmFiles').filter((f): f is File => f instanceof File)
   const imageFiles = form.getAll('imageFiles').filter((f): f is File => f instanceof File)
@@ -103,6 +107,7 @@ export const POST = handler(async (req) => {
   if (defaultBgmId) overlayTemplate.__defaultBgmId = defaultBgmId
   if (assetStat.imported + assetStat.reused > 0) overlayTemplate.__defaultAssetFolder = projectName
   if (watermark) overlayTemplate.watermark = watermark
+  if (flashCount) overlayTemplate.__bookCount = flashCount
 
   const fw = await prisma.copyFramework.create({
     data: {

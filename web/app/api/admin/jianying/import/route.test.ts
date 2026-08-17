@@ -129,4 +129,40 @@ describe('POST /api/admin/jianying/import', () => {
     expect((fw.overlayTemplate as Record<string, unknown>).watermark).toBeUndefined()
     expect(fw.suggestedSegmentCount).toBeNull()
   })
+
+  it('带 flashCount → 落到 overlayTemplate.__bookCount（供 resolveBookCount 读取，供快闪书封配齐用）', async () => {
+    // 用独立 userId，避免与本文件其它用例共用 'op1' 撞上 jianying-import 的每用户限流
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-flashcount-1', role: 'operator' })
+    const form = makeForm({ projectName: '导入测试工程5' })
+    form.set('flashCount', '13')
+    const res = await call(form)
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    createdFw.push(j.id)
+    const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+    expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBe(13)
+  })
+
+  it('不带 flashCount → __bookCount 不写入（与现状一致，零回归）', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-flashcount-2', role: 'operator' })
+    const res = await call(makeForm({ projectName: '导入测试工程6' }))
+    const j = await res.json()
+    createdFw.push(j.id)
+    const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+    expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBeUndefined()
+  })
+
+  it('flashCount 非法(0/负数/非数字) → 不写入(不写 0/NaN)', async () => {
+    for (const bad of ['0', '-1', 'abc']) {
+      requireRoleMock.mockResolvedValueOnce({ userId: `op-flashcount-bad-${bad}`, role: 'operator' })
+      const form = makeForm({ projectName: `导入测试工程7-${bad}` })
+      form.set('flashCount', bad)
+      const res = await call(form)
+      expect(res.status).toBe(200)
+      const j = await res.json()
+      createdFw.push(j.id)
+      const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+      expect((fw.overlayTemplate as Record<string, unknown>).__bookCount).toBeUndefined()
+    }
+  })
 })

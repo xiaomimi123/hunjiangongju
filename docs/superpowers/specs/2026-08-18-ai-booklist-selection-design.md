@@ -89,7 +89,9 @@ model BookLibrary {
 
 ### 3.5 目标本数 N 的来源
 
-优先级：`framework.overlayTemplate.__bookCount`（剪映导入时由 `structure.flashCount` 写入，运营可在框架编辑页改）→ 框架 `overlayTemplate.books.length`（老框架兼容）→ 默认 5。
+优先级：`framework.overlayTemplate.__bookCount` → 框架 `overlayTemplate.books.length`（老框架兼容）→ 默认 5。`resolveBookCount`（`packages/db/src/booklist/bookPick.ts`）按此优先级读取并 clamp 到 1..20。
+
+`__bookCount` 的写入路径：`/admin/jianying` 页面解析剪映草稿后得到 `meta.structure.flashCount`（原工程里快闪书封的槽位数）；点「一键导入」时（`importAll()`，`web/app/admin/jianying/page.tsx`）若该值为正数，随 `watermark`/`bodyCount` 一起以 `flashCount` 表单字段提交；`POST /api/admin/jianying/import`（`web/app/api/admin/jianying/import/route.ts`）校验为正整数后写入新建框架的 `overlayTemplate.__bookCount`，非正数/非数字一律不写（不落 0/NaN）。该字段全程可选：缺省行为与写入前完全一致。运营仍可在框架编辑页手动改 `__bookCount`。
 
 ### 3.6 学员端改动（很小）
 

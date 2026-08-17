@@ -3,10 +3,15 @@ import type { Prisma } from '@prisma/client'
 import { prisma, enqueueGen } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { checkRate } from '@/lib/ratelimit'
 import { normalizeVariables, stripVoiceForNonOperator } from './normalize'
 
 export const POST = handler(async (req) => {
   const s = await requireRole()
+  // 选书步骤现在会为每次生成打出约 20 次联网检索(enableSearch)LLM 调用，成本比之前高一个数量级。
+  // 只对学员等非运营角色限流：运营跑的是 studio 工作流，需要连续试参数，不该被学员端限额卡住。
+  // 6 次/60s：留够正常操作中「改选题重试/切模板」的空间，同时把连点刷检索成本的上限锁在个位数量级。
+  if (s.role !== 'operator') checkRate('generate', s.userId, 6)
   const { frameworkId, subject, variables } = await req.json().catch(() => {
     throw new HttpError(400, '请求体格式错误')
   })

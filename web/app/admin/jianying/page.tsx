@@ -197,6 +197,7 @@ export default function JianyingTemplatePage() {
       form.set('templateParams', JSON.stringify(templateParams))
       if (meta?.watermark) form.set('watermark', meta.watermark)
       if (meta?.structure?.bodyCount) form.set('bodyCount', String(meta.structure.bodyCount))
+      if (meta?.structure?.flashCount && meta.structure.flashCount > 0) form.set('flashCount', String(meta.structure.flashCount))
       const foundBgm = media.bgm.filter((b) => byName.has(b.fileName))
       form.set('bgmMeta', JSON.stringify(foundBgm))
       for (const b of foundBgm) form.append('bgmFiles', byName.get(b.fileName)!)

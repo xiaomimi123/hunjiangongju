@@ -36,8 +36,11 @@ function normalizeTitleLocal(title: string): string {
   return String(title ?? '').replace(/[《》]/g, '').trim()
 }
 
+// 分隔符用转义 NUL（源码里是 \, x, 0, 0 四个可打印 ASCII 字符，运行时才是 NUL 字节），
+// 与 bookPick.ts 的 dedupeBooks 去重 key 统一：NUL 不可能出现在真实书名/作者里，
+// 用空格等可打印字符当分隔符则不然（"活着 " + "余" 与 "活着" + " 余" 会撞出同一个 key）。
 function bookKey(b: { title: string; author: string }): string {
-  return `${normalizeTitleLocal(b.title)} ${b.author.trim()}`
+  return `${normalizeTitleLocal(b.title)}\x00${b.author.trim()}`
 }
 
 function excludeBook(pool: PickedBook[], book: { title: string; author: string }): PickedBook[] {

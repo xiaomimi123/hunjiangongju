@@ -16,7 +16,7 @@ vi.mock('@mixcut/db', async () => {
   }
 })
 
-import { prisma, upsertBook } from '@mixcut/db'
+import { prisma, upsertBook, isSameBook } from '@mixcut/db'
 import {
   selectBooks,
   hasManualBooks,
@@ -129,6 +129,23 @@ describe('纯函数：parseVerifiedBook', () => {
   })
   it('去掉包裹的书名号/引号与首尾空白', () => {
     expect(parseVerifiedBook(' 「余华」 | 「文学」 ')).toEqual({ author: '余华', theme: '文学' })
+  })
+
+  it('（fix round 1 Minor 1）含句子标点的解释性文字 → 拒绝，视为无作者', () => {
+    expect(parseVerifiedBook('这是一本非常好的书，作者是某某某，我强烈推荐大家阅读它。')).toEqual({})
+    expect(parseVerifiedBook('作者不详，暂无法确认。')).toEqual({})
+  })
+
+  it('（fix round 1 Minor 1）模型如实说"不确定/查不到"等措辞 → 拒绝，不当作者名写库', () => {
+    expect(parseVerifiedBook('这本书作者尚不确定')).toEqual({})
+    expect(parseVerifiedBook('作者未知')).toEqual({})
+    expect(parseVerifiedBook('无法确认')).toEqual({})
+    expect(parseVerifiedBook('不清楚')).toEqual({})
+    expect(parseVerifiedBook('抱歉，我不知道')).toEqual({})
+  })
+
+  it('（fix round 1 Minor 1）合法的顿号分隔多作者仍然通过', () => {
+    expect(parseVerifiedBook('岸见一郎、古贺史健')).toEqual({ author: '岸见一郎、古贺史健' })
   })
 })
 
@@ -442,6 +459,39 @@ describe('selectBooks：学员书作者三级兜底', () => {
     const books = (fresh.variables as { books: { title: string; author: string }[] }).books
     expect(books.length).toBe(3)
     expect(books[0]).toEqual({ title: subject, author: '固定作者' })
+  })
+
+  it('（fix round 1 覆盖）n>1 时学员书从候选池借到作者后，同一本书不会在候选部分重复出现', async () => {
+    // 这条端到端覆盖的正是本批次要修的场景：学员书（短标题）从候选池借到作者后，候选池自己的
+    // 召回（collectCandidates 内部同样用 theme=subject 兜底 findBooksByTheme）会再次读到那本"全名版"，
+    // 如果排除逻辑只按精确字符串比较（旧 bookKey 方案），全名版不会被当成"已经是学员书了"而排除，
+    // 最终书单里会同一本书出现两次。
+    //
+    // n=4（即 n-1=3 个候选名额）是刻意选的：
+    // - 正确实现（isSameBook 排除）下，候选池排除全名版后只剩 2 本"真候选"（<3，pickSubset 全部返回）；
+    // - 若排除退化为精确字符串匹配，候选池会保留全名版凑成 3 本（=3，pickSubset 同样全部返回）。
+    // 两种情况请求数都 >= 候选池大小，pickSubset 必然返回全部候选——断言结果因此与洗牌顺序/种子无关，
+    // 不需要固定 genTaskId 也能确定性验证："排除退化" 这条路径必然会让全名版进最终书单。
+    const studentTitle = '重复防护测试书'
+    trackTheme(studentTitle)
+    await upsertBook({ title: `${studentTitle}：完整版`, author: '重复防护作者', theme: studentTitle, points: '重复防护要点' })
+    for (const t of ['重复防护候选1', '重复防护候选2']) {
+      await upsertBook({ title: t, author: `作者-${t}`, theme: studentTitle })
+    }
+
+    const fw = await makeFramework(4)
+    const task = await makeTask(studentTitle, fw.id)
+    mockLlmComplete.mockRejectedValue(new Error('查证服务不可用')) // 两次查证都失败，强制走 L2 候选池借用
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const books = (fresh.variables as { books: { title: string; author: string; points?: string }[] }).books
+    // 学员书仍固定排第一，且确实借到了作者
+    expect(books[0]).toEqual({ title: studentTitle, author: '重复防护作者', points: '重复防护要点' })
+    // 核心断言：借出作者的"全名版"与学员书是 isSameBook 意义下的同一本书，最终书单里只能算一次名额
+    const sameBookCount = books.filter((b) => isSameBook(b, { title: studentTitle, author: '重复防护作者' })).length
+    expect(sameBookCount).toBe(1)
   })
 })
 

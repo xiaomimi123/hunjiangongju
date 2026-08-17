@@ -90,6 +90,22 @@ function stripWrap(raw: string): string {
 // 遵守格式、把解释性文字塞进来了）才丢弃，此时仍保留已解析出的作者。
 const MAX_THEME_LEN = 8
 
+// 沿用旧版 parseVerifiedAuthor 的判断依据：真实作者名不含句子标点、不是解释性长文本。
+// 唯独去掉顿号「、」——新格式里它是合法的多作者分隔符（如"岸见一郎、古贺史健"），不能再当
+// "这是一句话"的信号。换行仍然是強信号，保留在同一个正则里一并拒绝。
+const AUTHOR_SENTENCE_PUNCTUATION = /[\n，。；：！？,.;:!?]/
+// 模型偶尔会诚实地回答"不确定/查不到"而不是按格式要求回 NO；这类措辞不含标点也很短，
+// 光靠长度/标点过滤不掉，必须单独列出常见说法拒绝，否则会被当成一个"作者名"永久写库
+// （upsertBook 用 update:{} 幂等写入，写错一次后面再也不会被更正）。
+const AUTHOR_HEDGE_PHRASES = ['不确定', '未知', '无法确认', '不清楚', '抱歉']
+
+function isRejectedAuthor(author: string): boolean {
+  if (!author || /^no$/i.test(author)) return true
+  if (author.length > 40) return true
+  if (AUTHOR_SENTENCE_PUNCTUATION.test(author)) return true
+  return AUTHOR_HEDGE_PHRASES.some((phrase) => author.includes(phrase))
+}
+
 /** 解析查证响应里的「作者|主题词」：取不到主题词时 theme 为 undefined；NO/空/无作者一律返回空对象 */
 export function parseVerifiedBook(raw: string): { author?: string; theme?: string } {
   if (typeof raw !== 'string') return {}
@@ -102,7 +118,7 @@ export function parseVerifiedBook(raw: string): { author?: string; theme?: strin
   const themeRaw = sepIdx === -1 ? '' : trimmed.slice(sepIdx + 1)
 
   const author = stripWrap(authorRaw)
-  if (!author || /^no$/i.test(author) || author.length > 40 || /\n/.test(author)) return {}
+  if (isRejectedAuthor(author)) return {}
 
   const result: { author?: string; theme?: string } = { author }
   const theme = stripWrap(themeRaw)

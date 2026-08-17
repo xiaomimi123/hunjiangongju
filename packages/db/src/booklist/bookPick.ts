@@ -96,8 +96,8 @@ export function isSameBook(a: PickedBook, b: PickedBook): boolean {
   const ta = normalizeTitle(a.title)
   const tb = normalizeTitle(b.title)
   if (!ta || !tb) return false
-  const aa = (a.author ?? '').trim()
-  const ab = (b.author ?? '').trim()
+  const aa = typeof a.author === 'string' ? a.author.trim() : ''
+  const ab = typeof b.author === 'string' ? b.author.trim() : ''
   // 作者都非空且不同 → 直接判为不同书（同名不同作者是不同版本/不同书）
   if (aa && ab && aa !== ab) return false
   if (ta === tb) return true

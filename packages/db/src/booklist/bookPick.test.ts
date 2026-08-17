@@ -143,6 +143,23 @@ describe('isSameBook', () => {
   it('毫不相干 → 不同书', () => {
     expect(isSameBook({ title: 'A', author: '甲' }, { title: 'B', author: '乙' })).toBe(false)
   })
+  it('author 为非字符串（如来自 DB 的脏数据）→ 视为空作者，不抛错', () => {
+    const dirty = { title: 'A', author: 123 as unknown as string }
+    expect(() => isSameBook(dirty, { title: 'A', author: 'x' })).not.toThrow()
+    // 一方作者被当作空 → 沿用「一方为空可匹配」的规则，与同标题一起判为同一本
+    expect(isSameBook(dirty, { title: 'A', author: 'x' })).toBe(true)
+    const dirtyObj = { title: 'A', author: {} as unknown as string }
+    const dirtyArr = { title: 'A', author: [] as unknown as string }
+    expect(() => isSameBook(dirtyObj, dirtyArr)).not.toThrow()
+    expect(typeof isSameBook(dirtyObj, dirtyArr)).toBe('boolean')
+  })
+  it('title 为非字符串 → 不抛错，返回 false', () => {
+    const dirtyTitle = { title: 123 as unknown as string, author: 'x' }
+    expect(() => isSameBook(dirtyTitle, { title: 'A', author: 'x' })).not.toThrow()
+    expect(isSameBook(dirtyTitle, { title: 'A', author: 'x' })).toBe(false)
+    expect(() => isSameBook({ title: 'A', author: 'x' }, dirtyTitle)).not.toThrow()
+    expect(isSameBook({ title: 'A', author: 'x' }, dirtyTitle)).toBe(false)
+  })
 })
 
 describe('dedupeBooks 合并同一本书', () => {

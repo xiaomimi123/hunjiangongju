@@ -9,6 +9,7 @@ import {
   getCapabilityConfig,
   isMockMode,
   pickAngle,
+  parseTemplateParams,
 } from '@mixcut/db'
 import { splitScriptToSegments } from './splitScript'
 
@@ -319,7 +320,13 @@ export async function generateScript(genTaskId: string): Promise<void> {
   const scriptMode = readScriptMode(task.variables)
   const perGenBookTitle = readBookTitle(task.variables)
 
+  // 仅 flash 模板会把第 0 段整段吃进开场快闪且不出字幕（indexHtml 正片字幕取 segs.slice(1)），
+  // 只有这种模板需要一句与开场标题呼应的旁白；classic 模板第 0 段照常出字幕，不加开场白。
+  const tp = parseTemplateParams((fw.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
+  const openTitleText = tp.mode === 'flash' ? tp.open.titleText : undefined
+
   let clean: string[] | null = null
+  let markedIdxs: number[] | null = null
   if (scriptMode === 'manual') {
     // 手动：直接切分用户文案，跳过 LLM / validate / 重试
     clean = splitScriptToSegments(readCustomScript(task.variables))
@@ -334,20 +341,28 @@ export async function generateScript(genTaskId: string): Promise<void> {
     const angle = pickAngle(genTaskId)
     const basePrompt = scriptMode === 'imitate'
       ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars } })
-      : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle })
+      : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle, openTitleText })
 
     let prompt = basePrompt
     let lastErrors: string[] = []
     let lastClean: string[] = []
+    let lastIdxs: number[] | null = null
+    const bookCount = mode === 'books' ? (books?.length ?? 0) : 0
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const raw = await llmComplete({ prompt, maxTokens: 1200, temperature: 0.9 })
-      const lines = raw.split('\n')
+      const rawLines = raw.split('\n')
+      // 标记必须在预算校验之前剥离：validateScript/trimToBudget 按字符数算预算，
+      // 带着「1|」前缀会让每行凭空多 2 个字符，挤压真实文案预算并令重试循环误判超限。
+      const marked = bookCount > 0 && scriptMode === 'auto' ? parseBookMarkedLines(rawLines, bookCount) : null
+      const lines = marked ? marked.map((m) => m.text) : rawLines
       const result = validateScript(lines, maxLines, maxTotalChars)
       lastClean = result.clean
+      lastIdxs = marked ? marked.map((m) => m.bookIdx) : null
 
       if (result.errors.length === 0) {
         clean = result.clean
+        markedIdxs = lastIdxs
         break
       }
 
@@ -363,11 +378,18 @@ export async function generateScript(genTaskId: string): Promise<void> {
         throw new Error(`文案生成为空（已重试 ${MAX_ATTEMPTS} 次）：${lastErrors.join('；')}`)
       }
       clean = trimToBudget(lastClean, maxLines, maxTotalChars)
+      // trimToBudget 只从尾部整行丢弃且保持顺序，故按裁剪后长度截取序号即可保持配对；
+      // 这依赖 parseBookMarkedLines 已保证每条 text 非空（否则 trimToBudget 的 filter(Boolean) 会错位）。
+      markedIdxs = lastIdxs ? lastIdxs.slice(0, clean.length) : null
       console.warn(`[gen] generate-script ${genTaskId}: 超预算兜底裁剪 (${lastErrors.join('；')}) → ${clean.length} 行`)
+    }
+
+    if (bookCount > 0 && scriptMode === 'auto' && !markedIdxs) {
+      console.warn(`[gen] generate-script ${genTaskId}: 未能解析书序号标记，《书名》头回退位置均分`)
     }
   }
 
-  const assigned = assignBooksToSegments(clean, booksForAssign(scriptMode, books))
+  const assigned = assignBooksToSegments(clean, booksForAssign(scriptMode, books), markedIdxs ?? undefined)
   const assignedFinal = perGenBookTitle
     ? assigned.map((a) => ({ ...a, bookTitle: perGenBookTitle }))
     : assigned

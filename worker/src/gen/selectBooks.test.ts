@@ -51,9 +51,10 @@ async function makeFramework(bookCount?: number) {
   return fw
 }
 
-async function makeTask(subject: string, frameworkId: string, variables?: unknown) {
+async function makeTask(subject: string, frameworkId: string, variables?: unknown, id?: string) {
   const task = await prisma.generationTask.create({
     data: {
+      ...(id ? { id } : {}),
       subject,
       frameworkId,
       variables: (variables ?? undefined) as never,
@@ -170,6 +171,54 @@ describe('selectBooks：规则1 —— 运营手填书单必须原样跳过（�
   })
 })
 
+describe('selectBooks：规则4（fix round 1）—— manual/imitate 文案模式跳过 AI 选书，避免浪费检索与污染书库', () => {
+  it('scriptMode: imitate → 不调用 llmComplete，不写任何书库行，直接入队 generate-script', async () => {
+    const fw = await makeFramework(3)
+    // subject 模拟 route.ts 从粘贴文案里截出的片段（不是书名），imitate 模式下 books 字段本就为空
+    const task = await makeTask('这段文案的开头几句被当作选题兜底', fw.id, {
+      scriptMode: 'imitate',
+      customScript: '这是学员粘贴用来仿写的参考文案全文……',
+    })
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    expect(
+      await prisma.bookLibrary.count({ where: { title: '这段文案的开头几句被当作选题兜底' } })
+    ).toBe(0)
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    // 跳过时不得触碰 variables（与规则1 一致：原样透传）
+    expect(fresh.variables).toEqual({ scriptMode: 'imitate', customScript: '这是学员粘贴用来仿写的参考文案全文……' })
+    expect(mockEnqueueGen).toHaveBeenCalledWith('generate-script', { genTaskId: task.id })
+  })
+
+  it('scriptMode: manual 且 books 为空/缺省 → 同样跳过 AI 选书，不调用 llmComplete，仍入队 generate-script', async () => {
+    const fw = await makeFramework(3)
+    const task = await makeTask('手动模式的选题片段', fw.id, {
+      scriptMode: 'manual',
+      customScript: '学员完全自己写的文案',
+    })
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    expect(await prisma.bookLibrary.count({ where: { title: '手动模式的选题片段' } })).toBe(0)
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    expect(fresh.variables).toEqual({ scriptMode: 'manual', customScript: '学员完全自己写的文案' })
+    expect(mockEnqueueGen).toHaveBeenCalledWith('generate-script', { genTaskId: task.id })
+  })
+
+  it('scriptMode: manual 且 books 显式为空数组 → 走规则4 跳过（不是规则1，因为 hasManualBooks 要求非空数组）', async () => {
+    const fw = await makeFramework(3)
+    const task = await makeTask('手动模式空书单选题', fw.id, { scriptMode: 'manual', books: [] })
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    expect(mockEnqueueGen).toHaveBeenCalledWith('generate-script', { genTaskId: task.id })
+  })
+})
+
 describe('selectBooks：mock 模式 —— 自带 fixture，零网络调用', () => {
   it('返回固定夹具书目，长度等于目标本数，不调用 llmComplete', async () => {
     mockIsMockMode.mockReturnValue(true)
@@ -196,6 +245,24 @@ describe('selectBooks：mock 模式 —— 自带 fixture，零网络调用', ()
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: unknown[] }).books
     expect(books.length).toBe(6)
+  })
+
+  it('（fix round 1 Minor 1）写回 books 时必须原样保留已有的其它 variables 字段，不得被覆盖丢失', async () => {
+    mockIsMockMode.mockReturnValue(true)
+    const fw = await makeFramework(2)
+    const preexisting = { 标题: 'x', 副标题: 'y', 账号: '@z', voiceId: 'v1' }
+    const task = await makeTask('变量保留测试选题', fw.id, preexisting)
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const vars = fresh.variables as Record<string, unknown>
+    expect(vars.标题).toBe('x')
+    expect(vars.副标题).toBe('y')
+    expect(vars.账号).toBe('@z')
+    expect(vars.voiceId).toBe('v1')
+    expect(Array.isArray(vars.books)).toBe(true)
+    expect((vars.books as unknown[]).length).toBe(2)
   })
 })
 
@@ -293,8 +360,12 @@ describe('selectBooks：种子稳定性 —— 同任务重跑一致，不同任
       await upsertBook({ title: t, author: `作者-${t}`, theme: sharedSubject })
     }
     const fw = await makeFramework(3)
-    const taskA = await makeTask(sharedSubject, fw.id)
-    const taskB = await makeTask(sharedSubject, fw.id)
+    // 用固定 id（而非让 Prisma 随机生成 uuid）：pickSubset 的种子就是 genTaskId，两个真随机 uuid
+    // 在 6 选 2 的小候选池上偶尔会撞出相同子集（Fisher-Yates 的生日悖论），导致这条断言随机跑绿/跑红。
+    // 固定 id 已用 pickSubset 实测确认对该候选池产出不同子集（同 Task 3 bookPick.test.ts 用
+    // 'task-a'/'task-b' 固定种子验证"异 seed 结果不同"的做法一致），消除 flake 而不改变被测语义。
+    const taskA = await makeTask(sharedSubject, fw.id, undefined, 'selectbooks-seed-task-a')
+    const taskB = await makeTask(sharedSubject, fw.id, undefined, 'selectbooks-seed-task-b')
 
     await selectBooks(taskA.id)
     await selectBooks(taskB.id)

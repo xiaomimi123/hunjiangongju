@@ -56,6 +56,46 @@ describe('buildScriptPrompt', () => {
     expect(prompt).toContain('200 字')
     expect(prompt).toContain('20 行')
   })
+
+  it('books 模式：传入 angle 时，提示词包含该切入角度，且作为独立要求出现', () => {
+    const prompt = buildScriptPrompt({
+      mode: 'books',
+      subject: '不重要',
+      books: [{ title: '孤独六讲' }],
+      framework,
+      angle: '故事式',
+    })
+    expect(prompt).toContain('故事式')
+    expect(prompt).toContain('切入角度')
+  })
+
+  it('books 模式：不传 angle 时，提示词与今天（未加 angle 参数）逐字节一致——不包含切入角度要求行', () => {
+    const withoutAngle = buildScriptPrompt({
+      mode: 'books',
+      subject: '不重要',
+      books: [{ title: '孤独六讲' }],
+      framework,
+    })
+    expect(withoutAngle).not.toContain('切入角度')
+  })
+
+  it('books 模式：同样的书单，不同 angle 产出不同的提示词', () => {
+    const promptA = buildScriptPrompt({
+      mode: 'books',
+      subject: '不重要',
+      books: [{ title: '孤独六讲' }],
+      framework,
+      angle: '故事式',
+    })
+    const promptB = buildScriptPrompt({
+      mode: 'books',
+      subject: '不重要',
+      books: [{ title: '孤独六讲' }],
+      framework,
+      angle: '痛点式',
+    })
+    expect(promptA).not.toBe(promptB)
+  })
 })
 
 describe('resolveScriptMode', () => {

@@ -8,6 +8,7 @@ import {
   enqueueGen,
   getCapabilityConfig,
   isMockMode,
+  pickAngle,
 } from '@mixcut/db'
 import { splitScriptToSegments } from './splitScript'
 
@@ -77,8 +78,9 @@ export function buildScriptPrompt(args: {
   books?: BookInput[]
   framework: ScriptFrameworkInput
   variablesText?: string
+  angle?: string
 }): string {
-  const { mode, subject, books, framework, variablesText = '' } = args
+  const { mode, subject, books, framework, variablesText = '', angle } = args
   const { frameworkText, segCount, maxLines, maxTotalChars } = framework
 
   if (mode === 'books') {
@@ -94,6 +96,7 @@ export function buildScriptPrompt(args: {
       '2. 只输出文案正文，不要编号、不要额外标题、不要任何解释说明。',
       `3. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行，请依书目数量合理分配每本书的篇幅。`,
       '4. 严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
+      ...(angle ? [`5. 本条整体采用「${angle}」的切入角度展开，与其它角度明显区分。`] : []),
       '',
       STYLE_RULES,
     ].join('\n')
@@ -239,17 +242,8 @@ export async function generateScript(genTaskId: string): Promise<void> {
   const maxTotalChars = fw.maxTotalChars ?? 220
 
   const resolved = resolveScriptMode(task.variables)
-  let mode = resolved.mode
-  let books = resolved.books
-  // 改进3：从拆解框架生成时，若未手填书单但框架带有识别到的书目（overlayTemplate.books），
-  // 自动采用 → 渲染《书名》头，无需运营每次手填。
-  if (mode === 'subject') {
-    const fwBooks = frameworkBooks(fw.overlayTemplate)
-    if (fwBooks.length > 0) {
-      mode = 'books'
-      books = fwBooks
-    }
-  }
+  const mode = resolved.mode
+  const books = resolved.books
 
   const variablesText =
     task.variables && Object.keys(task.variables as object).length > 0
@@ -271,16 +265,17 @@ export async function generateScript(genTaskId: string): Promise<void> {
     clean = trimToBudget(clean, maxLines, maxTotalChars)
   } else {
     // imitate: 用参考仿写；auto: 现状。二者复用现有 validate/重试/兜底循环。
+    const angle = pickAngle(genTaskId)
     const basePrompt = scriptMode === 'imitate'
       ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars } })
-      : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText })
+      : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle })
 
     let prompt = basePrompt
     let lastErrors: string[] = []
     let lastClean: string[] = []
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const raw = await llmComplete({ prompt, maxTokens: 1200 })
+      const raw = await llmComplete({ prompt, maxTokens: 1200, temperature: 0.9 })
       const lines = raw.split('\n')
       const result = validateScript(lines, maxLines, maxTotalChars)
       lastClean = result.clean

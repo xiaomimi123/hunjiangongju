@@ -64,13 +64,19 @@ function formatBookLine(b: BookInput, i: number): string {
  * 字数/行数上限直接复用框架已推导的 `maxLines`/`maxTotalChars`（deriveCharBudget 产出），不在此重新计算。
  */
 // 书单号爆款文案风格准则（对齐优质书单号：口语化、情绪优先、无营销腔）。
-const STYLE_RULES = [
-  '文案风格准则（务必遵守）：',
-  '- 开篇第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。',
-  '- 短句、口语化、像跟朋友说话；多用具体细节，少用抽象大词。',
-  '- 严禁"你是不是……"式营销开头、"不是……而是……"的对仗论证、机械排比。',
-  '- 结尾留余味、给一句能被记住的话；严禁任何 CTA（买它/点购物车/关注/链接）。',
-].join('\n')
+// hasOpenTitle=true 时首条必须让步：模板已有「今天分享的是」这类开场标题，
+// 此时要求写开场白与原文「不要先介绍书」正面冲突，两条打架会让 LLM 输出不稳定。
+function styleRules(hasOpenTitle: boolean): string {
+  return [
+    '文案风格准则（务必遵守）：',
+    hasOpenTitle
+      ? '- 开场白之后的第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。'
+      : '- 开篇第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。',
+    '- 短句、口语化、像跟朋友说话；多用具体细节，少用抽象大词。',
+    '- 严禁"你是不是……"式营销开头、"不是……而是……"的对仗论证、机械排比。',
+    '- 结尾留余味、给一句能被记住的话；严禁任何 CTA（买它/点购物车/关注/链接）。',
+  ].join('\n')
+}
 
 export function buildScriptPrompt(args: {
   mode: 'books' | 'subject'
@@ -79,29 +85,52 @@ export function buildScriptPrompt(args: {
   framework: ScriptFrameworkInput
   variablesText?: string
   angle?: string
+  openTitleText?: string
 }): string {
-  const { mode, subject, books, framework, variablesText = '', angle } = args
+  const { mode, subject, books, framework, variablesText = '', angle, openTitleText } = args
   const { frameworkText, segCount, maxLines, maxTotalChars } = framework
+  const openTitle = (openTitleText ?? '').trim()
 
   if (mode === 'books') {
     const list = (books ?? []).map(formatBookLine).join('\n')
+    const n = books?.length ?? 0
+    // 书序号让《书名》头严格跟随内容；开场白行用 0，不归属任何一本书。
+    const openLine = openTitle
+      ? `每一条文案单独一行，行首必须标出这句讲的是第几本书，格式为「书序号|文案」，书序号取上面书单的编号 1-${n}；第一行必须是开场白，以「${openTitle}」开头，用一句话点出这几本书共同解决的问题，这一行的书序号写 0。`
+      : `每一条文案单独一行，行首必须标出这句讲的是第几本书，格式为「书序号|文案」，书序号取上面书单的编号 1-${n}。`
+    // books 分支的条目编号随 angle 条目的有无整体顺延，故用数组拼装后统一编号，
+    // 避免手写序号出现两个末位序号。
+    const bookItems = [
+      openLine,
+      '按书单顺序为每本书逐句撰写书评文案；语言需贴合书评人口吻，突出该书的核心价值与阅读理由。',
+      '除行首的「书序号|」外，只输出文案正文，不要编号、不要额外标题、不要任何解释说明。',
+      `总字数不超过 ${maxTotalChars} 字（不含行首书序号），总行数不超过 ${maxLines} 行，请依书目数量合理分配每本书的篇幅。`,
+      '严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
+      ...(angle ? [`本条整体采用「${angle}」的切入角度展开，与其它角度明显区分。`] : []),
+    ]
     return [
       '你是一名书单号短视频文案写手。请根据下面的「文案框架」，为以下书单逐句创作书评口吻的文案。',
       '',
       `文案框架：\n${frameworkText}`,
-      `书单（共 ${books?.length ?? 0} 本）：\n${list}`,
+      `书单（共 ${n} 本）：\n${list}`,
       '',
       '要求：',
-      '1. 按书单顺序为每本书逐句撰写书评文案，每句单独一行；语言需贴合书评人口吻，突出该书的核心价值与阅读理由。',
-      '2. 只输出文案正文，不要编号、不要额外标题、不要任何解释说明。',
-      `3. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行，请依书目数量合理分配每本书的篇幅。`,
-      '4. 严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
-      ...(angle ? [`5. 本条整体采用「${angle}」的切入角度展开，与其它角度明显区分。`] : []),
+      ...bookItems.map((s, i) => `${i + 1}. ${s}`),
       '',
-      STYLE_RULES,
+      styleRules(Boolean(openTitle)),
     ].join('\n')
   }
 
+  // subject 分支的条目编号随开场白条目的有无整体顺延，故用数组拼装后统一编号，
+  // 避免手写序号出现两个「3.」。
+  const subjectItems = [
+    '请先选书：在心里挑选 2-4 本与选题高度相关、适合书单号推荐的书籍（无需输出选书过程与书单本身），再围绕选定书目逐句撰写书评文案。',
+    `分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
+    ...(openTitle ? [`第一段必须是开场白，以「${openTitle}」开头，用一句话点出这条视频要解决的问题。`] : []),
+    '只输出文案正文，不要编号、不要标题、不要选书清单、不要任何解释说明。',
+    `总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+    '严禁照搬原文或框架示例，必须围绕选题原创改写。',
+  ]
   return [
     '你是一名书单号短视频文案写手。请根据下面的「文案框架」和「选题」创作一条口播文案。',
     '',
@@ -109,13 +138,9 @@ export function buildScriptPrompt(args: {
     `选题：${subject}${variablesText}`,
     '',
     '要求：',
-    '1. 请先选书：在心里挑选 2-4 本与选题高度相关、适合书单号推荐的书籍（无需输出选书过程与书单本身），再围绕选定书目逐句撰写书评文案。',
-    `2. 分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
-    '3. 只输出文案正文，不要编号、不要标题、不要选书清单、不要任何解释说明。',
-    `4. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
-    '5. 严禁照搬原文或框架示例，必须围绕选题原创改写。',
+    ...subjectItems.map((s, i) => `${i + 1}. ${s}`),
     '',
-    STYLE_RULES,
+    styleRules(Boolean(openTitle)),
   ].join('\n')
 }
 
@@ -214,7 +239,7 @@ export function buildTranslatePrompt(zh: string): string {
 /**
  * 纯函数：根据参考文案拼装仿写提示词。
  * 指示 LLM 仿照参考文案的语气、句式、情感浓度与第二人称口吻，就同一主题原创改写一条新文案。
- * 复用 STYLE_RULES（包括禁 CTA 条款）。
+ * 复用 styleRules(false)（包括禁 CTA 条款）；仿写场景暂不支持开场白参数。
  */
 export function buildImitatePrompt(args: {
   reference: string
@@ -236,7 +261,7 @@ export function buildImitatePrompt(args: {
     '3. 必须原创改写，严禁照抄参考文案或框架示例。',
     `4. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
     '',
-    STYLE_RULES,
+    styleRules(false),
   ].join('\n')
 }
 

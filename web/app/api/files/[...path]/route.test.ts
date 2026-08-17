@@ -18,10 +18,13 @@ const { GET } = await import('./route')
 
 const REL = 'gen/a/final.png'
 const CONTENT = Buffer.from('hello world image bytes')
+const REL_WEBP = 'gen/a/1.thumb.webp'
+const WEBP_CONTENT = Buffer.from('fake webp thumbnail bytes')
 
 beforeAll(async () => {
   await fs.mkdir(path.join(tmpDataDir, 'gen', 'a'), { recursive: true })
   await fs.writeFile(path.join(tmpDataDir, REL), CONTENT)
+  await fs.writeFile(path.join(tmpDataDir, REL_WEBP), WEBP_CONTENT)
 })
 
 afterAll(async () => {
@@ -109,5 +112,12 @@ describe('GET /api/files/[...path]', () => {
     expect(cacheControl).toContain('private')
     const body = await res.text()
     expect(body).toBe(CONTENT.toString('utf-8', 0, 5))
+  })
+
+  it('.webp 缩略图 → Content-Type: image/webp（不能回退到 application/octet-stream，否则 nosniff 环境下无法渲染）', async () => {
+    getSessionMock.mockResolvedValueOnce({ userId: 'u1', role: 'operator' })
+    const res = await GET(req(`http://localhost/api/files/${REL_WEBP}`), { params: { path: REL_WEBP.split('/') } })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/webp')
   })
 })

@@ -8,7 +8,7 @@ import { contentDispositionAttachment } from '@/lib/contentDisposition'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.srt': 'text/plain; charset=utf-8',
-  '.json': 'application/json', '.png': 'image/png',
+  '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg',
 }
 

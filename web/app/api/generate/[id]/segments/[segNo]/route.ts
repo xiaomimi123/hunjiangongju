@@ -5,6 +5,7 @@ import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { DATA_DIR } from '@/lib/paths'
+import { makeThumb } from '@/lib/thumb'
 
 // 轻量编辑单段：multipart，可选 scriptText（改文案）/ image（换图）。
 // 仅在 ASSET_READY 时允许。此处只落数据/文件，不改任务状态：
@@ -46,6 +47,13 @@ export const PATCH = handler(async (req, { params }) => {
     const abs = path.join(DATA_DIR, rel)
     await fs.mkdir(path.dirname(abs), { recursive: true })
     await fs.writeFile(abs, Buffer.from(await image.arrayBuffer()))
+    // 重新生成缩略图，否则网格页 thumbUrl() 请求命中的还是换图前的旧 .thumb.webp（同名覆盖，
+    // 服务器返回 200 而非 404，客户端的 onError 回退不会触发）。缩略图失败绝不能拖垮换图本身。
+    try {
+      await makeThumb(abs)
+    } catch (err) {
+      console.warn(`[segments] makeThumb 异常(已忽略) ${abs}: ${(err as Error).message}`)
+    }
     data.imageUrl = `/api/files/${rel}`
   }
 

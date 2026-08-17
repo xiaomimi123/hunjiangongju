@@ -43,6 +43,43 @@ describe('稳定随机', () => {
   })
 })
 
+/** 确定性生成"uuid 形状"的种子字符串（8-4-4-4-12 十六进制），不依赖 Math.random / crypto.randomUUID，
+ *  仅由入参 index 派生，保证测试集在每次运行时完全一致。混合函数与被测的 seedFrom 完全独立（不同算法族），
+ *  避免"用同一套哈希既生成测试数据又验证测试数据"这种自证循环。 */
+function uuidShapedSeed(index: number): string {
+  let state = ((index + 1) * 2654435761) >>> 0
+  const bytes: number[] = []
+  for (let k = 0; k < 16; k++) {
+    state = (Math.imul(state ^ (state >>> 15), 2246822519) + 0x9e3779b9) >>> 0
+    state = (state ^ (state >>> 13)) >>> 0
+    bytes.push(state & 0xff)
+    state = (Math.imul(state, 2246822519) + k) >>> 0
+  }
+  const hex = bytes.map((b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+describe('分布回归：seedFrom 在 uuid 形状种子下不塌缩', () => {
+  it('用 2000 个确定性生成的 uuid 形状种子洗牌 20 元素数组，元素 0 落点应覆盖全部 20 个位置且无严重塌缩', () => {
+    const xs = Array.from({ length: 20 }, (_, i) => i)
+    const N = 2000
+    const positionCounts = new Array(20).fill(0)
+    for (let i = 0; i < N; i++) {
+      const seed = uuidShapedSeed(i)
+      const shuffled = pickSubset(xs, 20, seed)
+      const pos = shuffled.indexOf(0)
+      positionCounts[pos] += 1
+    }
+    // 均匀期望每桶 N/20 = 100。要求每个位置都被命中，且命中数不低于均匀期望的 20%（留足余量，
+    // 只用来卡"结构性不可达"这种塌缩问题，不对分布形状做过严格的统计检验）。
+    const expectedPerBucket = N / xs.length
+    const minAcceptable = expectedPerBucket * 0.2
+    for (let pos = 0; pos < 20; pos++) {
+      expect(positionCounts[pos]).toBeGreaterThanOrEqual(minAcceptable)
+    }
+  })
+})
+
 describe('parseBookList', () => {
   it('解析合法 JSON 数组', () => {
     expect(parseBookList('[{"title":"活着","author":"余华","points":"苦难与坚韧"}]'))

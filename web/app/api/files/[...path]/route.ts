@@ -28,9 +28,35 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
   if (abs !== root && !abs.startsWith(root + path.sep)) return new Response('非法路径', { status: 400 })
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return new Response('不存在', { status: 404 })
 
-  const size = fs.statSync(abs).size
+  const stat = fs.statSync(abs)
+  const size = stat.size
   const type = MIME[path.extname(abs).toLowerCase()] ?? 'application/octet-stream'
   const download = req.nextUrl.searchParams.get('download')
+
+  // 强缓存 + 条件请求校验：必须放在鉴权与路径校验之后，避免未登录请求靠 If-None-Match 猜出 304 绕过登录。
+  const etag = `W/"${size}-${stat.mtimeMs}"`
+  const lastModified = new Date(stat.mtimeMs).toUTCString()
+  const cacheControl = 'private, max-age=31536000, immutable'
+  const ifNoneMatch = req.headers.get('if-none-match')
+  const ifModifiedSince = req.headers.get('if-modified-since')
+  let notModified = false
+  if (ifNoneMatch) {
+    notModified = ifNoneMatch === etag
+  } else if (ifModifiedSince) {
+    const since = Date.parse(ifModifiedSince)
+    notModified = !Number.isNaN(since) && stat.mtimeMs <= since + 999 // If-Modified-Since 精度为秒
+  }
+  if (notModified) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        'ETag': etag,
+        'Last-Modified': lastModified,
+        'Cache-Control': cacheControl,
+      },
+    })
+  }
+
   const range = req.headers.get('range')
   if (range) {
     const m = /^bytes=(\d*)-(\d*)$/.exec(range)
@@ -63,6 +89,9 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
         'Accept-Ranges': 'bytes',
         'Content-Length': String(end - start + 1),
         'Content-Type': type,
+        'ETag': etag,
+        'Last-Modified': lastModified,
+        'Cache-Control': cacheControl,
         ...(download ? { 'Content-Disposition': contentDispositionAttachment(path.basename(abs)) } : {}),
       },
     })
@@ -72,6 +101,9 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
       'Content-Length': String(size),
       'Content-Type': type,
       'Accept-Ranges': 'bytes',
+      'ETag': etag,
+      'Last-Modified': lastModified,
+      'Cache-Control': cacheControl,
       ...(download ? { 'Content-Disposition': contentDispositionAttachment(path.basename(abs)) } : {}),
     },
   })

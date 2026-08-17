@@ -25,4 +25,32 @@ describe('bookLibrary', () => {
     }
     expect((await findBooksByTheme('测试主题', 2)).length).toBe(2)
   })
+  it('findBooksByTheme theme 为空（undefined/null/空串）→ 不返回无关书目，直接空数组', async () => {
+    expect(await findBooksByTheme(undefined as unknown as string, 5)).toEqual([])
+    expect(await findBooksByTheme(null as unknown as string, 5)).toEqual([])
+    expect(await findBooksByTheme('', 5)).toEqual([])
+  })
+  it('upsertBook 并发安全：同 (title, author) 并发写入只落一行', async () => {
+    // 先并发打一批 pg_sleep 请求，逼连接池真的开出多条物理连接（否则冷启动时单条连接会把
+    // 隐式事务串行化，并发调用在同一条连接上排队执行，永远撞不上竞态窗口，测试会假阴性）。
+    await Promise.all(
+      Array.from({ length: 30 }, () => prisma.$queryRawUnsafe('SELECT pg_sleep(0.08)::text'))
+    )
+
+    const book = { title: '并发测试书', author: '并发作者', theme: '并发' }
+    // 用 allSettled 而非 Promise.all：修复前这里必然会有调用因撞唯一约束而 reject，
+    // 用 allSettled 观察全部 20 个调用的真实结果，而不是被 Promise.all 的短路行为掩盖。
+    const settled = await Promise.allSettled(Array.from({ length: 20 }, () => upsertBook(book)))
+    const fulfilled = settled.filter(
+      (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof upsertBook>>> => r.status === 'fulfilled'
+    )
+    for (const r of fulfilled) ids.push(r.value.id)
+
+    expect(settled.every((r) => r.status === 'fulfilled')).toBe(true)
+    const firstId = fulfilled[0]?.value.id
+    expect(fulfilled.every((r) => r.value.id === firstId)).toBe(true)
+    expect(
+      await prisma.bookLibrary.count({ where: { title: book.title, author: book.author } })
+    ).toBe(1)
+  })
 })

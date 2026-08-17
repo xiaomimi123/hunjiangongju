@@ -1,4 +1,5 @@
 // 本地可运营维护的书库：AI 选书结果 / 人工审校后的 书名+作者 沉淀于此，供后续复用与召回。
+import { Prisma } from '@prisma/client'
 import { prisma } from '../client'
 
 export interface BookRow {
@@ -26,26 +27,38 @@ export async function findBookByTitle(title: string): Promise<BookRow | null> {
   return row ? toRow(row) : null
 }
 
-/** 按主题标签召回候选（theme 相等），最多 limit 条 */
+/** 按主题标签召回候选（theme 相等），最多 limit 条；theme 为空（undefined/null/''）时不查询，直接返回空数组 */
 export async function findBooksByTheme(theme: string, limit: number): Promise<BookRow[]> {
+  if (!theme) return []
   const rows = await prisma.bookLibrary.findMany({ where: { theme }, take: limit })
   return rows.map(toRow)
 }
 
-/** 幂等写入：同 (title, author) 已存在则返回既有行，不重复插入 */
+/** 幂等写入：同 (title, author) 已存在则返回既有行，不重复插入。
+ * Prisma 的 upsert 在 PostgreSQL 上不是单条原子 SQL（BEGIN/SELECT/INSERT/SELECT/COMMIT），
+ * 并发写同一 (title, author) 时后到者会撞唯一约束抛 P2002；此处捕获该错误并回查既有行返回，
+ * 保证并发调用方都能拿到同一行而不是让异常冒出去。 */
 export async function upsertBook(b: { title: string; author: string; theme?: string; points?: string; source?: string }): Promise<BookRow> {
   const title = normalizeTitle(b.title)
   const author = b.author.trim()
-  const row = await prisma.bookLibrary.upsert({
-    where: { title_author: { title, author } },
-    update: {},
-    create: {
-      title,
-      author,
-      theme: b.theme ?? null,
-      points: b.points ?? null,
-      source: b.source ?? 'ai',
-    },
-  })
-  return toRow(row)
+  try {
+    const row = await prisma.bookLibrary.upsert({
+      where: { title_author: { title, author } },
+      update: {},
+      create: {
+        title,
+        author,
+        theme: b.theme ?? null,
+        points: b.points ?? null,
+        source: b.source ?? 'ai',
+      },
+    })
+    return toRow(row)
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const existing = await prisma.bookLibrary.findUnique({ where: { title_author: { title, author } } })
+      if (existing) return toRow(existing)
+    }
+    throw err
+  }
 }

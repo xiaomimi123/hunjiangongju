@@ -197,3 +197,37 @@ describe('frameworkBooks', () => {
     expect(frameworkBooks({ books: 'x' })).toEqual([])
   })
 })
+
+describe('assignBooksToSegments —— 显式书序号', () => {
+  const books = [
+    { title: '甲书', author: '甲作者' },
+    { title: '乙书', author: '乙作者' },
+    { title: '丙书' },
+  ]
+
+  it('给定序号时按序号分配，不再按位置均分', () => {
+    const out = assignBooksToSegments(['a', 'b', 'c', 'd'], books, [1, 2, 2, 3])
+    expect(out.map((o) => o.bookTitle)).toEqual(['甲书', '乙书', '乙书', '丙书'])
+    expect(out.map((o) => o.bookAuthor)).toEqual(['甲作者', '乙作者', '乙作者', undefined])
+  })
+
+  it('序号 0 → 该段无书名头（开场白）', () => {
+    const out = assignBooksToSegments(['开场白', 'a'], books, [0, 1])
+    expect(out[0].bookTitle).toBeUndefined()
+    expect(out[1].bookTitle).toBe('甲书')
+  })
+
+  it('序号数组长度与行数不符 → 忽略之，回退位置均分', () => {
+    const out = assignBooksToSegments(['a', 'b', 'c'], books, [1, 2])
+    expect(out.map((o) => o.bookTitle)).toEqual(['甲书', '乙书', '丙书'])
+  })
+
+  it('不传序号时与今天完全一致', () => {
+    expect(assignBooksToSegments(['a', 'b', 'c'], books))
+      .toEqual(assignBooksToSegments(['a', 'b', 'c'], books, undefined))
+  })
+
+  it('书单为空时原样透传（不受序号影响）', () => {
+    expect(assignBooksToSegments(['a', 'b'], [], [1, 2])).toEqual([{ scriptText: 'a' }, { scriptText: 'b' }])
+  })
+})

@@ -178,9 +178,21 @@ export function booksForAssign(
   return scriptMode === 'auto' ? (books ?? []) : []
 }
 
-export function assignBooksToSegments(lines: string[], books: BookInput[]): AssignedSegment[] {
+/**
+ * 纯函数：结合书序号把书目的 title/author 落到每段文案上。
+ * `bookIdxs` 给定（1-based，0=无书名头）且长度与 lines 相同时，按它分配——这是让《书名》头
+ * 严格跟随文案内容的路径；未给定或长度不符时回退 `allocateBookIndexes` 的位置均分。
+ * books 为空数组（subject 模式）时原样透传，不带 bookTitle/bookAuthor。
+ */
+export function assignBooksToSegments(
+  lines: string[],
+  books: BookInput[],
+  bookIdxs?: number[],
+): AssignedSegment[] {
   if (books.length === 0) return lines.map((scriptText) => ({ scriptText }))
-  const idxs = allocateBookIndexes(lines.length, books.length)
+  const idxs = bookIdxs && bookIdxs.length === lines.length
+    ? bookIdxs.map((n) => (n >= 1 && n <= books.length ? n - 1 : -1))
+    : allocateBookIndexes(lines.length, books.length)
   return lines.map((scriptText, i) => {
     const book = books[idxs[i]]
     if (!book) return { scriptText }

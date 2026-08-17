@@ -25,6 +25,12 @@ describe('thumbUrl（由原图 URL 推导缩略图 URL,纯函数）', () => {
   it('无扩展名时原样返回', () => {
     expect(thumbUrl('/api/files/gen/x/noext')).toBe('/api/files/gen/x/noext')
   })
+  it('带查询串：先剥离 ?...再推导扩展名，再拼回查询串（不破坏 cache-busting）', () => {
+    expect(thumbUrl('/api/files/gen/x/3.png?t=123')).toBe('/api/files/gen/x/3.thumb.webp?t=123')
+  })
+  it('查询串本身含点号也不干扰扩展名推导', () => {
+    expect(thumbUrl('/api/files/gen/x/3.png?t=1699999999.123')).toBe('/api/files/gen/x/3.thumb.webp?t=1699999999.123')
+  })
 })
 
 describe('makeThumb（真实调用 ffmpeg 生成 webp 缩略图）', () => {
@@ -74,5 +80,18 @@ describe('makeThumb（真实调用 ffmpeg 生成 webp 缩略图）', () => {
       })
     })
     expect(width).toBe(360)
+  })
+
+  // 坏源：文件名后缀是 .png 但内容是随机字节。ffmpeg 会先打开/建立输出文件，
+  // 之后解码失败才报错退出——留下一个 0 字节的 .thumb.webp。若不清理，Task 5 的
+  // 网格会请求到这个 URL，得到 200+0 字节而不是 404，无法触发"回退原图"逻辑。
+  it('坏源（.png 后缀但内容是随机字节）→ 返回 false 且不残留 0 字节的 .thumb.webp', async () => {
+    const badSrc = path.join(workDir, 'garbage.png')
+    await fs.writeFile(badSrc, Buffer.from(Array.from({ length: 2000 }, () => Math.floor(Math.random() * 256))))
+    const ok = await makeThumb(badSrc)
+    expect(ok).toBe(false)
+    const dst = path.join(workDir, 'garbage.thumb.webp')
+    const exists = await fs.stat(dst).then(() => true).catch(() => false)
+    expect(exists).toBe(false)
   })
 })

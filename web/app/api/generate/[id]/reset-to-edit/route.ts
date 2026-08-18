@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma, setGenerationStatus } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { canAccessTask } from '@/lib/taskAccess'
 
 // 失败后退回编辑：render 起步即把 genTask 移入 VISUAL_RENDERING 且无回退路径，
 // 若最新 RenderTask 停在 QC_FAILED/FAILED（或 genTask FAILED），运营将卡死无法重试。
@@ -11,7 +12,7 @@ const FAILED_RENDER = ['QC_FAILED', 'FAILED']
 export const POST = handler(async (_req, { params }) => {
   const session = await requireRole('operator')
   const task = await prisma.generationTask.findUnique({ where: { id: params.id } })
-  if (!task || task.createdBy !== session.userId) throw new HttpError(404, '生成任务不存在')
+  if (!canAccessTask(task, session)) throw new HttpError(404, '生成任务不存在')
 
   const rt = await prisma.renderTask.findFirst({
     where: { generationTaskId: task.id },

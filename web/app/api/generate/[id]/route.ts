@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { canAccessTask } from '@/lib/taskAccess'
 import { DATA_DIR } from '@/lib/paths'
 
 export const GET = handler(async (_req, { params }) => {
@@ -21,7 +22,7 @@ export const GET = handler(async (_req, { params }) => {
       },
     },
   })
-  if (!task || (task.createdBy && task.createdBy !== session.userId)) throw new HttpError(404, '生成任务不存在')
+  if (!canAccessTask(task, session)) throw new HttpError(404, '生成任务不存在')
 
   // 学员不下发完整 variables：里面可能有运营字段（voiceId/assetSource/assetFolder/scriptMode/__bgmId 等）。
   // 学员只需要知道本条选用了哪些真实书目，因此只投影 books 的 title/author。
@@ -45,7 +46,7 @@ export const GET = handler(async (_req, { params }) => {
 export const DELETE = handler(async (_req, { params }) => {
   const session = await requireRole('operator')
   const task = await prisma.generationTask.findUnique({ where: { id: params.id }, select: { id: true, createdBy: true } })
-  if (!task || (task.createdBy && task.createdBy !== session.userId)) throw new HttpError(404, '生成任务不存在')
+  if (!canAccessTask(task, session)) throw new HttpError(404, '生成任务不存在')
 
   await prisma.generationTask.delete({ where: { id: params.id } })
 

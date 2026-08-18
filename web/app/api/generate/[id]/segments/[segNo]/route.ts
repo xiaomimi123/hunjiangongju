@@ -4,6 +4,7 @@ import fs from 'fs/promises'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { canAccessTask } from '@/lib/taskAccess'
 import { DATA_DIR } from '@/lib/paths'
 import { makeThumb } from '@/lib/thumb'
 
@@ -14,7 +15,7 @@ import { makeThumb } from '@/lib/thumb'
 export const PATCH = handler(async (req, { params }) => {
   const session = await requireRole('operator')
   const task = await prisma.generationTask.findUnique({ where: { id: params.id } })
-  if (!task || task.createdBy !== session.userId) throw new HttpError(404, '生成任务不存在')
+  if (!canAccessTask(task, session)) throw new HttpError(404, '生成任务不存在')
   if (task.status !== 'ASSET_READY') throw new HttpError(400, '仅在素材就绪（ASSET_READY）时可编辑分段')
 
   const seqNo = Number(params.segNo)

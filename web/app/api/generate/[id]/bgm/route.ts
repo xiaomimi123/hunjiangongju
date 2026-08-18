@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { canAccessTask } from '@/lib/taskAccess'
 
 // 选定本任务合成时使用的 BGM。generationTask 无 bgmId 字段，
 // P1 存入 variables.__bgmId（保留键），render-visuals 建 RenderTask 时读取写入 RenderTask.bgmId。
@@ -10,7 +11,7 @@ import { handler } from '@/lib/api'
 export const POST = handler(async (req, { params }) => {
   const session = await requireRole('operator')
   const task = await prisma.generationTask.findUnique({ where: { id: params.id } })
-  if (!task || task.createdBy !== session.userId) throw new HttpError(404, '生成任务不存在')
+  if (!canAccessTask(task, session)) throw new HttpError(404, '生成任务不存在')
 
   const body = (await req.json().catch(() => {
     throw new HttpError(400, '请求体格式错误')

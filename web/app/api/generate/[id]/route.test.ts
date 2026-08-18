@@ -95,3 +95,39 @@ describe('GET /api/generate/[id]', () => {
     expect(res.status).toBe(404)
   })
 })
+
+// 后台「生成栏」现在会列出学员创建的任务；若详情接口仍只认创建人，运营点进去必然 404
+// （列表看得见、点不开）——这正是线上实际撞到的报错，用例直接复现该场景。
+describe('GET /api/generate/[id] —— 访问归属', () => {
+  it('运营访问学员创建的任务 → 200', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, {}, 'stu-somebody')
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-1', role: 'operator' })
+    const res = await GET(req(task.id), { params: { id: task.id } })
+    expect(res.status).toBe(200)
+  })
+
+  it('学员访问他人任务 → 404', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, {}, 'stu-other')
+    requireRoleMock.mockResolvedValueOnce({ userId: 'stu1', role: 'student' })
+    const res = await GET(req(task.id), { params: { id: task.id } })
+    expect(res.status).toBe(404)
+  })
+
+  it('学员访问 createdBy 为空的历史任务 → 404（无法证明归属；比旧行为更严）', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, {}, null)
+    requireRoleMock.mockResolvedValueOnce({ userId: 'stu1', role: 'student' })
+    const res = await GET(req(task.id), { params: { id: task.id } })
+    expect(res.status).toBe(404)
+  })
+
+  it('运营访问 createdBy 为空的历史任务 → 200', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, {}, null)
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-1', role: 'operator' })
+    const res = await GET(req(task.id), { params: { id: task.id } })
+    expect(res.status).toBe(200)
+  })
+})

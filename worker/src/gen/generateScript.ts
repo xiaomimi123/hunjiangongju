@@ -308,6 +308,49 @@ export function buildImitatePrompt(args: {
   ].join('\n')
 }
 
+/**
+ * 纯函数：单本书成片的提示词。与 buildScriptPrompt 的 books 模式的根本区别是——
+ * 全篇只讲一本书，因此不需要「书序号|文案」标记（只有一本，标记没有意义，多一条格式
+ * 指令只会增加模型出错面）。调性由 frameworkText 决定，不在此写死风格词。
+ */
+export function buildSingleBookPrompt(args: {
+  book: BookInput
+  framework: ScriptFrameworkInput
+  angle?: string
+  openTitleText?: string
+}): string {
+  const { book, framework, angle, openTitleText } = args
+  const { frameworkText, segCount, maxLines, maxTotalChars } = framework
+  const openTitle = (openTitleText ?? '').trim()
+
+  const bookLine = [`《${book.title}》`]
+  if (book.author) bookLine.push(`作者：${book.author}`)
+  if (book.points) bookLine.push(`要点：${book.points}`)
+
+  const items = [
+    ...(openTitle ? [`第一段必须是开场白，以「${openTitle}《${book.title}》」开头。`] : []),
+    `分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
+    // 核心约束：模型写书评时天然爱旁征博引，不明说必犯。
+    `全篇只讲《${book.title}》这一本书，不得提及、引用或对比任何其他书籍，也不得出现其他书名。`,
+    '只输出文案正文，不要编号、不要标题、不要任何解释说明。',
+    `总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+    '严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
+    ...(angle ? [`本条整体采用「${angle}」的切入角度展开，与其它角度明显区分。`] : []),
+  ]
+
+  return [
+    '你是一名书单号短视频文案写手。请根据下面的「文案框架」，为下面这一本书创作一条口播文案。',
+    '',
+    `文案框架：\n${frameworkText}`,
+    `书籍：${bookLine.join(' ｜ ')}`,
+    '',
+    '要求：',
+    ...items.map((s, i) => `${i + 1}. ${s}`),
+    '',
+    styleRules(Boolean(openTitle)),
+  ].join('\n')
+}
+
 export function readScriptMode(variables: unknown): 'auto' | 'manual' | 'imitate' {
   const m = variables && typeof variables === 'object' && !Array.isArray(variables)
     ? (variables as Record<string, unknown>).scriptMode : undefined

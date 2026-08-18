@@ -56,7 +56,9 @@ books 模式提示词改为要求逐行输出 `书序号|文案`，书序号即�
 
 **格式与解析**
 - 行格式：`^\s*(\d+)\s*[|｜]\s*(.+)$`（半角 `|` 与全角 `｜` 都接受；LLM 中文输出常出全角）。
-- **全有或全无**：仅当每一条非空行都匹配、且每个序号都落在 `0..N` 内时，才采用结构化结果；否则整体回退到现行 `allocateBookIndexes`，并记 warning。不做部分解析——半解析会产出比均分更难预料的错位。
+- **全有或全无**：仅当每一条非空行都匹配、且每个序号都落在 `0..N` 内时，才采用结构化结果；否则**书名头归属**整体回退到现行 `allocateBookIndexes`，并记 warning。不做部分解析——半解析会产出比均分更难预料的错位。
+- **剥离与归属必须解耦**（终审推翻了本设计初稿的一处错误假设，见 §八第 4 点）：回退的只是「书名头归属」，**标记前缀在任何情况下都必须逐行剥干净**。凡是要求过标记的路径（`bookCount > 0 && scriptMode === 'auto'`）都对每行调用 `stripBookMark`；subject/manual/imitate 三条路径从未要求标记，不得剥离（否则会误伤以数字加竖线开头的正常文案）。
+- `stripBookMark` 需用两条正则：`BOOK_MARK_RE`（带文案）与 `BOOK_MARK_BARE_RE`（裸标记行，如 `3|`，剥成空串交给既有的 `filter(Boolean)` 过滤）。**不能把 `BOOK_MARK_RE` 的 `(.+)` 放宽成 `(.*)` 去共用一条**——那会让 `parseBookMarkedLines` 把裸标记当合法标记采纳、产出空 text，破坏「每条 text 非空」的配对不变式。
 - 序号 `0` → 该行无书名头（开场白）。序号 `k` → `books[k-1]`。
 - **不强制单调**：LLM 若来回跳书，按其自身结构如实呈现（`bookRuns` 会把连续同名合并）。均分是「猜」，如实呈现是「跟」，后者永远不比前者差。
 
@@ -99,7 +101,7 @@ worker/src/gen/generateScript.ts   ← parseBookMarkedLines；提示词加书序
 
 ## 五、错误处理
 
-- LLM 不按格式输出 → `parseBookMarkedLines` 返回 `null` → 回退位置均分（= 今天的行为），记 warning，不硬失败。
+- LLM 不按格式输出 → `parseBookMarkedLines` 返回 `null` → 书名头回退位置均分，记 warning，不硬失败。**注意：只有在标记已被逐行剥干净的前提下，这才等价于今天的行为**；初稿漏掉剥离这一步，导致部分守规时裸标记会落库，见 §八第 4 点。
 - 序号越界（如书单 5 本却出现 `7|`）→ 视为整体不可用，同上回退。
 - 重试压缩循环：追加的压缩指令拼在 `basePrompt` 之后，格式要求仍在，无需额外处理。
 - 框架无 `__templateParams` 或非 flash → 不加开场白要求，行为不变。
@@ -125,3 +127,11 @@ worker/src/gen/generateScript.ts   ← parseBookMarkedLines；提示词加书序
 1. **`buildImitatePrompt` 是设计未预见的连带改动**。§B 把 `STYLE_RULES` 从常量改成 `styleRules(hasOpenTitle: boolean)` 函数（因为是否有开场白要切换风格准则第一条），而 `buildImitatePrompt` 内部原样引用 `STYLE_RULES`，签名一变就必须跟着改调用点（`styleRules(false)`）。设计的「改动面」「函数签名」两节都只提到 `buildScriptPrompt`/`parseBookMarkedLines`/`assignBooksToSegments`，未列出 `buildImitatePrompt`。~~仿写场景本身依旧不支持 `openTitleText` 参数，行为不变，只是签名跟着挪了个位置。~~ **（2026-08-18 追加，task-6 已修正）** 终审发现这是遗漏：flash 模板 + 仿写（imitate）模式生成时，开场白缺失的缺陷完全没修——运营选「仿写」时 `buildImitatePrompt` 从未接过 `openTitleText`。已补齐：新增可选 `openTitleText?: string` 参数，行为与 `buildScriptPrompt` 一致（首段要求开场白、`styleRules(Boolean(openTitle))` 联动切换风格准则首条），主流程调用点已传入该参数；「要求」列表同步改为数组拼装 + 统一编号，避免条件项插入导致序号错位。
 2. **books/subject 两分支都改用数组统一编号**。原实现里编号列表是手写的 `1. xxx` / `2. xxx` …；一旦要在中间插入条件项（books 分支插开场白要求、subject 分支插开场白要求），手写序号会在开场白开关不同的两种情况下产生错位的编号。实现改为先拼 `bookItems`/`subjectItems` 数组（含可选的开场白/角度项），再统一 `map((s, i) => \`${i+1}. ${s}\`)` 生成编号——这是为达成设计描述的效果（编号连续、无跳号）而在实现层面选的写法，设计文档未描述这层机制。
 3. **书序号解析的触发条件比「books 模式」更窄一层**：主流程用 `bookCount > 0 && scriptMode === 'auto'` 才会调用 `parseBookMarkedLines`，即 `mode==='books'` 之外还要求 `scriptMode==='auto'`（排除 `imitate`）。设计 §A「只作用于 books 模式」讨论的是 `books`/`subject` 这个内容维度，未提及 `scriptMode`（`manual`/`imitate`/`auto`）这个入口维度的交叉；实际上 `imitate` 走的是 `buildImitatePrompt`，本就不会让 LLM 输出书序号标记，这条额外判断与设计意图一致，只是设计文档没写出这层交叉条件。
+
+4. **初稿的「全有或全无」回退是错的，终审推翻后才补上剥离**。设计初稿写「LLM 不按格式输出 → 回退位置均分（= 今天的行为）」，这个等价性声明只对「LLM 完全不打标记」成立。真实最常见的失误是**部分行打了、个别行漏打**——此时 `parseBookMarkedLines` 判整体失败，而初稿实现直接把 `lines` 退回 `rawLines`（LLM 原始回复），**已经打了标记的行前缀原样保留**，落库进字幕并被 TTS 念出。改动前提示词根本不要求标记、`rawLines` 恒干净，所以这个失败模式改动前不存在，属于「比今天更糟」。
+
+   整批终审复现了该场景（7 行里 6 行带标记、1 行漏打 → 6 行带裸前缀落库），判 NOT READY。修复方式是把**剥离**与**归属**解耦（见 §三 A）：commit 206ba1f 引入 `stripBookMark`，commit 06a9f60 补上裸标记行（`3|`）的识别——后者是第一轮修复的残留，同类失败模式，由复审再次实测抓出。
+
+   教训记在这里：设计一个「解析失败就回退」的机制时，必须区分**回退什么**。这里「归属」可以回退，「清理」不能——因为清理面对的输入形态已经被新提示词改变了，回退到旧逻辑并不等于回退到旧输入。
+
+5. **仿写（imitate）模式的开场白是终审后扩范围补的**。计划原写「imitate 分支不动」，终审指出这使设计开篇目标「让快闪开场的 4 秒有对应旁白」在该入口上未达成——运营对 flash 模板选仿写生成时，标题卡依旧没有旁白呼应。经用户确认扩范围，commit d2642d2 给 `buildImitatePrompt` 加了可选 `openTitleText`，行为与 `buildScriptPrompt` 一致；不传时输出与改动前逐字节相同（已实证比对）。

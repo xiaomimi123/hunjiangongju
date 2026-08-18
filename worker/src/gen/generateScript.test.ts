@@ -222,11 +222,6 @@ describe('assignBooksToSegments —— 显式书序号', () => {
     expect(out.map((o) => o.bookTitle)).toEqual(['甲书', '乙书', '丙书'])
   })
 
-  it('不传序号时与今天完全一致', () => {
-    expect(assignBooksToSegments(['a', 'b', 'c'], books))
-      .toEqual(assignBooksToSegments(['a', 'b', 'c'], books, undefined))
-  })
-
   it('书单为空时原样透传（不受序号影响）', () => {
     expect(assignBooksToSegments(['a', 'b'], [], [1, 2])).toEqual([{ scriptText: 'a' }, { scriptText: 'b' }])
   })

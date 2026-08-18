@@ -175,6 +175,22 @@ export function parseBookMarkedLines(lines: string[], bookCount: number): Marked
 }
 
 /**
+ * 纯函数：剥离单行开头可能存在的「书序号|」标记，与 parseBookMarkedLines 复用同一正则
+ * （BOOK_MARK_RE），保证对同一行的判定结果一致，不会出现两套正则各判各的分歧。
+ * 命中格式则返回捕获组里的文案（trim 后）；未命中（含普通无标记行）原样返回（trim 后）。
+ * 不做序号范围校验——parseBookMarkedLines 的「全有或全无」语义决定整体是否采信标记来定
+ * 书名头，本函数只负责在「我们要求过标记」的路径上兜底清除标记文本，不判定标记是否有效。
+ * 用于 parseBookMarkedLines 因个别行漏打标记而整体返回 null 时的回退：书名头归属回退到
+ * 位置均分没错，但已经打了标记的那些行不能带着「1|」前缀原样落库——那是 LLM 未处理过的
+ * 裸标记，会被 splitCaptionPhrases 当正常字幕切、被 TTS 原样念出来。
+ */
+export function stripBookMark(line: string): string {
+  const trimmed = line.trim()
+  const m = BOOK_MARK_RE.exec(trimmed)
+  return m ? m[2].trim() : trimmed
+}
+
+/**
  * 纯函数：把 `segCount` 个按序生成的分段，均匀、连续地分配到 `bookCount` 本书下标（0-based）。
  * 用于 books 模式——LLM 按书单顺序逐句撰写，本函数只按位置做整除分配，不解析文案内容。
  * - `bookCount <= 0`（subject 模式或空书单）：全部返回 -1，表示无归属。
@@ -348,14 +364,23 @@ export async function generateScript(genTaskId: string): Promise<void> {
     let lastClean: string[] = []
     let lastIdxs: number[] | null = null
     const bookCount = mode === 'books' ? (books?.length ?? 0) : 0
+    // 只有这条路径向 LLM 要求过「书序号|文案」格式（见 buildScriptPrompt 的 openLine/bookItems），
+    // 所以也只有这条路径需要在 parseBookMarkedLines 判定失败时兜底剥离标记；
+    // subject/manual/imitate 从没要求过标记，贸然剥会误伤本就以「数字|」开头的正常文案。
+    const wantsBookMark = bookCount > 0 && scriptMode === 'auto'
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const raw = await llmComplete({ prompt, maxTokens: 1200, temperature: 0.9 })
       const rawLines = raw.split('\n')
       // 标记必须在预算校验之前剥离：validateScript/trimToBudget 按字符数算预算，
       // 带着「1|」前缀会让每行凭空多 2 个字符，挤压真实文案预算并令重试循环误判超限。
-      const marked = bookCount > 0 && scriptMode === 'auto' ? parseBookMarkedLines(rawLines, bookCount) : null
-      const lines = marked ? marked.map((m) => m.text) : rawLines
+      const marked = wantsBookMark ? parseBookMarkedLines(rawLines, bookCount) : null
+      // parseBookMarkedLines 是「全有或全无」：只要某一行漏打标记就整体判失败，书名头归属
+      // 回退位置均分没错，但已经打了标记的其它行不能带着裸「1|」前缀直接进正文——那会被
+      // splitCaptionPhrases 当正常字幕切、被 TTS 原样念出来。故 wantsBookMark 为真时，无论
+      // parseBookMarkedLines 整体成功与否，都要逐行剥掉可能存在的标记（stripBookMark 复用
+      // 同一 BOOK_MARK_RE，不会与 parseBookMarkedLines 的判定产生分歧）。
+      const lines = marked ? marked.map((m) => m.text) : wantsBookMark ? rawLines.map(stripBookMark) : rawLines
       const result = validateScript(lines, maxLines, maxTotalChars)
       lastClean = result.clean
       lastIdxs = marked ? marked.map((m) => m.bookIdx) : null
@@ -384,7 +409,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
       console.warn(`[gen] generate-script ${genTaskId}: 超预算兜底裁剪 (${lastErrors.join('；')}) → ${clean.length} 行`)
     }
 
-    if (bookCount > 0 && scriptMode === 'auto' && !markedIdxs) {
+    if (wantsBookMark && !markedIdxs) {
       console.warn(`[gen] generate-script ${genTaskId}: 未能解析书序号标记，《书名》头回退位置均分`)
     }
   }

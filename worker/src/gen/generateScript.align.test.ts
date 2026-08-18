@@ -119,6 +119,48 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
     const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id } })
     expect(segs.length).toBe(3)
   })
+
+  it('部分行漏打标记（混合标记）→ 全部标记前缀仍被剥离，书名头回退位置均分', async () => {
+    // parseBookMarkedLines 全有或全无：6 行里第 3 行漏打标记 → 整体判定失败，
+    // 书名头归属回退到 allocateBookIndexes(6,3)=[0,0,1,1,2,2] → [甲,甲,乙,乙,丙,丙]；
+    // 但已经打了标记的另外 5 行不能带着「0|」「1|」「2|」「3|」前缀落库。
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id)
+    mockLlmComplete.mockResolvedValue(
+      '0|开场白文案\n1|甲书一句\n甲书二句缺标记\n2|乙书一句\n2|乙书二句\n3|丙书一句',
+    )
+
+    await generateScript(task.id)
+
+    const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
+    expect(segs.map((s) => s.scriptText)).toEqual([
+      '开场白文案',
+      '甲书一句',
+      '甲书二句缺标记',
+      '乙书一句',
+      '乙书二句',
+      '丙书一句',
+    ])
+    expect(await bookTitles(task.id)).toEqual(['甲书', '甲书', '乙书', '乙书', '丙书', '丙书'])
+  })
+
+  it('imitate 模式：LLM 返回带「数字|」形状文本 → 原样保留，不误剥（非我们要求过标记的路径）', async () => {
+    const fw = await makeFramework()
+    const task = await prisma.generationTask.create({
+      data: {
+        subject: '走出低谷期',
+        frameworkId: fw.id,
+        variables: { books: BOOKS, scriptMode: 'imitate', customScript: '参考文案示例。' } as never,
+      },
+    })
+    taskIds.push(task.id)
+    mockLlmComplete.mockResolvedValue('1|甲书一句\n2|乙书一句')
+
+    await generateScript(task.id)
+
+    const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
+    expect(segs.map((s) => s.scriptText)).toEqual(['1|甲书一句', '2|乙书一句'])
+  })
 })
 
 describe('generateScript：开场白提示词', () => {

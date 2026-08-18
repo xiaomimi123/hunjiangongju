@@ -1,3 +1,8 @@
+// 与 web/app/api/admin/students/[id]/route.test.ts 的共享状态耦合（务必保留）：
+// 那个文件里的「禁用/删除最后一名可用运营 → 400」依赖一个全局前提——测试库里除目标外
+// 没有其它「启用状态」的运营账号。vitest 跨文件并行，本文件若在那段窗口里留下启用状态的
+// 运营，就会让它的前提失效、断言随机变红（实测失败率一度约 60%）。
+// 因此本文件创建的运营账号一律不得处于启用状态：要么直接建成 disabled，要么用完立刻禁用。
 import { describe, it, expect, vi, afterAll } from 'vitest'
 import { NextRequest } from 'next/server'
 import { prisma } from '@mixcut/db'
@@ -49,6 +54,9 @@ describe('POST /api/admin/students', () => {
     expect(json.role).toBe('operator')
     const u = await prisma.user.findUnique({ where: { email } })
     expect(u?.role).toBe('operator')
+    // 立刻禁用：见文件顶部「与 [id]/route.test.ts 的共享状态耦合」说明。
+    // POST 建出来的运营默认是启用状态，留着它会让并行跑的 [id] 测试的「最后一名可用运营」前提失效。
+    await prisma.user.update({ where: { email }, data: { disabled: true } })
   })
 
   it('重复 email → 409', async () => {
@@ -91,7 +99,9 @@ describe('GET /api/admin/students', () => {
   it('role=operator 只返回运营', async () => {
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
     const email = track(`op-list-${Date.now()}@example.com`)
-    await prisma.user.create({ data: { email, passwordHash: 'x', role: 'operator' } })
+    // disabled: true —— 本用例只关心「role=operator 的账号会被列出」，列表接口不按 disabled 过滤
+    // （见 route.ts 的 select）。建成禁用态可避免污染 [id] 测试的「最后一名可用运营」前提。
+    await prisma.user.create({ data: { email, passwordHash: 'x', role: 'operator', disabled: true } })
 
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
     const res = await GET(getReq('?role=operator'), { params: {} })

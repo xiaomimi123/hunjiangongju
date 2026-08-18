@@ -1,3 +1,8 @@
+// 与 web/app/api/admin/students/route.test.ts 的共享状态耦合（务必保留）：
+// 下面「禁用/删除最后一名可用运营 → 400」两条依赖一个全局前提——测试库里除目标外没有
+// 其它「启用状态」的运营账号。vitest 跨文件并行，姊妹文件若在这段窗口里留下启用状态的
+// 运营，前提就会失效、断言随机变红。姊妹文件已相应约定「创建的运营一律不得处于启用状态」。
+// 若将来新增别的测试文件会创建启用状态运营，必须同样遵守该约定，否则这两条会重新变flaky。
 import { describe, it, expect, vi, afterAll } from 'vitest'
 import { NextRequest } from 'next/server'
 import { prisma } from '@mixcut/db'

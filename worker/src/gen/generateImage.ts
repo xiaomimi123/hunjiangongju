@@ -5,7 +5,7 @@ import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
 import { pickAssetsForSegments, readAssetSource } from './stockAssets'
-import { describeScenes, buildSegmentImagePrompt } from './scenePrompts'
+import { pickArtScenes, buildFreeArtPrompt } from './artScenes'
 import { makeThumb } from '../thumb'
 
 // 缩略图是锦上添花，绝不能因它失败拖垮生成/上传主流程：ffmpeg 缺失、损坏输入等一律吞掉只记 warning。
@@ -18,7 +18,7 @@ async function makeThumbSafely(abs: string): Promise<void> {
 }
 
 // 画风提示词留空时的默认兜底：厚涂油画质感，避免生成画面过于平淡。
-export const DEFAULT_IMAGE_STYLE = '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物'
+export const DEFAULT_IMAGE_STYLE = '梵高后印象派风格,旋转笔触,厚重颜料肌理,鲜明蓝黄对比,星夜质感,无人物'
 
 // 取书单：variables.books 优先，回退 overlayTemplate.books；过滤无 title 的脏项。
 // 顺序在此**必须原样保留**——快闪书封按该顺序出卡，主题书排在末位即「最后一张定格」。
@@ -64,11 +64,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
     : []
   const assignedAssets = pickAssetsForSegments(libraryAssets, segments.length)
 
-  // 每段文案先由 LLM 提炼成一句画面描述（口播话术直接塞生图模型是噪音）；全部命中素材库则跳过。
-  const needAi = segments.some((_, i) => !assignedAssets[i])
-  const scenes = needAi
-    ? await describeScenes(stylePrompt, segments.map((s) => s.scriptText))
-    : segments.map(() => null)
+  // 配图与文案完全脱钩：主体只来自 genTaskId 派生的场景方向，不再由 LLM 从口播提炼画面
+  // （那样必然逐句配插画：说碗画碗、说台阶画台阶）。同任务重跑一致，不同任务必然不同。
+  const scenes = pickArtScenes(genTaskId, segments.length)
 
   for (const [i, seg] of segments.entries()) {
     const asset = assignedAssets[i]
@@ -82,9 +80,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
       await makeThumbSafely(abs)
       imageUrl = `/api/files/gen/${genTaskId}/${seg.seqNo}${ext}`
     } else {
-      // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildSegmentImagePrompt
-      // 内保底，配 negative_prompt 强力压制。场景描述缺失时自动回退文案意境引导。
-      const prompt = buildSegmentImagePrompt(stylePrompt, scenes[i], seg.scriptText)
+      // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildFreeArtPrompt
+      // 内保底，配 negative_prompt 强力压制。
+      const prompt = buildFreeArtPrompt(stylePrompt, scenes[i])
       // 单张文生图偶发 504/超时是瞬时错误，逐图重试而非让整任务失败。
       const png = await withRetry(
         () =>

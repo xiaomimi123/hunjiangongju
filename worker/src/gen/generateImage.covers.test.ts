@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { resolveBooks, DEFAULT_IMAGE_STYLE } from './generateImage'
 
 describe('DEFAULT_IMAGE_STYLE', () => {
-  it('导出非空的厚涂油画默认画风兜底文案', () => {
+  it('导出非空的梵高后印象派默认画风兜底文案', () => {
     expect(DEFAULT_IMAGE_STYLE).toBeTruthy()
-    expect(DEFAULT_IMAGE_STYLE).toContain('厚涂油画')
+    expect(DEFAULT_IMAGE_STYLE).toContain('梵高')
+    // 「无人物」是硬约束：书单号配图出现人脸会很违和,且与 negative_prompt 一致
+    expect(DEFAULT_IMAGE_STYLE).toContain('无人物')
   })
 })
 

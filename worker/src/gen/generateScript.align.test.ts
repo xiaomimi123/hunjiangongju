@@ -144,6 +144,22 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
     expect(await bookTitles(task.id)).toEqual(['甲书', '甲书', '乙书', '乙书', '丙书', '丙书'])
   })
 
+  it('裸标记行（如「3|」，编号+分隔符后无文案）→ 该碎片被剥成空串并被过滤，不落库', async () => {
+    // parseBookMarkedLines 对「3|」这类行本就无法匹配 BOOK_MARK_RE（(.+) 要求分隔符后至少一字符），
+    // 整体判定失败 → 走回退路径。stripBookMark 须把「3|」识别为"标记但无文案"→ 剥成空串，
+    // 交给 validateScript 的 filter(Boolean) 统一过滤掉；其余正常/漏打标记的行不受影响。
+    // 5 行 → 剥离并过滤空串后剩 4 行 → allocateBookIndexes(4,3)=[0,0,1,2] → [甲,甲,乙,丙]。
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id)
+    mockLlmComplete.mockResolvedValue('0|开场白文案\n1|甲书一句\n乙书漏打标记的一句\n3|\n丙书一句')
+
+    await generateScript(task.id)
+
+    const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
+    expect(segs.map((s) => s.scriptText)).toEqual(['开场白文案', '甲书一句', '乙书漏打标记的一句', '丙书一句'])
+    expect(await bookTitles(task.id)).toEqual(['甲书', '甲书', '乙书', '丙书'])
+  })
+
   it('imitate 模式：LLM 返回带「数字|」形状文本 → 原样保留，不误剥（非我们要求过标记的路径）', async () => {
     const fw = await makeFramework()
     const task = await prisma.generationTask.create({

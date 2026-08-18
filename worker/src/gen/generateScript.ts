@@ -174,20 +174,37 @@ export function parseBookMarkedLines(lines: string[], bookCount: number): Marked
   return out
 }
 
+// 剥离侧专用：识别「只有编号+分隔符、后面无文案」的裸标记行（如「3|」）。
+// 不能与 BOOK_MARK_RE 共用——BOOK_MARK_RE 的 (.+) 故意要求分隔符后至少一个字符，
+// 这是 parseBookMarkedLines「一行连文案都没有 → 判定整体不可信、返回 null 交由上层整体
+// 回退位置均分」这条语义的基础；若把 (.+) 放宽成 (.*) 让两处共用，parseBookMarkedLines
+// 会把裸标记行当成合法标记采纳，产出一条 text 为空串的 MarkedLine，违反本文件另一处
+// 「返回的每条 text 均非空」的不变式（trimToBudget 裁剪后文案数组与序号数组会错位）。
+// 两条正则各司其职：BOOK_MARK_RE 判「标记是否完整合法」，BOOK_MARK_BARE_RE 只在剥离侧
+// 补一种「合法编号+分隔符，但空文案」的兜底识别，不影响 parseBookMarkedLines 的判定。
+const BOOK_MARK_BARE_RE = /^\s*\d+\s*[|｜]\s*$/
+
 /**
- * 纯函数：剥离单行开头可能存在的「书序号|」标记，与 parseBookMarkedLines 复用同一正则
- * （BOOK_MARK_RE），保证对同一行的判定结果一致，不会出现两套正则各判各的分歧。
- * 命中格式则返回捕获组里的文案（trim 后）；未命中（含普通无标记行）原样返回（trim 后）。
+ * 纯函数：剥离单行开头可能存在的「书序号|」标记，与 parseBookMarkedLines 复用同一条
+ * BOOK_MARK_RE（用于识别"编号+分隔符+文案"的完整标记），保证对同一行的判定结果一致，
+ * 不会出现两套正则各判各的分歧。
+ * - 命中 BOOK_MARK_RE（有文案）→ 返回捕获组里的文案（trim 后）。
+ * - 命中 BOOK_MARK_BARE_RE（裸标记，如「3|」，编号+分隔符后无文案）→ 返回空串，交由
+ *   调用方（validateScript/trimToBudget 的 filter(Boolean)）统一过滤掉这一行。
+ * - 都未命中（含普通无标记行）→ 原样返回（trim 后）。
  * 不做序号范围校验——parseBookMarkedLines 的「全有或全无」语义决定整体是否采信标记来定
  * 书名头，本函数只负责在「我们要求过标记」的路径上兜底清除标记文本，不判定标记是否有效。
- * 用于 parseBookMarkedLines 因个别行漏打标记而整体返回 null 时的回退：书名头归属回退到
- * 位置均分没错，但已经打了标记的那些行不能带着「1|」前缀原样落库——那是 LLM 未处理过的
- * 裸标记，会被 splitCaptionPhrases 当正常字幕切、被 TTS 原样念出来。
+ * 用于 parseBookMarkedLines 因个别行漏打标记（或裸标记）而整体返回 null 时的回退：
+ * 书名头归属回退到位置均分没错，但已经打了标记的那些行（含裸标记碎片）不能带着
+ * 「1|」「3|」这类前缀/碎片原样落库——那是 LLM 未处理过的标记语法，会被
+ * splitCaptionPhrases 当正常字幕切、被 TTS 原样念出来。
  */
 export function stripBookMark(line: string): string {
   const trimmed = line.trim()
   const m = BOOK_MARK_RE.exec(trimmed)
-  return m ? m[2].trim() : trimmed
+  if (m) return m[2].trim()
+  if (BOOK_MARK_BARE_RE.test(trimmed)) return ''
+  return trimmed
 }
 
 /**

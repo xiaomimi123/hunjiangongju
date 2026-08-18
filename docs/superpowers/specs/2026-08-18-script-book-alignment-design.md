@@ -1,6 +1,7 @@
 # 文案与画面对齐：书名头跟内容走 + 开场白呼应模板标题 设计
 
-> 状态：设计中 · 2026-08-18 · 分支 feat/script-align
+> 状态：已实现 · 2026-08-18 · 分支 feat/script-align
+> 实现提交：60a7b88（parseBookMarkedLines）· a482a18（assignBooksToSegments 显式序号）· 94c9b74（提示词改造）· c6412a0（主流程接线）
 > 目标：消除成片里「屏幕上的《书名》头与口播内容不是同一本」的错位；让快闪开场的 4 秒有对应旁白。
 
 ---
@@ -116,3 +117,11 @@ worker/src/gen/generateScript.ts   ← parseBookMarkedLines；提示词加书序
 - **依赖 LLM 守格式**：不守就回退到今天的行为，不会更差；但也就修不好——需上线后看真实成片验证守规率。
 - **书序号跳跃**：LLM 若在两本书之间来回跳，书名头会跟着来回切。如实呈现优于均分猜测，但可能观感突兀；先上线观察，不预先加平滑逻辑（YAGNI）。
 - **某本书分到 0 行**：其书封仍在快闪里出现却全片不被谈及。属既有现象（均分同样可能），本设计不改变。
+
+## 八、实现与设计的差异
+
+对照 60a7b88/a482a18/94c9b74/c6412a0 四次提交的 diff，核心结构（`parseBookMarkedLines` 签名、`assignBooksToSegments` 第三参、剥标记再校验预算的顺序）与设计完全一致。以下是实现过程中暴露、但设计阶段未写明的点：
+
+1. **`buildImitatePrompt` 是设计未预见的连带改动**。§B 把 `STYLE_RULES` 从常量改成 `styleRules(hasOpenTitle: boolean)` 函数（因为是否有开场白要切换风格准则第一条），而 `buildImitatePrompt` 内部原样引用 `STYLE_RULES`，签名一变就必须跟着改调用点（`styleRules(false)`）。设计的「改动面」「函数签名」两节都只提到 `buildScriptPrompt`/`parseBookMarkedLines`/`assignBooksToSegments`，未列出 `buildImitatePrompt`。仿写场景本身依旧不支持 `openTitleText` 参数，行为不变，只是签名跟着挪了个位置。
+2. **books/subject 两分支都改用数组统一编号**。原实现里编号列表是手写的 `1. xxx` / `2. xxx` …；一旦要在中间插入条件项（books 分支插开场白要求、subject 分支插开场白要求），手写序号会在开场白开关不同的两种情况下产生错位的编号。实现改为先拼 `bookItems`/`subjectItems` 数组（含可选的开场白/角度项），再统一 `map((s, i) => \`${i+1}. ${s}\`)` 生成编号——这是为达成设计描述的效果（编号连续、无跳号）而在实现层面选的写法，设计文档未描述这层机制。
+3. **书序号解析的触发条件比「books 模式」更窄一层**：主流程用 `bookCount > 0 && scriptMode === 'auto'` 才会调用 `parseBookMarkedLines`，即 `mode==='books'` 之外还要求 `scriptMode==='auto'`（排除 `imitate`）。设计 §A「只作用于 books 模式」讨论的是 `books`/`subject` 这个内容维度，未提及 `scriptMode`（`manual`/`imitate`/`auto`）这个入口维度的交叉；实际上 `imitate` 走的是 `buildImitatePrompt`，本就不会让 LLM 输出书序号标记，这条额外判断与设计意图一致，只是设计文档没写出这层交叉条件。

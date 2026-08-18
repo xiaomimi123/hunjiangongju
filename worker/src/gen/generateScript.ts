@@ -367,6 +367,23 @@ export function readBookTitle(variables: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
 }
 
+/**
+ * 从 variables 读单本模式的主题书。存在即表示本次生成走「全篇只讲一本」的路径。
+ * 由 select-books 写入；运营手填书单、manual/imitate、老任务重跑都不会有该字段。
+ */
+export function readThemeBook(variables: unknown): BookInput | undefined {
+  const v = variables && typeof variables === 'object' && !Array.isArray(variables)
+    ? (variables as Record<string, unknown>).themeBook : undefined
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+  const o = v as { title?: unknown; author?: unknown; points?: unknown }
+  if (typeof o.title !== 'string' || !o.title.trim()) return undefined
+  return {
+    title: o.title.trim(),
+    ...(typeof o.author === 'string' && o.author.trim() ? { author: o.author.trim() } : {}),
+    ...(typeof o.points === 'string' && o.points.trim() ? { points: o.points.trim() } : {}),
+  }
+}
+
 // mock 模式固定定长占位英文字幕；translateLine 的 mock 分支自带该 fixture，
 // 绝不经由 llmComplete 的通用 mock（那是无关的固定中文文案，不适合充当"翻译结果"）。
 const MOCK_SUBTITLE_EN = 'This is a mock English subtitle placeholder.'
@@ -404,6 +421,8 @@ export async function generateScript(genTaskId: string): Promise<void> {
 
   const scriptMode = readScriptMode(task.variables)
   const perGenBookTitle = readBookTitle(task.variables)
+  // 单本模式：仅 auto 文案模式生效。manual/imitate 是用户自控文案，themeBook 不得劫持它们。
+  const themeBook = scriptMode === 'auto' ? readThemeBook(task.variables) : undefined
 
   // 仅 flash 模板会把第 0 段整段吃进开场快闪且不出字幕（indexHtml 正片字幕取 segs.slice(1)），
   // 只有这种模板需要一句与开场标题呼应的旁白；classic 模板第 0 段照常出字幕，不加开场白。
@@ -426,13 +445,15 @@ export async function generateScript(genTaskId: string): Promise<void> {
     const angle = pickAngle(genTaskId)
     const basePrompt = scriptMode === 'imitate'
       ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, openTitleText })
-      : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle, openTitleText })
+      : themeBook
+        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, angle, openTitleText })
+        : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle, openTitleText })
 
     let prompt = basePrompt
     let lastErrors: string[] = []
     let lastClean: string[] = []
     let lastIdxs: number[] | null = null
-    const bookCount = mode === 'books' ? (books?.length ?? 0) : 0
+    const bookCount = mode === 'books' && !themeBook ? (books?.length ?? 0) : 0
     // 只有这条路径向 LLM 要求过「书序号|文案」格式（见 buildScriptPrompt 的 openLine/bookItems），
     // 所以也只有这条路径需要在 parseBookMarkedLines 判定失败时兜底剥离标记；
     // subject/manual/imitate 从没要求过标记，贸然剥会误伤本就以「数字|」开头的正常文案。
@@ -483,7 +504,14 @@ export async function generateScript(genTaskId: string): Promise<void> {
     }
   }
 
-  const assigned = assignBooksToSegments(clean, booksForAssign(scriptMode, books), markedIdxs ?? undefined)
+  // 单本模式：所有正文段统一挂主题书，不走位置均分、也不走书序号标记。
+  const assigned = themeBook
+    ? clean.map((scriptText) => ({
+        scriptText,
+        bookTitle: themeBook.title,
+        ...(themeBook.author ? { bookAuthor: themeBook.author } : {}),
+      }))
+    : assignBooksToSegments(clean, booksForAssign(scriptMode, books), markedIdxs ?? undefined)
   const assignedFinal = perGenBookTitle
     ? assigned.map((a) => ({ ...a, bookTitle: perGenBookTitle }))
     : assigned

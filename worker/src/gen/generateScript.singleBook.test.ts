@@ -1,5 +1,23 @@
-import { describe, it, expect } from 'vitest'
-import { buildSingleBookPrompt } from './generateScript'
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
+
+const mockLlmComplete = vi.fn()
+const mockIsMockMode = vi.fn()
+const mockGetCapabilityConfig = vi.fn()
+const mockEnqueueGen = vi.fn()
+
+vi.mock('@mixcut/db', async () => {
+  const actual = await vi.importActual<typeof import('@mixcut/db')>('@mixcut/db')
+  return {
+    ...actual,
+    llmComplete: (...args: unknown[]) => mockLlmComplete(...args),
+    isMockMode: (...args: unknown[]) => mockIsMockMode(...args),
+    getCapabilityConfig: (...args: unknown[]) => mockGetCapabilityConfig(...args),
+    enqueueGen: (...args: unknown[]) => mockEnqueueGen(...args),
+  }
+})
+
+import { prisma } from '@mixcut/db'
+import { buildSingleBookPrompt, generateScript } from './generateScript'
 
 const framework = { frameworkText: '框架示例：开头钩子+逐段展开', segCount: 7, maxLines: 21, maxTotalChars: 220 }
 const book = { title: '被讨厌的勇气', author: '岸见一郎、古贺史健', points: '课题分离' }
@@ -60,5 +78,126 @@ describe('buildSingleBookPrompt', () => {
       const nums = p.split('\n').map((l) => /^(\d+)\. /.exec(l)?.[1]).filter(Boolean).map(Number)
       expect(nums).toEqual(nums.map((_, i) => i + 1))
     }
+  })
+})
+
+// generateScript() 主流程接线集成测试：variables.themeBook 存在时走单本路径。
+// mock 与夹具沿用 generateScript.align.test.ts 的写法（DB 集成 + llmComplete mock）。
+describe('generateScript：单本模式接线', () => {
+  const frameworkIds: string[] = []
+  const taskIds: string[] = []
+
+  afterAll(async () => {
+    await prisma.generatedSegment.deleteMany({ where: { generationTaskId: { in: taskIds } } })
+    await prisma.generationTask.deleteMany({ where: { id: { in: taskIds } } })
+    await prisma.copyFramework.deleteMany({ where: { id: { in: frameworkIds } } })
+  })
+
+  // 快闪模板：segCount=6，与 align 测试同规格，便于对照。
+  async function makeFramework() {
+    const fw = await prisma.copyFramework.create({
+      data: {
+        frameworkText: '开头钩子+逐段展开，语气亲切',
+        overlayTemplate: { __templateParams: { mode: 'flash', open: { titleText: '今天分享的是' } } } as never,
+        suggestedSegmentCount: 6,
+        maxLines: 10,
+        maxTotalChars: 200,
+      },
+    })
+    frameworkIds.push(fw.id)
+    return fw
+  }
+
+  async function makeTask(frameworkId: string, variables: Record<string, unknown>) {
+    const task = await prisma.generationTask.create({
+      data: { subject: '走出低谷期', frameworkId, variables: variables as never },
+    })
+    taskIds.push(task.id)
+    return task
+  }
+
+  async function segmentsOf(taskId: string) {
+    return prisma.generatedSegment.findMany({ where: { generationTaskId: taskId }, orderBy: { seqNo: 'asc' } })
+  }
+
+  beforeEach(() => {
+    mockLlmComplete.mockReset()
+    mockIsMockMode.mockReset()
+    mockGetCapabilityConfig.mockReset()
+    mockEnqueueGen.mockReset()
+    mockGetCapabilityConfig.mockResolvedValue({ capability: 'llm', baseUrl: '', apiKey: '', model: '', enabled: false, extra: {} })
+    // translateLine 走 mock 短路，保证 mockLlmComplete 的调用只来自文案生成本身
+    mockIsMockMode.mockReturnValue(true)
+  })
+
+  it('variables.themeBook 存在 → 所有正文段挂主题书，且 prompt 不含陪衬书名、不含书序号要求', async () => {
+    const fw = await makeFramework()
+    const themeBook = { title: '被讨厌的勇气', author: '岸见一郎' }
+    const task = await makeTask(fw.id, {
+      books: [{ title: '陪衬甲' }, { title: '陪衬乙' }, themeBook],
+      themeBook,
+    })
+    // 单本路径不要求书序号标记，LLM 直接返回 6 行纯文案
+    mockLlmComplete.mockResolvedValue('开场白一句\n正文二句\n正文三句\n正文四句\n正文五句\n正文六句')
+
+    await generateScript(task.id)
+
+    const segs = await segmentsOf(task.id)
+    expect(segs.length).toBeGreaterThan(0)
+    expect(segs.every((s) => s.bookTitle === '被讨厌的勇气' && s.bookAuthor === '岸见一郎')).toBe(true)
+
+    const prompt = mockLlmComplete.mock.calls[0][0].prompt as string
+    expect(prompt).not.toContain('陪衬甲')
+    expect(prompt).not.toContain('陪衬乙')
+    expect(prompt).not.toContain('书序号')
+  })
+
+  it('themeBook 缺失 → 走多本路径，书序号标记仍生效（行为与今天一致）', async () => {
+    const fw = await makeFramework()
+    const BOOKS = [{ title: '甲书', author: '甲作者' }, { title: '乙书', author: '乙作者' }, { title: '丙书' }]
+    const task = await makeTask(fw.id, { books: BOOKS })
+    mockLlmComplete.mockResolvedValue('0|开场白\n1|甲书一句\n1|甲书二句\n1|甲书三句\n2|乙书一句\n3|丙书一句')
+
+    await generateScript(task.id)
+
+    const segs = await segmentsOf(task.id)
+    const titles = segs.map((s) => s.bookTitle ?? null)
+    expect(titles).toEqual([null, '甲书', '甲书', '甲书', '乙书', '丙书'])
+    // 有鉴别力：不是全部相同（区别于单本路径）
+    expect(new Set(titles.filter(Boolean)).size).toBeGreaterThan(1)
+  })
+
+  it('scriptMode=imitate 且有 themeBook → 仍走仿写路径，themeBook 不劫持 manual/imitate', async () => {
+    const fw = await makeFramework()
+    const themeBook = { title: '被讨厌的勇气', author: '岸见一郎' }
+    const task = await makeTask(fw.id, {
+      books: [{ title: '陪衬甲' }, themeBook],
+      themeBook,
+      scriptMode: 'imitate',
+      customScript: '参考文案示例，语气亲切。',
+    })
+    mockLlmComplete.mockResolvedValue('开场白\n仿写正文一句')
+
+    await generateScript(task.id)
+
+    const prompt = mockLlmComplete.mock.calls[0][0].prompt as string
+    expect(prompt).toContain('参考文案示例，语气亲切。')
+    // 单本提示词的特征串「不得提及」不应出现——证明没有误走单本路径
+    expect(prompt).not.toContain('不得提及')
+  })
+
+  it('运营手填书单（有 books、无 themeBook）→ 多本路径，零回归（位置均分）', async () => {
+    const fw = await makeFramework()
+    const BOOKS = [{ title: '甲书' }, { title: '乙书' }, { title: '丙书' }]
+    const task = await makeTask(fw.id, { books: BOOKS })
+    // 不带标记 → 走位置均分兜底
+    mockLlmComplete.mockResolvedValue('甲书一句\n甲书二句\n乙书一句\n乙书二句\n丙书一句\n丙书二句')
+
+    await generateScript(task.id)
+
+    const segs = await segmentsOf(task.id)
+    const titles = segs.map((s) => s.bookTitle ?? null)
+    // allocateBookIndexes(6,3) = [0,0,1,1,2,2]
+    expect(titles).toEqual(['甲书', '甲书', '乙书', '乙书', '丙书', '丙书'])
   })
 })

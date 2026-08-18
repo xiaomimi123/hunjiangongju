@@ -271,10 +271,19 @@ async function collectCandidates(theme: string, studentBook: BookOut, n: number)
   return pool
 }
 
-async function writeBooksAndEnqueue(genTaskId: string, variables: unknown, books: BookOut[]): Promise<void> {
+// themeBook 是下游判定「走单本文案」的唯一信号，且同时承载单本提示词与《书名》头所需的
+// 书名/作者/要点——用一个字段兼任信号与数据，避免开关与数据两处失配。
+// 不传（运营手填书单、manual/imitate、老任务重跑）时不写该字段，下游维持多本路径。
+async function writeBooksAndEnqueue(
+  genTaskId: string,
+  variables: unknown,
+  books: BookOut[],
+  themeBook?: BookOut,
+): Promise<void> {
   const vars: Record<string, unknown> =
     variables && typeof variables === 'object' && !Array.isArray(variables) ? { ...(variables as Record<string, unknown>) } : {}
   vars.books = books
+  if (themeBook) vars.themeBook = themeBook
   await prisma.generationTask.update({ where: { id: genTaskId }, data: { variables: vars as never } })
   await enqueueGen('generate-script', { genTaskId })
 }
@@ -304,7 +313,12 @@ export async function selectBooks(genTaskId: string): Promise<void> {
 
   const cfg = await getCapabilityConfig('llm')
   if (isMockMode(cfg)) {
-    await writeBooksAndEnqueue(genTaskId, task.variables, buildMockBookList(subject, n))
+    // buildMockBookList 固定学员那本排第一（见其实现），这里取出后挪到末位，与真实路径一致：
+    // 快闪最后一张定格在主题书。
+    const mockBooks = buildMockBookList(subject, n)
+    const mockThemeBook = mockBooks[0]
+    const mockRest = mockBooks.slice(1)
+    await writeBooksAndEnqueue(genTaskId, task.variables, [...mockRest, mockThemeBook], mockThemeBook)
     return
   }
 
@@ -320,12 +334,13 @@ export async function selectBooks(genTaskId: string): Promise<void> {
 
   const { book: studentBook, theme } = await resolveStudentBook(subject, fallbackCandidates)
 
+  // 快闪按 variables.books 顺序出卡，主题书排末位 = 最后一张定格在它。
   let books: BookOut[] = [studentBook]
   if (n > 1) {
     const pool = await collectCandidates(theme, studentBook, n)
     const picked = pickSubset(pool, n - 1, genTaskId)
-    books = [studentBook, ...picked]
+    books = [...picked, studentBook]
   }
 
-  await writeBooksAndEnqueue(genTaskId, task.variables, books)
+  await writeBooksAndEnqueue(genTaskId, task.variables, books, studentBook)
 }

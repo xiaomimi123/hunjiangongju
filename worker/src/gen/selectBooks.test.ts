@@ -279,7 +279,8 @@ describe('selectBooks：mock 模式 —— 自带 fixture，零网络调用', ()
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: { title: string; author: string }[] }).books
     expect(books.length).toBe(3)
-    expect(books[0]).toEqual({ title: 'MOCK模式选题', author: '' })
+    // 单本模式：主题书排末位（最后一张定格）而非首位，见 2026-08-18-single-book-mode 设计。
+    expect(books[books.length - 1]).toEqual({ title: 'MOCK模式选题', author: '' })
     expect(mockEnqueueGen).toHaveBeenCalledWith('generate-script', { genTaskId: task.id })
   })
 
@@ -333,12 +334,13 @@ describe('selectBooks：书库已命中该书 → 不发起联网调用', () => 
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: { title: string; author: string }[] }).books
     expect(books.length).toBe(3)
-    expect(books[0]).toEqual({ title: studentTitle, author: '库内作者' })
+    // 单本模式：主题书排末位而非首位。
+    expect(books[books.length - 1]).toEqual({ title: studentTitle, author: '库内作者' })
   })
 })
 
-describe('selectBooks：规则3 —— 学员输入本身始终作为第一本出现', () => {
-  it('候选池远多于所需本数、发生洗牌时，学员那本仍固定排第一且不被挤出', async () => {
+describe('selectBooks：规则3 —— 学员输入本身始终会出现且排末位', () => {
+  it('候选池远多于所需本数、发生洗牌时，学员那本仍固定排末位且不被挤出', async () => {
     const studentTitle = '固定第一测试书'
     trackTheme(studentTitle)
     await upsertBook({ title: studentTitle, author: '固定第一作者', theme: studentTitle })
@@ -355,7 +357,8 @@ describe('selectBooks：规则3 —— 学员输入本身始终作为第一本�
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: { title: string; author: string }[] }).books
     expect(books.length).toBe(3)
-    expect(books[0]).toEqual({ title: studentTitle, author: '固定第一作者' })
+    // 单本模式：主题书排末位而非首位。
+    expect(books[books.length - 1]).toEqual({ title: studentTitle, author: '固定第一作者' })
     // 不能出现重复：学员那本不会又混进候选部分
     const keys = books.map((b) => `${b.title}\x00${b.author}`)
     expect(new Set(keys).size).toBe(books.length)
@@ -429,7 +432,8 @@ describe('selectBooks：学员书作者三级兜底', () => {
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: { title: string; author: string }[] }).books
     expect(books.length).toBe(3)
-    expect(books[0]).toEqual({ title: subject, author: '查证作者乙' })
+    // 单本模式：主题书排末位而非首位。
+    expect(books[books.length - 1]).toEqual({ title: subject, author: '查证作者乙' })
     const titles = books.map((b) => b.title)
     expect(titles).toContain('主题候选甲')
     expect(titles).toContain('主题候选乙')
@@ -452,7 +456,7 @@ describe('selectBooks：学员书作者三级兜底', () => {
     expect(savedRow?.theme).toBe(subject)
   })
 
-  it('（回归）通过查证成功拿到作者的新路径，学员书仍固定排第一', async () => {
+  it('（回归）通过查证成功拿到作者的新路径，学员书仍固定排末位', async () => {
     const subject = '新路径固定第一测试书'
     const theme = '新路径主题词'
     trackTheme(theme)
@@ -468,7 +472,8 @@ describe('selectBooks：学员书作者三级兜底', () => {
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: { title: string; author: string }[] }).books
     expect(books.length).toBe(3)
-    expect(books[0]).toEqual({ title: subject, author: '固定作者' })
+    // 单本模式：主题书排末位而非首位。
+    expect(books[books.length - 1]).toEqual({ title: subject, author: '固定作者' })
   })
 
   it('（fix round 1 覆盖）n>1 时学员书从候选池借到作者后，同一本书不会在候选部分重复出现', async () => {
@@ -497,8 +502,8 @@ describe('selectBooks：学员书作者三级兜底', () => {
 
     const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
     const books = (fresh.variables as { books: { title: string; author: string; points?: string }[] }).books
-    // 学员书仍固定排第一，且确实借到了作者
-    expect(books[0]).toEqual({ title: studentTitle, author: '重复防护作者', points: '重复防护要点' })
+    // 学员书仍固定排末位（单本模式），且确实借到了作者
+    expect(books[books.length - 1]).toEqual({ title: studentTitle, author: '重复防护作者', points: '重复防护要点' })
     // 核心断言：借出作者的"全名版"与学员书是 isSameBook 意义下的同一本书，最终书单里只能算一次名额
     const sameBookCount = books.filter((b) => isSameBook(b, { title: studentTitle, author: '重复防护作者' })).length
     expect(sameBookCount).toBe(1)
@@ -574,5 +579,83 @@ describe('selectBooks：完成后入队 generate-script', () => {
     const task = await makeTask('入队测试选题', fw.id)
     await selectBooks(task.id)
     expect(mockEnqueueGen).toHaveBeenCalledWith('generate-script', { genTaskId: task.id })
+  })
+})
+
+describe('selectBooks：单本模式——主题书排末位并单独标出', () => {
+  it('主题书位于 variables.books 末位，themeBook 与之一致', async () => {
+    const studentTitle = '被讨厌的勇气'
+    trackTheme(studentTitle)
+    await upsertBook({ title: studentTitle, author: '岸见一郎', theme: studentTitle })
+    await upsertBook({ title: '陪衬书甲', author: '陪衬作者甲', theme: studentTitle })
+    await upsertBook({ title: '陪衬书乙', author: '陪衬作者乙', theme: studentTitle })
+
+    const fw = await makeFramework(3)
+    const task = await makeTask(studentTitle, fw.id)
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const vars = fresh.variables as {
+      books: { title: string; author: string }[]
+      themeBook: { title: string; author: string }
+    }
+    expect(vars.books.length).toBe(3)
+    expect(vars.books[vars.books.length - 1].title).toBe(studentTitle)
+    expect(vars.themeBook.title).toBe(studentTitle)
+    // 有区分力的关键断言：排在首位/中间的书里不能再混进主题书（否则"排末位"改动前也会通过）
+    expect(vars.books.slice(0, -1).some((b) => b.title === studentTitle)).toBe(false)
+  })
+
+  it('__bookCount 为 1 时只有主题书，themeBook 仍写入', async () => {
+    const studentTitle = '单本主题书测试'
+    trackTheme(studentTitle)
+    await upsertBook({ title: studentTitle, author: '单本测试作者', theme: studentTitle })
+
+    const fw = await makeFramework(1)
+    const task = await makeTask(studentTitle, fw.id)
+
+    await selectBooks(task.id)
+
+    // findBookByTitle 精确命中，走不到查证/推荐/校验任何一次 llmComplete 调用
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const vars = fresh.variables as { books: unknown[]; themeBook: unknown }
+    expect(vars.books.length).toBe(1)
+    expect(vars.books[0]).toEqual(vars.themeBook)
+  })
+
+  it('运营手填书单 → 不写 themeBook（多本路径零回归）', async () => {
+    const fw = await makeFramework(5)
+    const manualBooks = [{ title: '运营手填书-单本用例', author: '运营作者' }]
+    const task = await makeTask('这个字段此时应被忽略-单本用例', fw.id, { books: manualBooks })
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const vars = fresh.variables as Record<string, unknown>
+    expect(vars.themeBook).toBeUndefined()
+    expect(vars.books).toEqual(manualBooks)
+  })
+
+  it('mock 模式 → 主题书同样在末位并写 themeBook', async () => {
+    mockIsMockMode.mockReturnValue(true)
+    const fw = await makeFramework(3)
+    const task = await makeTask('MOCK单本选题', fw.id)
+
+    await selectBooks(task.id)
+
+    expect(mockLlmComplete).not.toHaveBeenCalled()
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const vars = fresh.variables as {
+      books: { title: string; author: string }[]
+      themeBook: { title: string; author: string }
+    }
+    expect(vars.books.length).toBe(3)
+    expect(vars.books[vars.books.length - 1]).toEqual({ title: 'MOCK单本选题', author: '' })
+    expect(vars.themeBook).toEqual({ title: 'MOCK单本选题', author: '' })
+    expect(vars.books.slice(0, -1).some((b) => b.title === 'MOCK单本选题')).toBe(false)
   })
 })

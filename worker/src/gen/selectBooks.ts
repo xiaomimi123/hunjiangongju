@@ -5,9 +5,12 @@
 // 1. 运营已手填书单（variables.books 非空）→ 原样跳过，直接入队，零回归。
 // 2. 本步骤绝不能让生成任务失败：每个外部调用（联网 LLM）都单独 try/catch，任一环节
 //    失败都降级而不是抛出；全部失败时兜底为「只用学员自己那本」。
-// 3. 学员输入那本书永远出现且排第一——不是"大概率排第一"，是结构上保证：
+// 3. 学员输入那本书（= 主题书）永远出现且排**末位**——不是"大概率排末位"，是结构上保证：
 //    候选池在传给 pickSubset 之前先把学员那本剔除掉（避免被随机洗牌吞掉或排到别处），
-//    随机只从"AI 配的其余名额"里选，选完再把学员那本挂到最前面。
+//    随机只从"陪衬书名额"里选，选完再把学员那本挂到最后面。
+//    排末位是产品要求：快闪严格按 variables.books 顺序出卡，末位即「最后一张定格在主题书」。
+//    改这里的顺序前先读 docs/superpowers/specs/2026-08-18-single-book-mode-design.md，
+//    不要因为别处还留着"排第一"的旧描述就把它改回去。
 // 4.（fix round 1）scriptMode 为 manual/imitate 的任务：subject 此时是从学员粘贴的文案里
 //    截出来的片段（见 web/app/api/generate/route.ts 的 finalSubject 兜底逻辑），不是书名/主题，
 //    走 AI 选书只会白烧联网检索、且一旦模型误判 YES 就会把文案碎片当真书写进 BookLibrary，
@@ -227,7 +230,7 @@ async function resolveStudentBook(subject: string, candidates: PickedBook[]): Pr
   }
 }
 
-/** 候选池：书库同主题召回 + 不足时联网推荐并二次校验；学员那本始终被排除在外（外层负责固定排第一） */
+/** 候选池（陪衬书）：书库同主题召回 + 不足时联网推荐并二次校验；学员那本始终被排除在外（外层负责固定排末位） */
 async function collectCandidates(theme: string, studentBook: BookOut, n: number): Promise<PickedBook[]> {
   let pool: PickedBook[] = []
   try {

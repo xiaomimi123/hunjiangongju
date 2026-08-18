@@ -57,18 +57,45 @@ export const POST = handler(async (req) => {
   return NextResponse.json({ id: task.id })
 })
 
+// 运营列表的返回上限。运营看的是全量任务，随学员使用量增长会无界膨胀，故设上限；
+// 但不做静默截断——命中上限时前端会提示「仅显示最近 N 条」，避免运营误以为看到了全部。
+// 注意不要 export：Next.js route 文件只允许导出 GET/POST/dynamic 等约定名，
+// 多导出一个常量会导致构建期类型校验失败（"does not match the required types of a Next.js Route"）。
+const OPERATOR_LIST_LIMIT = 200
+
 export const GET = handler(async () => {
   const s = await requireRole()
+  // 学员只看自己的；运营看全部（含学员创建的）。此前无论角色一律按 createdBy 过滤，
+  // 导致后台「生成栏」永远看不到学员的任务——任务在库里状态正常流转，后台却是空的。
+  const isOperator = s.role === 'operator'
   const tasks = await prisma.generationTask.findMany({
-    where: { createdBy: s.userId },
+    ...(isOperator ? {} : { where: { createdBy: s.userId } }),
     orderBy: { createdAt: 'desc' },
+    ...(isOperator ? { take: OPERATOR_LIST_LIMIT } : {}),
     select: {
       id: true, subject: true, status: true, createdAt: true, updatedAt: true,
+      ...(isOperator ? { createdBy: true } : {}),
       framework: { select: { name: true } },
       // 最新合成任务状态：autoRender 任务的 generationTask.status 停在 VISUAL_RENDERING，
       // 真实进度（EXPORTED/QC_FAILED 等）在 RenderTask 上，列表据此归类「已完成/失败」。
       renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
     },
   })
-  return NextResponse.json(tasks)
+  if (!isOperator) return NextResponse.json(tasks)
+
+  // GenerationTask.createdBy 是裸字符串、未与 User 建关联，故补一次批量查询把创建人补齐，
+  // 让运营能分辨哪条是哪个学员生成的。不建外键关联是为了避免为此单独加一次数据库迁移。
+  // 用 Array.from 而非展开 Set：本仓 tsconfig 的 target 下展开 Set 需要 downlevelIteration，
+  // vitest 的转译能过、next build 会失败。
+  const ids = Array.from(new Set(tasks.map((t) => t.createdBy).filter((v): v is string => !!v)))
+  const users = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, nickname: true, email: true, role: true } })
+    : []
+  const byId = new Map(users.map((u) => [u.id, u]))
+  return NextResponse.json(
+    tasks.map(({ createdBy, ...t }) => {
+      const u = createdBy ? byId.get(createdBy) : undefined
+      return { ...t, creator: u ? { nickname: u.nickname, email: u.email, role: u.role } : null }
+    }),
+  )
 })

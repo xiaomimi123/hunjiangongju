@@ -11,7 +11,8 @@ import Modal from '@/components/admin/Modal'
 import { GenPill } from './genStatus'
 
 type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string; defaultAssetFolder: string | null }
-type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null }
+type Creator = { nickname: string | null; email: string; role: string }
+type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null; creator?: Creator | null }
 type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
 type Voice = { id: string; voiceId: string; name: string }
@@ -176,11 +177,15 @@ export default function GeneratePage() {
       {err && <p className="pill pill-bad">{err}</p>}
 
       <div className="card overflow-x-auto">
+        {tasks && tasks.length >= 200 && (
+          <p className="border-b border-line px-4 py-2 text-xs text-ink3">仅显示最近 200 条生成任务</p>
+        )}
         <table className="w-full text-sm">
           <thead className="bg-surface2 text-left text-ink3">
             <tr>
               <th className="px-4 py-3 font-medium">选题</th>
               <th className="px-4 py-3 font-medium">框架</th>
+              <th className="px-4 py-3 font-medium">创建人</th>
               <th className="px-4 py-3 font-medium">状态</th>
               <th className="px-4 py-3 font-medium">创建时间</th>
               <th className="px-4 py-3 font-medium text-right">操作</th>
@@ -193,6 +198,11 @@ export default function GeneratePage() {
                   <Link href={`/admin/generate/${t.id}`} className="font-medium text-flame">{t.subject}</Link>
                 </td>
                 <td className="px-4 py-3 text-ink2">{t.framework?.name ?? '—'}</td>
+                <td className="px-4 py-3 text-ink2">
+                  {t.creator
+                    ? <span title={t.creator.email}>{t.creator.nickname || t.creator.email}{t.creator.role === 'student' && <span className="ml-1 text-ink3">(学员)</span>}</span>
+                    : <span className="text-ink3">—</span>}
+                </td>
                 <td className="px-4 py-3"><GenPill status={t.status} /></td>
                 <td className="num px-4 py-3 text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
@@ -204,10 +214,10 @@ export default function GeneratePage() {
               </tr>
             ))}
             {tasks && tasks.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
             )}
             {!tasks && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
             )}
           </tbody>
         </table>

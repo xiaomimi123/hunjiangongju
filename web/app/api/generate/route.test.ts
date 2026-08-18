@@ -16,14 +16,16 @@ vi.mock('@mixcut/db', async () => {
   return { ...actual, enqueueGen: (...args: unknown[]) => enqueueGenMock(...args) }
 })
 
-const { POST } = await import('./route')
+const { POST, GET } = await import('./route')
 
 const frameworkIds: string[] = []
 const taskIds: string[] = []
+const userIds: string[] = []
 
 afterAll(async () => {
   await prisma.generationTask.deleteMany({ where: { id: { in: taskIds } } })
   await prisma.copyFramework.deleteMany({ where: { id: { in: frameworkIds } } })
+  await prisma.user.deleteMany({ where: { id: { in: userIds } } })
   await prisma.$disconnect()
 })
 
@@ -76,5 +78,40 @@ describe('POST /api/generate 限流', () => {
       const { res } = await call({ frameworkId: fw.id, subject: `选题${i}` })
       expect(res.status).toBe(200)
     }
+  })
+})
+
+// GET 列表的可见范围：学员只看自己的；运营要能看到全部（含学员生成的），
+// 否则后台「生成栏」永远看不到学员的任务——任务在库里状态正常流转，后台却是空的。
+describe('GET /api/generate —— 列表可见范围', () => {
+  it('学员只看得到自己创建的任务', async () => {
+    const fw = await makeFramework()
+    const mine = await prisma.generationTask.create({ data: { frameworkId: fw.id, subject: '学员甲的选题', createdBy: 'stu-a' } })
+    const others = await prisma.generationTask.create({ data: { frameworkId: fw.id, subject: '学员乙的选题', createdBy: 'stu-b' } })
+    taskIds.push(mine.id, others.id)
+
+    requireRoleMock.mockResolvedValueOnce({ userId: 'stu-a', role: 'student' })
+    const res = await GET(new NextRequest('http://localhost/api/generate'), { params: {} })
+    const list = (await res.json()) as { id: string }[]
+    const ids = list.map((t) => t.id)
+    expect(ids).toContain(mine.id)
+    expect(ids).not.toContain(others.id)
+  })
+
+  it('运营看得到学员创建的任务，并带上创建人昵称', async () => {
+    const fw = await makeFramework()
+    const stu = await prisma.user.create({
+      data: { email: `gen-list-stu-${Date.now()}@example.com`, passwordHash: 'x', role: 'student', nickname: '学员小王' },
+    })
+    userIds.push(stu.id)
+    const t = await prisma.generationTask.create({ data: { frameworkId: fw.id, subject: '学员生成的选题', createdBy: stu.id } })
+    taskIds.push(t.id)
+
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-1', role: 'operator' })
+    const res = await GET(new NextRequest('http://localhost/api/generate'), { params: {} })
+    const list = (await res.json()) as { id: string; creator?: { nickname: string | null } | null }[]
+    const found = list.find((x) => x.id === t.id)
+    expect(found).toBeTruthy()
+    expect(found?.creator?.nickname).toBe('学员小王')
   })
 })

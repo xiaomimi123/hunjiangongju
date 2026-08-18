@@ -195,4 +195,49 @@ describe('generateScript：开场白提示词', () => {
     expect(prompt).toContain('开篇第一句直击情绪')
     expect(prompt).not.toContain('开场白')
   })
+
+  // 仿写（imitate）模式此前从未接过 openTitleText，flash 模板下运营选「仿写」生成时
+  // 开场白缺失的缺陷完全没修——本组测试补齐 imitate 路径与 auto 路径行为一致。
+  it('flash 模板 + imitate 模式 → prompt 含模板开场标题', async () => {
+    const fw = await makeFramework()
+    const task = await prisma.generationTask.create({
+      data: {
+        subject: '走出低谷期',
+        frameworkId: fw.id,
+        variables: { scriptMode: 'imitate', customScript: '参考文案示例。' } as never,
+      },
+    })
+    taskIds.push(task.id)
+    mockLlmComplete.mockResolvedValue('开场白\n仿写正文一句')
+
+    await generateScript(task.id)
+
+    const prompt = mockLlmComplete.mock.calls[0][0].prompt as string
+    expect(prompt).toContain('今天分享的是')
+  })
+
+  it('classic 模板 + imitate 模式 → prompt 不含开场白要求', async () => {
+    const fw = await prisma.copyFramework.create({
+      data: {
+        frameworkText: '开头钩子+逐段展开，语气亲切',
+        overlayTemplate: { __templateParams: { mode: 'classic' } } as never,
+        suggestedSegmentCount: 6, maxLines: 10, maxTotalChars: 200,
+      },
+    })
+    frameworkIds.push(fw.id)
+    const task = await prisma.generationTask.create({
+      data: {
+        subject: '走出低谷期',
+        frameworkId: fw.id,
+        variables: { scriptMode: 'imitate', customScript: '参考文案示例。' } as never,
+      },
+    })
+    taskIds.push(task.id)
+    mockLlmComplete.mockResolvedValue('仿写正文一句')
+
+    await generateScript(task.id)
+
+    const prompt = mockLlmComplete.mock.calls[0][0].prompt as string
+    expect(prompt).not.toContain('开场白')
+  })
 })

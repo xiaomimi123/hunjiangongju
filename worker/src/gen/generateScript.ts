@@ -256,15 +256,27 @@ export function buildTranslatePrompt(zh: string): string {
 /**
  * 纯函数：根据参考文案拼装仿写提示词。
  * 指示 LLM 仿照参考文案的语气、句式、情感浓度与第二人称口吻，就同一主题原创改写一条新文案。
- * 复用 styleRules(false)（包括禁 CTA 条款）；仿写场景暂不支持开场白参数。
+ * 复用 styleRules(hasOpenTitle)（包括禁 CTA 条款）；openTitleText 非空时与 buildScriptPrompt
+ * 行为对齐——要求首段为呼应该标题的开场白，同时风格准则首条让步为「开场白之后的第一句」，
+ * 避免与「不要先介绍书」正面冲突（flash 模板选仿写模式时同样会漏开场白，需一并修）。
  */
 export function buildImitatePrompt(args: {
   reference: string
   subject: string
   framework: { frameworkText: string; segCount: number; maxLines: number; maxTotalChars: number }
+  openTitleText?: string
 }): string {
-  const { reference, subject, framework } = args
+  const { reference, subject, framework, openTitleText } = args
   const { frameworkText, segCount, maxLines, maxTotalChars } = framework
+  const openTitle = (openTitleText ?? '').trim()
+  // 条目编号随开场白条目的有无整体顺延，故用数组拼装后统一编号，避免手写序号出现两个末位序号。
+  const items = [
+    `分成约 ${segCount} 段，每句单独一行；第二人称口吻，围绕一个核心主题贯穿，不逐本介绍、不讲故事情节。`,
+    ...(openTitle ? [`第一段必须是开场白，以「${openTitle}」开头，用一句话点出这条视频要解决的问题。`] : []),
+    '只输出文案正文，不要编号、不要标题、不要任何解释说明。',
+    '必须原创改写，严禁照抄参考文案或框架示例。',
+    `总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+  ]
   return [
     '你是一名书单号短视频文案写手。请【仿照】下面这段【参考文案】的语气、句式、情感浓度与第二人称口吻，就同一主题原创改写一条新文案。',
     '',
@@ -273,12 +285,9 @@ export function buildImitatePrompt(args: {
     `文案框架：\n${frameworkText}`,
     '',
     '要求：',
-    `1. 分成约 ${segCount} 段，每句单独一行；第二人称口吻，围绕一个核心主题贯穿，不逐本介绍、不讲故事情节。`,
-    '2. 只输出文案正文，不要编号、不要标题、不要任何解释说明。',
-    '3. 必须原创改写，严禁照抄参考文案或框架示例。',
-    `4. 总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+    ...items.map((s, i) => `${i + 1}. ${s}`),
     '',
-    styleRules(false),
+    styleRules(Boolean(openTitle)),
   ].join('\n')
 }
 
@@ -356,7 +365,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
     // imitate: 用参考仿写；auto: 现状。二者复用现有 validate/重试/兜底循环。
     const angle = pickAngle(genTaskId)
     const basePrompt = scriptMode === 'imitate'
-      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars } })
+      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, openTitleText })
       : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle, openTitleText })
 
     let prompt = basePrompt

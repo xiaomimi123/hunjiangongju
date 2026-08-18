@@ -20,7 +20,10 @@ async function makeThumbSafely(abs: string): Promise<void> {
 // 画风提示词留空时的默认兜底：厚涂油画质感，避免生成画面过于平淡。
 export const DEFAULT_IMAGE_STYLE = '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物'
 
-// 取书单：overlayTemplate.books 优先，回退 variables.books；过滤无 title 的脏项。
+// 取书单：variables.books 优先，回退 overlayTemplate.books；过滤无 title 的脏项。
+// 顺序在此**必须原样保留**——快闪书封按该顺序出卡，主题书排在末位即「最后一张定格」。
+// 早前是框架书目优先，会让本次选出的书单（含主题书末位顺序）被整个绕开；框架自带书目
+// 的定位是「原片信息，仅供参考」，不该压过 per-generation 的选择。
 export function resolveBooks(overlayTemplate: unknown, variables: unknown): { title: string; author?: string }[] {
   const pick = (x: unknown): { title: string; author?: string }[] => {
     const arr = (x && typeof x === 'object' && Array.isArray((x as { books?: unknown }).books))
@@ -32,8 +35,8 @@ export function resolveBooks(overlayTemplate: unknown, variables: unknown): { ti
         return { title: o.title.trim(), ...(typeof o.author === 'string' && o.author.trim() ? { author: o.author.trim() } : {}) }
       })
   }
-  const fromOverlay = pick(overlayTemplate)
-  return fromOverlay.length ? fromOverlay : pick(variables)
+  const fromVars = pick(variables)
+  return fromVars.length ? fromVars : pick(overlayTemplate)
 }
 
 export async function generateImage(genTaskId: string): Promise<void> {

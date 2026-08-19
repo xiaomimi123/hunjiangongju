@@ -69,7 +69,10 @@ export function keyframeTween(m: KeyframeMotion, n: number, startMs: number, end
   const r = (x: number) => Math.round(x * 1000) / 1000
   const from = r(m.scaleFrom)
   const to = r(m.scaleTo)
-  if (from === to) return ''
+  // 首尾相同=该段没有运镜动画，但可能仍有静态缩放（剪映里 clip.scale 不为 1、只是没打关键帧）。
+  // 此时必须出一条 tl.set 把静态缩放钉住，否则画面会回到 scale 1、把创作者的构图丢掉。
+  // 恰为 1 时无需任何 transform，返回空串。
+  if (from === to) return from === 1 ? '' : `  tl.set('.s${n} .photo', { scale: ${from} }, ${sec(startMs)});`
   return `  tl.fromTo('.s${n} .photo', { scale: ${from} }, { scale: ${to}, duration: ${segLenSec}, ease: 'none' }, ${sec(startMs)});`
 }
 

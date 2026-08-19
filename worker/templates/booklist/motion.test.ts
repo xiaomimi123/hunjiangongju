@@ -175,3 +175,15 @@ describe('keyframeTween —— 照抄草稿关键帧的运镜', () => {
     expect(keyframeTween({ scaleFrom: 1, scaleTo: 1.1 }, 1, 5000, 4000)).toBe('')
   })
 })
+
+describe('keyframeTween —— 静态缩放段（有 clip.scale 但无关键帧动画）', () => {
+  it('首尾相同且不为 1 → 出 tl.set 保住静态缩放，而不是什么都不出', () => {
+    const out = keyframeTween({ scaleFrom: 1.189, scaleTo: 1.189 }, 4, 3984, 4765)
+    expect(out).toContain(`tl.set('.s4 .photo', { scale: 1.189 }`)
+    expect(out).not.toContain('fromTo')
+  })
+
+  it('首尾相同且为 1 → 仍返回空串（scale 1 无需任何 transform）', () => {
+    expect(keyframeTween({ scaleFrom: 1, scaleTo: 1 }, 1, 0, 3000)).toBe('')
+  })
+})

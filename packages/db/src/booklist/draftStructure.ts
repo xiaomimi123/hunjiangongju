@@ -57,7 +57,7 @@ function materialDimsById(materials: Record<string, unknown>): Map<string, { wid
 // 与画布不一致时，raw scale 里混了补偿宽高比差异的部分；换算成「相对填满」口径
 // (raw / (coverFill/containFit)) 才是创作者真正的构图缩放意图——AI 生成图按画布比例出图,不需要这层补偿。
 // 画布/素材尺寸缺失或非正 → 无法换算,原样返回 raw（不丢段）。
-function coverRelativeScale(rawScale: number, srcW: number | undefined, srcH: number | undefined, canvasW: number, canvasH: number): number {
+export function coverRelativeScale(rawScale: number, srcW: number | undefined, srcH: number | undefined, canvasW: number, canvasH: number): number {
   if (!(typeof srcW === 'number' && srcW > 0 && typeof srcH === 'number' && srcH > 0) || !(canvasW > 0 && canvasH > 0)) {
     return rawScale
   }

@@ -7,6 +7,7 @@ import { pickBgmSegment } from './draftMedia'
 import { extractDraftStructure, type DraftStructure } from './draftStructure'
 import { extractDraftGrade } from './draftGrade'
 import { extractDraftMoves } from './draftMotion'
+import { extractDraftKeyframes, type KeyframeScale } from './draftKeyframes'
 import { extractSubtitleEntrance } from './draftTextAnim'
 import { detectUnsupported, type ProvenanceEntry, type ProvenanceStatus } from './draftProvenance'
 
@@ -144,9 +145,13 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   // defaulted provenance（如 open.titleText 和 open.durationMs 因同一句「未找到开场标题段…」
   // 一起回退），但 warnings 只应出现一次——去重发生在 warnings 这一层，不影响 provenance 条数。
   const pushedDetails = new Set<string>()
-  const note = (path: string, status: ProvenanceStatus, detail?: string) => {
+  // warn=false：detail 只进 provenance，不进 warnings。
+  // 用于**新增**的提取器——warnings 是被冻结的老契约（解析预览页 buildReport() 在消费它，
+  // 且有逐字节比对的回归测试守着），往里加新条目会改变运营看到的报告。provenance 是更丰富的
+  // 新记录，加条目不受此限。两者解耦后，新提取器才能既如实留档、又不动老契约。
+  const note = (path: string, status: ProvenanceStatus, detail?: string, warn = true) => {
     provenance.push({ path, status, ...(detail ? { detail } : {}) })
-    if (status === 'defaulted' && detail && !pushedDetails.has(detail)) {
+    if (warn && status === 'defaulted' && detail && !pushedDetails.has(detail)) {
       warnings.push(detail)
       pushedDetails.add(detail)
     }
@@ -569,6 +574,16 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
 
   // ---- 运镜 ----
   let moves: ReturnType<typeof extractDraftMoves> = []
+  // keyframes 与 moves 并存：前者是照抄的实测数值(渲染层优先用)，后者是归类后的预设招式(回退)。
+  // 分开提取而不是二选一——万一关键帧提取不到，moves 仍能给出一个像样的近似。
+  let keyframes: KeyframeScale[] = []
+  try {
+    keyframes = extractDraftKeyframes(draft)
+    if (keyframes.length > 0) note('motion.keyframes', 'extracted')
+    else note('motion.keyframes', 'defaulted', '未提取到可用的缩放关键帧，运镜回退预设招式', false)
+  } catch {
+    note('motion.keyframes', 'defaulted', '运镜关键帧解析失败', false)
+  }
   try {
     moves = extractDraftMoves(draft)
     if (moves.length > 0) note('motion.moves', 'extracted')
@@ -603,7 +618,9 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     },
     audio: { bgmVolume, sfx: { openGear, transitionDrop } },
     ...(grade ? { grade } : {}),
-    ...(moves.length ? { motion: { moves } } : {}),
+    ...(moves.length || keyframes.length
+      ? { motion: { moves, ...(keyframes.length ? { keyframes } : {}) } }
+      : {}),
   }
 
   // 最后合入 detectUnsupported：草稿里确实存在、但渲染器做不到的结构（如独立特效轨），

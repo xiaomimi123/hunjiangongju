@@ -2,7 +2,7 @@
 // 所有特效叠在既有 startMs/endMs 之上，不新增时长；契约见 docs/superpowers/specs 2026-07-24。
 import { sec } from './util.js'
 import { selectPreset, seedInt, rootVarsCss } from './theme.js'
-import { pickMove, moveTweens, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
+import { pickMove, moveTweens, keyframeTween, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
 import { pickEntrance, captionUnit } from './captionsAnim.js'
 import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml, fontFaceCss, flashCss, subtitleVarsCss } from './layout.js'
 import { flashTimeline, DEFAULT_PARAMS } from './templateParams.js'
@@ -215,8 +215,15 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       // 所以只要 moves 非空就必须走运镜分支，不能被 kenBurns==='off' 挡住。
       if (p.body.kenBurns === 'subtle' || (p.motion?.moves?.length ?? 0) > 0) {
         // 剪映草稿提取到运镜序列时按顺序循环用（分镜数与原工程不一定一致，循环保节奏感）；否则维持原「轻推」
-        const mv = p.motion?.moves?.length ? pickMove(i - 1, 0, p.motion.moves) : 'push-in'
-        motionLines.push(moveTweens(mv, n, s.startMs, s.endMs, i === segs.length - 1, p.body.photoScale ?? 1.07))
+        // keyframes 非空时优先用草稿实测数值（照抄起止幅度、线性、不过冲）；为空回退预设招式。
+        const kfs = p.motion?.keyframes ?? []
+        if (kfs.length > 0) {
+          const kf = kfs[((i - 1) % kfs.length + kfs.length) % kfs.length]
+          motionLines.push(keyframeTween(kf, n, s.startMs, s.endMs))
+        } else {
+          const mv = p.motion?.moves?.length ? pickMove(i - 1, 0, p.motion.moves) : 'push-in'
+          motionLines.push(moveTweens(mv, n, s.startMs, s.endMs, i === segs.length - 1, p.body.photoScale ?? 1.07))
+        }
       }
       // 固定叠化转场：honour templateParams.transition.durationMs（原来是死数据，renderer 一直硬编码 0.72s 窗口）。
       // transition.durationMs 不是可选字段——parseTemplateParams 在没提取到时也会填 DEFAULT_PARAMS 的 400ms，

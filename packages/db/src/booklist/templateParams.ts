@@ -17,7 +17,10 @@ export interface TemplateParams {
   body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
   grade?: GradeParams
-  motion?: { moves: MoveId[] }
+  // keyframes：从草稿 common_keyframes 提取的**实测**运镜数值（阶段1只含缩放）。
+  // 与 moves 的区别：moves 是把曲线归类成 6 种预设招式、幅度硬编码；keyframes 是照抄原值。
+  // 两者并存：keyframes 非空时优先，为空时回退 moves，老框架零回归。
+  motion?: { moves: MoveId[]; keyframes?: { scaleFrom: number; scaleTo: number }[] }
 }
 
 export const DEFAULT_PARAMS: TemplateParams = {
@@ -79,7 +82,20 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
         } }
       : {}),
     ...(Array.isArray(obj(r.motion).moves)
-      ? { motion: { moves: (obj(r.motion).moves as unknown[]).filter((x): x is string => typeof x === 'string' && !!x) as MoveId[] } }
+      ? {
+          motion: {
+            moves: (obj(r.motion).moves as unknown[]).filter((x): x is string => typeof x === 'string' && !!x) as MoveId[],
+            // keyframes 只收「两端都是有限数」的条目，脏项静默丢弃而非让整块 motion 失效
+            ...(Array.isArray(obj(r.motion).keyframes)
+              ? {
+                  keyframes: (obj(r.motion).keyframes as unknown[])
+                    .map((k) => obj(k))
+                    .filter((k) => typeof k.scaleFrom === 'number' && Number.isFinite(k.scaleFrom) && typeof k.scaleTo === 'number' && Number.isFinite(k.scaleTo))
+                    .map((k) => ({ scaleFrom: k.scaleFrom as number, scaleTo: k.scaleTo as number })),
+                }
+              : {}),
+          },
+        }
       : {}),
   }
 }

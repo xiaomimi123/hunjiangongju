@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW } from './motion'
+import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW, keyframeTween } from './motion'
 
 describe('pickMove', () => {
   it('确定性、相邻 seqNo 不撞招', () => {
@@ -142,5 +142,36 @@ describe('pickMove 序列覆盖', () => {
   })
   it('moves 含非法值 → 跳过非法项', () => {
     expect(pickMove(0, 0, ['不存在', 'push-in'])).toBe('push-in')
+  })
+})
+
+describe('keyframeTween —— 照抄草稿关键帧的运镜', () => {
+  it('用实测数值出线性 tween，时长恰为段长（不过冲）', () => {
+    const out = keyframeTween({ scaleFrom: 1, scaleTo: 1.107571 }, 2, 4765, 10468)
+    expect(out).toContain(`'.s2 .photo'`)
+    expect(out).toContain('scale: 1')
+    expect(out).toContain('1.108')            // scaleTo 保留三位
+    expect(out).toContain(`duration: 5.703`)  // 恰为段长,不是段长+1.2
+    expect(out).toContain(`ease: 'none'`)     // 剪映关键帧控制点均为(0,0)=线性
+    expect(out).toContain(', 4.765);')        // 起始时间
+  })
+
+  it('三段实测值分别产出各自幅度，而非统一硬编码', () => {
+    const a = keyframeTween({ scaleFrom: 1, scaleTo: 1.107571 }, 1, 0, 5703)
+    const b = keyframeTween({ scaleFrom: 1, scaleTo: 1.082490 }, 2, 0, 8064)
+    const c = keyframeTween({ scaleFrom: 1, scaleTo: 1.105659 }, 3, 0, 6067)
+    expect(a).toContain('1.108')
+    expect(b).toContain('1.082')
+    expect(c).toContain('1.106')
+    expect(new Set([a, b, c]).size).toBe(3)
+  })
+
+  it('首尾相同（无运镜）→ 返回空串，不产出无效果的 tween', () => {
+    expect(keyframeTween({ scaleFrom: 1, scaleTo: 1 }, 1, 0, 3000)).toBe('')
+  })
+
+  it('段长为 0 或负 → 不抛错，返回空串', () => {
+    expect(keyframeTween({ scaleFrom: 1, scaleTo: 1.1 }, 1, 5000, 5000)).toBe('')
+    expect(keyframeTween({ scaleFrom: 1, scaleTo: 1.1 }, 1, 5000, 4000)).toBe('')
   })
 })

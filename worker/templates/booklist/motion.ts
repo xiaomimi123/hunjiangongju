@@ -40,6 +40,39 @@ export function moveTweens(move: MoveId, n: number, startMs: number, endMs: numb
   }
 }
 
+/** 草稿关键帧提取出的运镜数值（阶段1只支持缩放，理由见 keyframeTween 注释） */
+export interface KeyframeMotion {
+  scaleFrom: number
+  scaleTo: number
+}
+
+/**
+ * 照抄草稿关键帧的运镜。与 moveTweens 的「预设招式 + 硬编码幅度」不同，这里直接用实测数值。
+ *
+ * 三处刻意的差异（都是为了贴近剪映的真实行为）：
+ * 1. duration 恰为段长——moveTweens 用「段长 + 1.2s」的过冲来避免段末定格，
+ *    但剪映关键帧就是覆盖整段、到点即停，过冲反而不像原片。
+ * 2. ease 用 'none'（线性）——实测关键帧的 left_control/right_control 均为 (0,0)，即线性插值，
+ *    而 moveTweens 用的是 sine.inOut。
+ * 3. 起止值直接取实测——如样例正片三段是 1.0→1.107571 / 1.082490 / 1.105659，
+ *    而 moveTweens 的 push-in 是 baseScale-0.035 → baseScale+0.035（默认即 1.035→1.105），
+ *    起点终点都不同。
+ *
+ * 【只支持缩放】样例三段的 Rotation/PositionX/PositionY 关键帧全是 0→0（存在但未动画），
+ * 无法据此确定剪映这些字段的单位（旋转是度还是弧度、位移是归一化还是像素）。没有可验证的
+ * 样本就实现换算等于凭空猜，一旦猜错是静默的画面错位。故本阶段只做缩放，遇到真有位移/旋转
+ * 的工程时再补，并在保真度报告里如实记为未复刻。
+ */
+export function keyframeTween(m: KeyframeMotion, n: number, startMs: number, endMs: number): string {
+  const segLenSec = sec(endMs - startMs)
+  if (segLenSec <= 0) return ''
+  const r = (x: number) => Math.round(x * 1000) / 1000
+  const from = r(m.scaleFrom)
+  const to = r(m.scaleTo)
+  if (from === to) return ''
+  return `  tl.fromTo('.s${n} .photo', { scale: ${from} }, { scale: ${to}, duration: ${segLenSec}, ease: 'none' }, ${sec(startMs)});`
+}
+
 export type TransId = 'crossfade' | 'wipe' | 'shard' | 'glide-push' | 'blur-dissolve'
 export const TRANS: TransId[] = ['crossfade', 'wipe', 'shard', 'glide-push', 'blur-dissolve']
 

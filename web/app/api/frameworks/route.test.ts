@@ -60,4 +60,27 @@ describe('GET /api/frameworks', () => {
     const row = rows.find((r: { id: string }) => r.id === fw.id)
     expect(row.defaultAssetFolder).toBeNull()
   })
+
+  it('带 draftFidelityReport 的框架 → 响应含该字段原样透出', async () => {
+    const report = { parsedAt: '2026-08-19T00:00:00.000Z', summary: { extracted: 1, defaulted: 1, unsupported: 1 }, entries: [] }
+    const fw = await prisma.copyFramework.create({
+      data: { name: '保真度测试', frameworkText: 'x', draftFidelityReport: report },
+    })
+    createdFw.push(fw.id)
+    const res = await GET(req(), { params: {} })
+    const rows = await res.json()
+    const row = rows.find((r: { id: string }) => r.id === fw.id)
+    expect(row.draftFidelityReport).toEqual(report)
+  })
+
+  it('无 draftFidelityReport 的框架 → 该字段为 null（不显示误导性数字，见前端角标逻辑）', async () => {
+    const fw = await prisma.copyFramework.create({
+      data: { name: '无保真度测试', frameworkText: 'x' },
+    })
+    createdFw.push(fw.id)
+    const res = await GET(req(), { params: {} })
+    const rows = await res.json()
+    const row = rows.find((r: { id: string }) => r.id === fw.id)
+    expect(row.draftFidelityReport).toBeNull()
+  })
 })

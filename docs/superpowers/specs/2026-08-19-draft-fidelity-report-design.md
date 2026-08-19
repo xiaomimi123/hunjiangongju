@@ -1,6 +1,6 @@
 # 剪映草稿保真度报告 设计（时间轴复刻 · 阶段 0）
 
-> 状态：设计中 · 2026-08-19 · 分支 feat/draft-fidelity-report
+> 状态：**已实现** · 2026-08-19 · 分支 feat/draft-fidelity-report
 > 目标：让运营看得见「这个框架里哪些参数是真从草稿提取的、哪些是默认值兜底、哪些明确没复刻」，并把这份认知持久化。
 
 ---
@@ -115,3 +115,23 @@ web/app/admin/frameworks/page.tsx                 ← 保真度角标
 
 - **报告只是「导入快照」**：运营手动改过框架参数后，报告不会更新，可能与现状不符。UI 必须写明，否则会误导。
 - **检测项是白名单**：只报我们已知的不支持项。草稿里若有别的没想到的东西，仍会静默丢失——这个局限无法根除，只能随后续阶段逐项补充。
+
+## 八、实现与设计的差异
+
+三个任务（`bfebbb2`/`d839469` 起至 Task 3）落地后，与本文档设计有以下几处出入，逐条对照 git log 与实际 diff 核实：
+
+1. **Task 2 第一轮把「键完全缺失」误记为 `extracted`，评审打回后修正**（`8b80149`，评审 Important #1/#2）：
+   - `canvas_config`/`duration` 键完全缺失时，回退值恰好「看起来标准」（720×960 / 0），第一版据此判定为 `extracted`；实际应为 `defaulted`（没有该字段、只是回退值巧合合理）。修正为先判定键是否真实存在（类型是否为 `number`），缺失才回退判 `defaulted`。
+   - 父级整体 `defaulted`（如 `audio`/`open`/`flash`/`body.subtitle*` 整块回退）时，子叶子字段（如 `audio.bgmVolume`、`open.durationMs`）原先「沉默缺席」——不出现在 `provenance` 里，导致提取率统计失真偏高。修正为父子各自都留一条 `defaulted` 记录，多个字段共用同一句 `detail` 时改用 `pushedDetails` 去重，`warnings` 里只出现一次（避免同一句提示重复刷屏），但 `provenance` 条数不受影响。
+   - 这两处都不影响本任务（Task 3）的落库/展示逻辑本身，但直接决定了 Step 5 冒烟结果里 `summary.extracted=25`（若无此修正会更高、且掺杂假阳性）。
+
+2. **设计文档「改动面」表遗漏了两个必需文件**，本任务实施中补上：
+   - `web/app/api/admin/jianying/parse/route.ts`：设计只说「报告由 parse 接口在服务端算出」，但没把该文件列入改动面。实现中给它加了 `buildFidelityReport(meta.provenance, ...)` 调用，响应体新增 `fidelityReport` 字段，供前端持有并在保存时原样回传给 `save/route.ts`。
+   - `web/app/api/frameworks/route.ts`（框架列表 GET）：`frameworks/page.tsx` 展示保真度角标依赖列表接口把 `draftFidelityReport` 字段透出，原 `select` 未包含该列，需要补充。
+
+3. **`import/route.ts` 收到「原始草稿文件」这一前提，实际需要新增一条数据通路才能成立**：设计文档写「import/route.ts 收到的是原始草稿文件」，仿佛这是既有事实；实际勘察代码后发现，导入路由此前只收 `templateParams`（已解析好的结构化参数）等表单字段，**并不持有原始草稿文本**。为了让服务端能权威重算报告，Task 3 新增了一个可选表单字段 `draftJson`：
+   - `web/app/admin/jianying/page.tsx` 的 `importAll()` 在提交表单时把解析阶段保留的 `raw`（草稿原文）一并设进 `draftJson`；
+   - `import/route.ts` 收到后自行 `JSON.parse` + `parseJianyingDraft` + `buildFidelityReport`，得到权威报告再落库；
+   - 字段缺失或解析失败时报告置 `null`，不影响导入本身（沿用「报告纯信息性展示，绝不能拖垮主流程」的既有口径），并补了对应的零回归测试。
+
+4. **`保真度` 角标的悬浮明细未按「path → 中文标签映射表」实现**：设计文档没有强制要求这张映射表，只在补充的实施约束里提醒「如果做，`fontsNeeded.*` 这类把数据值拼进路径的条目要特判」。实现里选择了更简单也更稳妥的做法——直接复用 `ProvenanceEntry.detail`（`defaulted`/`unsupported` 条目在写入时已经带上了人话文案，如「未找到转场素材，回退默认转场时长」），跳过 `path` 本身，从根源上避开了「无法穷举、需要特判动态 path」的问题，也不存在「未识别路径」兜底展示的风险。

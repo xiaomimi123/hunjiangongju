@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { parseJianyingDraft, extractDraftMedia } from '@mixcut/db'
+import { parseJianyingDraft, extractDraftMedia, buildFidelityReport } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
@@ -31,5 +31,8 @@ export const POST = handler(async (req) => {
     }
   }
   const { params, meta } = parseJianyingDraft(draft)
-  return NextResponse.json({ templateParams: params, meta, media: extractDraftMedia(draft) })
+  // 保真度报告在这里（服务端，拿得到原始草稿）算出，随预览响应一起下发；前端仅原样持有、
+  // 保存框架时原样回传给 save 路由（save 路由拿不到原始草稿，无法自己重算，见该文件注释）。
+  const fidelityReport = buildFidelityReport(meta.provenance, new Date().toISOString())
+  return NextResponse.json({ templateParams: params, meta, media: extractDraftMedia(draft), fidelityReport })
 })

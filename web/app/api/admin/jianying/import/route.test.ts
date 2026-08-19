@@ -53,7 +53,32 @@ function makeForm(over: Partial<Record<string, string>> = {}) {
   form.set('bgmMeta', over.bgmMeta ?? JSON.stringify([{ fileName: 'song.mp3', title: '歌曲A' }]))
   form.append('bgmFiles', new File([new Uint8Array([1, 2, 3])], 'song.mp3', { type: 'audio/mpeg' }))
   form.append('imageFiles', new File([new Uint8Array([9, 9])], 'pic.png', { type: 'image/png' }))
+  if (over.draftJson !== undefined) form.set('draftJson', over.draftJson)
   return form
+}
+
+// 与 packages/db/src/booklist/parseJianyingDraft.test.ts 同款最小可解析草稿：
+// 用于验证 import 路由在收到原始草稿时会在服务端权威地重算保真度报告并落库。
+const SAMPLE_DRAFT = {
+  canvas_config: { width: 720, height: 960 },
+  duration: 24601783,
+  materials: {
+    texts: [
+      { id: 't_title', content: JSON.stringify({ text: '今天分享的是', styles: [{ font: { path: 'text/x/字由玄真.ttf' }, fill: { content: { solid: { color: [0, 0, 0] } } } }] }) },
+      { id: 't_b1', content: JSON.stringify({ text: '《活着》', styles: [{ font: { path: 'text/x/字由玄真.ttf' }, fill: { content: { solid: { color: [0, 0, 0] } } } }] }) },
+    ],
+    material_animations: [{ id: 'a1', animations: [{ name: '破镜重圆' }] }],
+    transitions: [{ id: 'tr1', name: '叠化', duration: 500000 }],
+    audios: [{ id: 'au_bgm', name: '歌曲20260702' }],
+  },
+  tracks: [
+    { type: 'video', segments: [{ target_timerange: { duration: 2158988 } }] },
+    { type: 'audio', segments: [{ material_id: 'au_bgm', volume: 0.692, target_timerange: { start: 0, duration: 20000000 } }] },
+    { type: 'sticker', segments: [
+      { material_id: 't_title', target_timerange: { start: 0, duration: 2158988 }, clip: { transform: { y: -0.62 } }, extra_material_refs: ['a1'] },
+      { material_id: 't_b1', target_timerange: { start: 2158988, duration: 150300 }, clip: { transform: { y: 0.66 } }, extra_material_refs: [] },
+    ] },
+  ],
 }
 
 // 现场用 ffmpeg CLI 生成一张真实小图（同 worker/src/thumb.test.ts / segments route.test.ts
@@ -238,5 +263,41 @@ describe('POST /api/admin/jianying/import', () => {
     expect(j.assets).toEqual({ imported: 1, reused: 0 })
     const asset = await prisma.stockAsset.findFirstOrThrow({ where: { folder: '导入测试工程-缩略图失败', name: 'bad' } })
     createdAssets.push(asset.id)
+  })
+
+  it('带 draftJson → 服务端权威重算保真度报告并落库到 draftFidelityReport', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-fidelity-1', role: 'operator' })
+    const form = makeForm({ projectName: '导入测试工程-保真度', draftJson: JSON.stringify(SAMPLE_DRAFT) })
+    const res = await call(form)
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    createdFw.push(j.id)
+    await trackBgm('导入测试工程-保真度')
+    await trackAsset('导入测试工程-保真度')
+    const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+    const report = fw.draftFidelityReport as {
+      parsedAt: string
+      summary: { extracted: number; defaulted: number; unsupported: number }
+      entries: unknown[]
+    }
+    expect(report).toBeTruthy()
+    expect(typeof report.parsedAt).toBe('string')
+    expect(typeof report.summary.extracted).toBe('number')
+    expect(typeof report.summary.defaulted).toBe('number')
+    expect(typeof report.summary.unsupported).toBe('number')
+    expect(Array.isArray(report.entries)).toBe(true)
+    expect(report.entries.length).toBeGreaterThan(0)
+  })
+
+  it('不带 draftJson → draftFidelityReport 为 null（与现状一致，零回归）', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-fidelity-2', role: 'operator' })
+    const res = await call(makeForm({ projectName: '导入测试工程-无草稿' }))
+    expect(res.status).toBe(200)
+    const j = await res.json()
+    createdFw.push(j.id)
+    await trackBgm('导入测试工程-无草稿')
+    await trackAsset('导入测试工程-无草稿')
+    const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
+    expect(fw.draftFidelityReport).toBeNull()
   })
 })

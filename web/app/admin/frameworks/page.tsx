@@ -4,7 +4,11 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
 
-type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; degradedNote?: string | null; createdAt: string }
+// 与 packages/db/src/booklist/draftProvenance.ts 的导出保持一致（本页是客户端组件,不能 import @mixcut/db）。
+type ProvenanceEntry = { path: string; status: 'extracted' | 'defaulted' | 'unsupported'; detail?: string }
+type DraftFidelityReport = { parsedAt: string; summary: { extracted: number; defaulted: number; unsupported: number }; entries: ProvenanceEntry[] }
+
+type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; degradedNote?: string | null; draftFidelityReport?: DraftFidelityReport | null; createdAt: string }
 type FrameworkFull = {
   id: string; name: string | null; frameworkText: string; industryCategory: string | null
   imageStylePrompt: string | null; overlayTemplate: unknown; renderTemplate: string | null
@@ -15,6 +19,24 @@ type FrameworkFull = {
 type Form = {
   name: string; frameworkText: string; industryCategory: string; imageStylePrompt: string
   overlayTemplate: string; renderTemplate: string; maxLines: string; maxTotalChars: string; suggestedSegmentCount: string
+}
+
+// 把结构化保真度报告译成悬浮提示——只列 status!=extracted 且带 detail 的条目（extracted 条目
+// 本身没有 detail，罗列它们没有信息量），detail 文案沿用解析器里已经写好的中文（见
+// packages/db/src/booklist/parseJianyingDraft.ts 的 note() 调用），不再另起一套 path→标签映射表。
+function fidelityTitle(r: DraftFidelityReport): string {
+  const total = r.summary.extracted + r.summary.defaulted + r.summary.unsupported
+  const lines = [
+    '保真度报告（导入时快照，不随后续框架编辑更新）',
+    `解析时间：${new Date(r.parsedAt).toLocaleString('zh-CN')}`,
+    `已提取 ${r.summary.extracted} · 默认值兜底 ${r.summary.defaulted} · 明确未复刻 ${r.summary.unsupported}（共 ${total} 项）`,
+  ]
+  const details = r.entries.filter((e) => e.status !== 'extracted' && e.detail)
+  if (details.length > 0) {
+    lines.push('——')
+    for (const e of details) lines.push(`· ${e.detail}`)
+  }
+  return lines.join('\n')
 }
 
 const STYLE_PRESETS = [
@@ -131,6 +153,14 @@ export default function FrameworksPage() {
                   {f.degradedNote && (
                     <span title={f.degradedNote} className="ml-2 cursor-help rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-600">
                       ⚠️ 降级
+                    </span>
+                  )}
+                  {f.draftFidelityReport && (
+                    <span
+                      title={fidelityTitle(f.draftFidelityReport)}
+                      className="ml-2 cursor-help rounded bg-sky-500/15 px-1.5 py-0.5 text-xs text-sky-600"
+                    >
+                      保真度 {f.draftFidelityReport.summary.extracted}/{f.draftFidelityReport.summary.extracted + f.draftFidelityReport.summary.defaulted + f.draftFidelityReport.summary.unsupported}
                     </span>
                   )}
                 </td>

@@ -98,6 +98,9 @@ model CopyFramework {
   imageStylePrompt      String?          @map("image_style_prompt")
   // 拆解降级警告：ASR/vision 走 mock 时置提示，内容不可信；正常为 null。防止"静默造假框架"。
   degradedNote          String?          @map("degraded_note")
+  // 剪映草稿保真度报告：仅在从剪映工程导入/保存时写入一次(导入时快照)，不随后续编辑更新；
+  // 老框架/非剪映来源框架为 null。结构见 packages/db/src/booklist/draftProvenance.ts。
+  draftFidelityReport   Json?            @map("draft_fidelity_report")
   published             Boolean          @default(false)
   createdBy             String?          @map("created_by")
   createdAt             DateTime         @default(now()) @map("created_at")

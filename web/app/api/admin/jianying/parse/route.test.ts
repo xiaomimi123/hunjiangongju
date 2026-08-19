@@ -70,6 +70,19 @@ describe('POST /api/admin/jianying/parse', () => {
     expect(json.meta.bookTitles).toContain('活着')
   })
 
+  it('响应包含 fidelityReport(供前端保存时原样回传给 save 路由落库)', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
+    const res = await POST(req({ draftJson: draft }), { params: {} })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(typeof json.fidelityReport.parsedAt).toBe('string')
+    expect(typeof json.fidelityReport.summary.extracted).toBe('number')
+    expect(typeof json.fidelityReport.summary.defaulted).toBe('number')
+    expect(typeof json.fidelityReport.summary.unsupported).toBe('number')
+    expect(Array.isArray(json.fidelityReport.entries)).toBe(true)
+    expect(json.fidelityReport.entries.length).toBeGreaterThan(0)
+  })
+
   it('draftJson 是不合法 JSON 字符串 → 400 明确提示', async () => {
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
     const res = await POST(req({ draftJson: '{not json' }), { params: {} })

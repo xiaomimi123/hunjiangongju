@@ -22,6 +22,15 @@ type DraftStructure = {
   segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number; materialType?: string }[]
 }
 
+// 与 packages/db/src/booklist/draftProvenance.ts 的导出保持一致（本页是客户端组件，见上方镜像声明说明）。
+type ProvenanceStatus = 'extracted' | 'defaulted' | 'unsupported'
+type ProvenanceEntry = { path: string; status: ProvenanceStatus; detail?: string }
+type DraftFidelityReport = {
+  parsedAt: string
+  summary: { extracted: number; defaulted: number; unsupported: number }
+  entries: ProvenanceEntry[]
+}
+
 type DraftMeta = {
   canvas: { width: number; height: number }
   durationMs: number
@@ -31,6 +40,7 @@ type DraftMeta = {
   warnings: string[]
   watermark?: string
   structure: DraftStructure
+  provenance: ProvenanceEntry[]
 }
 
 type GradeParams = { filterName: string; intensity: number; contrast: number; sharpen: boolean }
@@ -88,6 +98,9 @@ export default function JianyingTemplatePage() {
   const [parseErr, setParseErr] = useState('')
   const [meta, setMeta] = useState<DraftMeta | null>(null)
   const [templateParams, setTemplateParams] = useState<TP | null>(null)
+  // parse 接口在服务端算出的保真度报告：save 路径原样回传（保存时服务端拿不到原始草稿，
+  // 无法自己重算）；import 路径改传原始 raw 文本，由 import 路由自己权威重算，不依赖这份状态。
+  const [fidelityReport, setFidelityReport] = useState<DraftFidelityReport | null>(null)
 
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -116,6 +129,7 @@ export default function JianyingTemplatePage() {
       setParseErr('请上传 draft_content.json 或粘贴其内容')
       setMeta(null)
       setTemplateParams(null)
+      setFidelityReport(null)
       setMedia(null)
       setSavedId('')
       return
@@ -124,6 +138,7 @@ export default function JianyingTemplatePage() {
       setParseErr(ENCRYPTED_DRAFT_HINT)
       setMeta(null)
       setTemplateParams(null)
+      setFidelityReport(null)
       setMedia(null)
       setSavedId('')
       return
@@ -140,6 +155,7 @@ export default function JianyingTemplatePage() {
       setParseErr('这不是剪映工程文件夹（未找到 draft_content.json）')
       setMeta(null)
       setTemplateParams(null)
+      setFidelityReport(null)
       setMedia(null)
       setSavedId('')
       return
@@ -154,6 +170,7 @@ export default function JianyingTemplatePage() {
       setParseErr((e as Error).message)
       setMeta(null)
       setTemplateParams(null)
+      setFidelityReport(null)
       setMedia(null)
       setSavedId('')
       return
@@ -167,6 +184,7 @@ export default function JianyingTemplatePage() {
     setParseErr('')
     setMeta(null)
     setTemplateParams(null)
+    setFidelityReport(null)
     setSavedId('')
     setMedia(null)
     if (!src.trim()) { setParseErr('请上传 draft_content.json 或粘贴其内容'); return }
@@ -177,10 +195,11 @@ export default function JianyingTemplatePage() {
     try { draftJson = JSON.parse(src) } catch { /* 交给后端按字符串再尝试解析并报错 */ }
     setParsing(true)
     try {
-      const r = await api<{ templateParams: TP; meta: DraftMeta; media?: Media }>('/api/admin/jianying/parse', { body: { draftJson } })
+      const r = await api<{ templateParams: TP; meta: DraftMeta; media?: Media; fidelityReport?: DraftFidelityReport }>('/api/admin/jianying/parse', { body: { draftJson } })
       setTemplateParams(r.templateParams)
       setMeta(r.meta)
       setMedia(r.media ?? null)
+      setFidelityReport(r.fidelityReport ?? null)
     } catch (e) { setParseErr((e as Error).message) }
     finally { setParsing(false) }
   }
@@ -195,6 +214,9 @@ export default function JianyingTemplatePage() {
       form.set('name', name.trim())
       form.set('projectName', projectName || '剪映工程')
       form.set('templateParams', JSON.stringify(templateParams))
+      // 原始草稿文本一并送后端：import 路由借此在服务端权威重算保真度报告（比 save 路径
+      // 靠前端回传更可信），不依赖这里持有的 fidelityReport 状态。
+      if (raw.trim()) form.set('draftJson', raw)
       if (meta?.watermark) form.set('watermark', meta.watermark)
       if (meta?.structure?.bodyCount) form.set('bodyCount', String(meta.structure.bodyCount))
       if (meta?.structure?.flashCount && meta.structure.flashCount > 0) form.set('flashCount', String(meta.structure.flashCount))
@@ -219,7 +241,8 @@ export default function JianyingTemplatePage() {
     if (!name.trim()) { setSaveErr('请填写框架名'); return }
     setSaving(true)
     try {
-      const r = await api<{ id: string }>('/api/admin/jianying/save', { body: { name: name.trim(), templateParams } })
+      // fidelityReport 原样回传给 save 路由：这里拿不到原始草稿，报告是 parse 时服务端算好的快照。
+      const r = await api<{ id: string }>('/api/admin/jianying/save', { body: { name: name.trim(), templateParams, fidelityReport } })
       setSavedId(r.id)
     } catch (e) { setSaveErr((e as Error).message) }
     finally { setSaving(false) }

@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import path from 'path'
 import fs from 'fs/promises'
 import type { Prisma } from '@prisma/client'
-import { prisma, parseTemplateParams } from '@mixcut/db'
+import { prisma, parseTemplateParams, parseJianyingDraft, buildFidelityReport } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
@@ -40,6 +40,21 @@ export const POST = handler(async (req) => {
     }
   } catch {
     throw new HttpError(400, 'bgmMeta 不是合法 JSON')
+  }
+
+  // 保真度报告：可选字段，收到的是原始草稿文件本体，能在服务端权威重算——比 save 路由
+  // 收到的客户端回传报告更可信。缺失/不是合法 JSON 时报告直接置空，不影响导入本身
+  // （报告纯信息性展示，沿用本路由"缺省字段一律不写、不因此拒绝导入"的既有口径）。
+  let fidelityReport: ReturnType<typeof buildFidelityReport> | null = null
+  const draftJsonRaw = form.get('draftJson')
+  if (typeof draftJsonRaw === 'string' && draftJsonRaw.trim()) {
+    try {
+      const draft = JSON.parse(draftJsonRaw)
+      const { meta } = parseJianyingDraft(draft)
+      fidelityReport = buildFidelityReport(meta.provenance, new Date().toISOString())
+    } catch {
+      fidelityReport = null
+    }
   }
 
   const watermark = String(form.get('watermark') ?? '').trim()
@@ -124,6 +139,7 @@ export const POST = handler(async (req) => {
       overlayTemplate: overlayTemplate as unknown as Prisma.InputJsonValue,
       createdBy: s.userId,
       ...(bodyCount ? { suggestedSegmentCount: bodyCount } : {}),
+      ...(fidelityReport ? { draftFidelityReport: fidelityReport as unknown as Prisma.InputJsonValue } : {}),
     },
   })
   return NextResponse.json({ id: fw.id, bgm: bgmStat, assets: assetStat, skipped })

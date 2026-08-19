@@ -199,6 +199,93 @@ describe('parseJianyingDraft —— provenance', () => {
     expect(unsupportedPaths).toContain('textGlow')
   })
 
+  it.skipIf(!hasSample)('真实样例：body.photoScale 有专属 path（不再笼统挂在 structure 下）', () => {
+    const draftSample = JSON.parse(fs.readFileSync(SAMPLE, 'utf8'))
+    const { meta } = parseJianyingDraft(draftSample)
+    expect(meta.provenance).toContainEqual({ path: 'body.photoScale', status: 'extracted' })
+  })
+
+  // 评审 Important #1：canvas_config / duration 键完全缺失时，回退值 720x960 / 0
+  // 恰好"看起来标准"，之前会被误判成 extracted。残缺草稿应该被记成 defaulted。
+  describe('硬编码默认值不能冒充 extracted（评审 Important #1）', () => {
+    it('{} 输入：canvas 记为 defaulted（不带 detail，不产生新 warning）', () => {
+      const { meta } = parseJianyingDraft({})
+      expect(meta.provenance).toContainEqual({ path: 'canvas', status: 'defaulted' })
+      expect(meta.provenance.find((e) => e.path === 'canvas' && e.status === 'extracted')).toBeUndefined()
+    })
+
+    it('{} 输入：durationMs 记为 defaulted（不带 detail，不产生新 warning）', () => {
+      const { meta } = parseJianyingDraft({})
+      expect(meta.provenance).toContainEqual({ path: 'durationMs', status: 'defaulted' })
+      expect(meta.provenance.find((e) => e.path === 'durationMs' && e.status === 'extracted')).toBeUndefined()
+    })
+
+    it('canvas_config 只给 width、没给 height，拼出来非标准尺寸 → 仍走原有告警分支（不是"键缺失"分支）', () => {
+      // 这组夹具专门用来防止"判据顺序颠倒"的回归：曾经把这种情况误判成"键不全→静默 defaulted"，
+      // 吞掉了改动前代码本来就会触发的这条 warning，被 __diff_old_new__ 实证脚本抓到过。
+      const { meta } = parseJianyingDraft({ canvas_config: { width: 1080 }, materials: {}, tracks: [] })
+      expect(meta.warnings).toContain('画布尺寸非 720x960 (1080x960)，可能影响排版比例')
+      const canvas = meta.provenance.find((e) => e.path === 'canvas')
+      expect(canvas).toEqual({ path: 'canvas', status: 'defaulted', detail: '画布尺寸非 720x960 (1080x960)，可能影响排版比例' })
+    })
+
+    it('canvas_config 完整且是标准尺寸 720x960 → 仍记 extracted（不能矫枉过正）', () => {
+      const { meta } = parseJianyingDraft(draft) // 既有主夹具 canvas_config 就是 { width: 720, height: 960 }
+      expect(meta.provenance).toContainEqual({ path: 'canvas', status: 'extracted' })
+    })
+  })
+
+  // 评审 Important #2：父级整体 defaulted 时，子叶子字段不能"沉默缺席"——
+  // 应该各自也留一条 defaulted 记录，且共用同一句 detail 时 warnings 不能重复。
+  describe('父级 defaulted 时叶子字段各自留痕（评审 Important #2）', () => {
+    it('audio 整体缺失时，bgmVolume/openGear/transitionDrop 三个叶子字段各自也有 defaulted 条目', () => {
+      const { meta } = parseJianyingDraft({})
+      const detail = '未找到音频轨道，BGM 音量/音效回退默认值'
+      expect(meta.provenance).toEqual(expect.arrayContaining([
+        { path: 'audio', status: 'defaulted', detail },
+        { path: 'audio.bgmVolume', status: 'defaulted', detail },
+        { path: 'audio.sfx.openGear', status: 'defaulted', detail },
+        { path: 'audio.sfx.transitionDrop', status: 'defaulted', detail },
+      ]))
+    })
+
+    it('开场标题段缺失时，open.titleText 与 open.durationMs 各自都有 defaulted 条目', () => {
+      const { meta } = parseJianyingDraft({})
+      const detail = '未找到开场标题段，回退默认标题/时长'
+      expect(meta.provenance).toEqual(expect.arrayContaining([
+        { path: 'open.titleText', status: 'defaulted', detail },
+        { path: 'open.durationMs', status: 'defaulted', detail },
+      ]))
+    })
+
+    it('书名快闪段缺失时，flash.perClipMs 与 flash.minClipMs 各自都有 defaulted 条目', () => {
+      const { meta } = parseJianyingDraft({})
+      const detail = '未找到书名快闪段，回退默认快闪时长'
+      expect(meta.provenance).toEqual(expect.arrayContaining([
+        { path: 'flash.perClipMs', status: 'defaulted', detail },
+        { path: 'flash.minClipMs', status: 'defaulted', detail },
+      ]))
+    })
+
+    it('正片字幕段缺失时，fontFamily/color/posY 三个叶子字段各自都有 defaulted 条目', () => {
+      const { meta } = parseJianyingDraft({})
+      const detail = '未找到正片字幕段，回退默认字幕样式'
+      expect(meta.provenance).toEqual(expect.arrayContaining([
+        { path: 'body.subtitleFontFamily', status: 'defaulted', detail },
+        { path: 'body.subtitleColor', status: 'defaulted', detail },
+        { path: 'body.subtitlePosY', status: 'defaulted', detail },
+      ]))
+    })
+
+    it('同一句 detail 被 4 个 path（audio 及其 3 个叶子）共用时，warnings 里只出现一次', () => {
+      const { meta } = parseJianyingDraft({})
+      const detail = '未找到音频轨道，BGM 音量/音效回退默认值'
+      expect(meta.warnings.filter((w) => w === detail)).toHaveLength(1)
+      // 去重只影响 warnings，不影响 provenance 条数——4 条 provenance 记录都应该在
+      expect(meta.provenance.filter((e) => e.detail === detail)).toHaveLength(4)
+    })
+  })
+
   // 回归红线：warnings 文案必须与改动前逐字节相同（web/app/admin/jianying/page.tsx 的
   // buildReport() 消费这个数组翻译成运营看的报告，文案一变报告就静默变了）。
   // 期望值是手写常量（改动前对同一夹具实际跑出来的结果，逐字节抄入，不是由被测代码算出来的）。

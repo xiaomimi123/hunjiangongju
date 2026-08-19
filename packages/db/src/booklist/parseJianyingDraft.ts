@@ -140,9 +140,16 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   const provenance: ProvenanceEntry[] = []
   // note() 是 warnings 与 provenance 唯一的写入口：defaulted 且带 detail 时同时 push 进 warnings，
   // 保证两份记录不会各写各的而漂移。文案必须与改动前 warnings.push 的字符串逐字节相同（回归红线）。
+  // pushedDetails 去重：同一句 detail 文案可能被多个"共享同一次回退"的叶子字段各记一条
+  // defaulted provenance（如 open.titleText 和 open.durationMs 因同一句「未找到开场标题段…」
+  // 一起回退），但 warnings 只应出现一次——去重发生在 warnings 这一层，不影响 provenance 条数。
+  const pushedDetails = new Set<string>()
   const note = (path: string, status: ProvenanceStatus, detail?: string) => {
     provenance.push({ path, status, ...(detail ? { detail } : {}) })
-    if (status === 'defaulted' && detail) warnings.push(detail)
+    if (status === 'defaulted' && detail && !pushedDetails.has(detail)) {
+      warnings.push(detail)
+      pushedDetails.add(detail)
+    }
   }
 
   if (!draft || typeof draft !== 'object' || Array.isArray(draft)) {
@@ -171,13 +178,23 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   let canvas = { width: 720, height: 960 }
   try {
     const cc = obj(d.canvas_config)
-    const width = typeof cc.width === 'number' ? cc.width : 720
-    const height = typeof cc.height === 'number' ? cc.height : 960
+    const hasWidth = typeof cc.width === 'number'
+    const hasHeight = typeof cc.height === 'number'
+    const width = hasWidth ? (cc.width as number) : 720
+    const height = hasHeight ? (cc.height as number) : 960
     canvas = { width, height }
+    // 判据顺序不能颠倒：改动前代码只看"拼出来的 width/height 是否等于 720x960"决定是否告警，
+    // 与 canvas_config 是否完整无关——哪怕只给了 width、height 是硬编码默认值，只要拼出来非标准
+    // 尺寸，老代码照样会告警（曾在这里踩过一次坑：先判"是否缺字段"会把这条 warning 吞掉，
+    // 用 __diff_old_new__ 实证对比时被"canvas_config 只给 width"这组夹具当场揪出来）。
+    // 只有在"拼出来恰好是标准尺寸"这个不告警的分支里，才进一步区分"两个维度都真拿到"(extracted)
+    // 还是"至少一个维度是硬编码默认值、只是凑巧等于标准值"(defaulted，且不产生新 warning)。
     if (width !== 720 || height !== 960) {
       note('canvas', 'defaulted', `画布尺寸非 720x960 (${width}x${height})，可能影响排版比例`)
-    } else {
+    } else if (hasWidth && hasHeight) {
       note('canvas', 'extracted')
+    } else {
+      note('canvas', 'defaulted')
     }
   } catch {
     note('canvas', 'defaulted', 'canvas_config 解析失败，回退 720x960')
@@ -186,8 +203,11 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   // ---- duration ----
   let durationMs = 0
   try {
+    const hasDuration = typeof d.duration === 'number' && Number.isFinite(d.duration)
     durationMs = usToMs(d.duration)
-    note('durationMs', 'extracted')
+    // duration 键缺失/类型不对时 usToMs 会安静地返回 0，不抛错——不能把这种情况记成 extracted，
+    // 否则残缺草稿会被误报「时长已提取」。同样没有对应的原 warning 文案，只记 provenance。
+    note('durationMs', hasDuration ? 'extracted' : 'defaulted')
   } catch {
     note('durationMs', 'defaulted', 'duration 解析失败')
   }
@@ -296,9 +316,11 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       note('open.durationMs', 'extracted')
     } else {
       note('open.titleText', 'defaulted', '未找到开场标题段，回退默认标题/时长')
+      note('open.durationMs', 'defaulted', '未找到开场标题段，回退默认标题/时长')
     }
   } catch {
     note('open.titleText', 'defaulted', '开场标题解析失败')
+    note('open.durationMs', 'defaulted', '开场标题解析失败')
   }
 
   // ---- 开场动画（破镜重圆/收拢） ----
@@ -347,9 +369,11 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       note('flash.minClipMs', 'extracted')
     } else {
       note('flash.perClipMs', 'defaulted', '未找到书名快闪段，回退默认快闪时长')
+      note('flash.minClipMs', 'defaulted', '未找到书名快闪段，回退默认快闪时长')
     }
   } catch {
     note('flash.perClipMs', 'defaulted', '书名快闪解析失败')
+    note('flash.minClipMs', 'defaulted', '书名快闪解析失败')
   }
 
   // 画面节奏优先：主视频轨切出的三段结构比「靠《书名》文字段」稳（空白模板没有书名也能切）。
@@ -361,6 +385,13 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       flashMinClipMs = structure.flashMinClipMs
     }
     note('structure', 'extracted')
+    // flash.scale / body.photoScale 是真影响渲染的叶子参数（见下方 built 里的
+    // structure.flashScale/bodyScale !== 1 才写入），之前只笼统挂在 'structure' 下，
+    // Task 3 按 path 找不到——这里给专属 path，取到非默认缩放才记 extracted
+    // （=== 1 即未检测到特殊缩放，等同「没有这回事」，不算 defaulted，沿用 grade/motion 同款
+    // "可选字段、没检测到就不记"的约定，不产生新 warning）。
+    if (structure.flashScale !== 1) note('flash.scale', 'extracted')
+    if (structure.bodyScale !== 1) note('body.photoScale', 'extracted')
   } catch { note('structure', 'defaulted', '画面节奏结构解析失败') }
 
   // ---- 正片字幕样式 ----
@@ -388,10 +419,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       note('body.subtitleColor', 'extracted')
       note('body.subtitlePosY', 'extracted')
     } else {
-      note('body.subtitleStyle', 'defaulted', '未找到正片字幕段，回退默认字幕样式')
+      note('body.subtitleFontFamily', 'defaulted', '未找到正片字幕段，回退默认字幕样式')
+      note('body.subtitleColor', 'defaulted', '未找到正片字幕段，回退默认字幕样式')
+      note('body.subtitlePosY', 'defaulted', '未找到正片字幕段，回退默认字幕样式')
     }
   } catch {
-    note('body.subtitleStyle', 'defaulted', '正片字幕样式解析失败')
+    note('body.subtitleFontFamily', 'defaulted', '正片字幕样式解析失败')
+    note('body.subtitleColor', 'defaulted', '正片字幕样式解析失败')
+    note('body.subtitlePosY', 'defaulted', '正片字幕样式解析失败')
   }
 
   // ---- 转场 ----
@@ -478,6 +513,9 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
 
     if (audioSegs.length === 0) {
       note('audio', 'defaulted', '未找到音频轨道，BGM 音量/音效回退默认值')
+      note('audio.bgmVolume', 'defaulted', '未找到音频轨道，BGM 音量/音效回退默认值')
+      note('audio.sfx.openGear', 'defaulted', '未找到音频轨道，BGM 音量/音效回退默认值')
+      note('audio.sfx.transitionDrop', 'defaulted', '未找到音频轨道，BGM 音量/音效回退默认值')
     } else {
       const picked = pickBgmSegment(draft)
       if (picked) {
@@ -494,6 +532,9 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     }
   } catch {
     note('audio', 'defaulted', '音频解析失败')
+    note('audio.bgmVolume', 'defaulted', '音频解析失败')
+    note('audio.sfx.openGear', 'defaulted', '音频解析失败')
+    note('audio.sfx.transitionDrop', 'defaulted', '音频解析失败')
   }
 
   // ---- 调色 ----

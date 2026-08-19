@@ -45,6 +45,12 @@ export function flashCardsHtml(covers: FlashCover[], titleFontFamily: string, co
 // 超过一半的生命花在渐显，节奏感被抹软。hardCut 与 bounceIn 互斥：硬切下不存在"入场过程"，
 // 弹入无处可施，故忽略 bounceIn。
 // 缺省 false，保证未接入草稿时间轴的老框架输出逐字节不变。
+//
+// 【产品决定，勿擅自改默认值】2026-08-19：渲出淡入版与硬切版对比样片后，用户选择**保留淡入**。
+// 原剪映工程的快闪边界确实是硬切，我们主动不复刻——因为我们的快闪卡是 AI 生成书封，与原片
+// 真实素材质感不同，硬切观感未必更好。所以本参数保留能力但默认关闭，也**不**从草稿自动判定
+// 该硬切还是淡入（那会自动切到用户不要的效果）。见
+// docs/superpowers/specs/2026-08-19-timeline-transitions-motion-design.md §二D1。
 export function flashCardsTweens(covers: FlashCover[], t: FlashTimeline, bounceIn: boolean, hardCut = false): string {
   const lines: string[] = []
   covers.forEach((_c, i) => {

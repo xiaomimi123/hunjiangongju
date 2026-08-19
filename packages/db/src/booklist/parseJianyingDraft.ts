@@ -217,7 +217,9 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   try {
     const videoTrack = tracks.map(obj).find((t) => t.type === 'video')
     segmentCount = videoTrack ? arr(videoTrack.segments).length : 0
-    note('segmentCount', 'extracted')
+    // 与 canvas/durationMs 同款陷阱：找不到 video 轨时 segmentCount 硬编码回退 0，不抛错，
+    // 不能因为"没抛错"就记 extracted——必须真的找到了 video 轨才算。
+    note('segmentCount', videoTrack ? 'extracted' : 'defaulted')
   } catch {
     note('segmentCount', 'defaulted', 'video track 段数解析失败')
   }
@@ -312,7 +314,10 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       openTitleText = chosen.t!.text || openTitleText
       openDurationMs = usToMs(chosen.s.durationUs)
       openTitleMaterialId = chosen.s.materialId
-      note('open.titleText', 'extracted')
+      // chosen.t!.text 可能是空字符串（文字素材 content 缺失/解析失败时 parseTexts 兜底成 ''），
+      // 这种情况下 openTitleText 靠 `|| openTitleText` 静默保留了 DEFAULT_PARAMS 的值——
+      // 找到了候选段不等于真读到了标题文字，两者要分开记。
+      note('open.titleText', chosen.t!.text ? 'extracted' : 'defaulted')
       note('open.durationMs', 'extracted')
     } else {
       note('open.titleText', 'defaulted', '未找到开场标题段，回退默认标题/时长')
@@ -384,12 +389,18 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       flashPerClipMs = structure.flashPerClipMs
       flashMinClipMs = structure.flashMinClipMs
     }
-    note('structure', 'extracted')
+    // extractDraftStructure 找不到主视频轨（或轨里没有段）时返回硬编码的 EMPTY 兜底对象——
+    // 形状齐全(所有数字字段=0、segments=[])，try 块本身不抛错，之前无条件记 extracted，
+    // 会把"什么都没读到"报成"✓ 已提取节奏结构"（评审终审 Important，与 canvas/durationMs
+    // 是同一个缺陷模式：硬编码默认值冒充 extracted）。判据用 segments.length > 0——
+    // 只有真的切出了非空段落，才算真提取到。
+    note('structure', structure.segments.length > 0 ? 'extracted' : 'defaulted')
     // flash.scale / body.photoScale 是真影响渲染的叶子参数（见下方 built 里的
     // structure.flashScale/bodyScale !== 1 才写入），之前只笼统挂在 'structure' 下，
     // Task 3 按 path 找不到——这里给专属 path，取到非默认缩放才记 extracted
     // （=== 1 即未检测到特殊缩放，等同「没有这回事」，不算 defaulted，沿用 grade/motion 同款
-    // "可选字段、没检测到就不记"的约定，不产生新 warning）。
+    // "可选字段、没检测到就不记"的约定，不产生新 warning。EMPTY 兜底对象的 flashScale/
+    // bodyScale 也恒为 1，天然不会误触发这两条，无需额外判断）。
     if (structure.flashScale !== 1) note('flash.scale', 'extracted')
     if (structure.bodyScale !== 1) note('body.photoScale', 'extracted')
   } catch { note('structure', 'defaulted', '画面节奏结构解析失败') }
@@ -410,13 +421,23 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       subtitleCandidates.sort((a, b) => b.durationUs - a.durationUs)
       const chosen = subtitleCandidates[0]
       const t = textsById.get(chosen.materialId)
-      if (t?.fontBasename) {
-        subtitleFontFamily = FONT_FAMILY_MAP[t.fontBasename] ?? subtitleFontFamily
+      // 同一个陷阱：找到候选字幕段 ≠ 真读到了字体/颜色。字体要在 FONT_FAMILY_MAP 里查到
+      // 才算 extracted——查不到时 `?? subtitleFontFamily` 静默保留了 DEFAULT_PARAMS 的值；
+      // 颜色要 t.colorHex 真存在才算，t?.colorHex 缺失时 subtitleColor 也是静默保留默认值。
+      const mappedFont = t?.fontBasename ? FONT_FAMILY_MAP[t.fontBasename] : undefined
+      if (mappedFont) {
+        subtitleFontFamily = mappedFont
+        note('body.subtitleFontFamily', 'extracted')
+      } else {
+        note('body.subtitleFontFamily', 'defaulted')
       }
-      if (t?.colorHex) subtitleColor = t.colorHex
+      if (t?.colorHex) {
+        subtitleColor = t.colorHex
+        note('body.subtitleColor', 'extracted')
+      } else {
+        note('body.subtitleColor', 'defaulted')
+      }
       subtitlePosY = transformYToNorm(chosen.y)
-      note('body.subtitleFontFamily', 'extracted')
-      note('body.subtitleColor', 'extracted')
       note('body.subtitlePosY', 'extracted')
     } else {
       note('body.subtitleFontFamily', 'defaulted', '未找到正片字幕段，回退默认字幕样式')

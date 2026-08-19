@@ -205,6 +205,84 @@ describe('parseJianyingDraft —— provenance', () => {
     expect(meta.provenance).toContainEqual({ path: 'body.photoScale', status: 'extracted' })
   })
 
+  // 终审 Important：extractDraftStructure 找不到主视频轨时返回硬编码的 EMPTY 兜底对象
+  // （形状齐全、不抛错），之前 note('structure','extracted') 无条件触发，把"什么都没读到"
+  // 报成"✓ 已提取"。与上一轮 canvas/durationMs 是同一个缺陷模式。
+  describe('structure/segmentCount 硬编码默认值不能冒充 extracted（终审 Important，同款 canvas/durationMs 缺陷）', () => {
+    it('没有 video 轨 → structure 记为 defaulted（EMPTY 兜底对象，不是真提取到）', () => {
+      const input = { canvas_config: { width: 720, height: 960 }, duration: 5000000, tracks: [{ type: 'audio', segments: [] }] }
+      const { meta } = parseJianyingDraft(input)
+      expect(meta.provenance).toContainEqual({ path: 'structure', status: 'defaulted' })
+      expect(meta.structure).toEqual({
+        openDurationMs: 0, flashCount: 0, flashPerClipMs: 0, flashMinClipMs: 0,
+        bodyCount: 0, bodyAvgMs: 0, flashScale: 1, bodyScale: 1, segments: [],
+      })
+    })
+
+    it('没有 video 轨 → segmentCount 也记为 defaulted（同一处硬编码回退 0）', () => {
+      const input = { canvas_config: { width: 720, height: 960 }, duration: 5000000, tracks: [{ type: 'audio', segments: [] }] }
+      const { meta } = parseJianyingDraft(input)
+      expect(meta.provenance).toContainEqual({ path: 'segmentCount', status: 'defaulted' })
+    })
+
+    it('video 轨存在但没有段 → segmentCount 仍记 extracted（真找到了轨，0 是真实值，不是硬编码回退）', () => {
+      const input = { canvas_config: { width: 720, height: 960 }, duration: 5000000, tracks: [{ type: 'video', segments: [] }] }
+      const { meta } = parseJianyingDraft(input)
+      expect(meta.provenance).toContainEqual({ path: 'segmentCount', status: 'extracted' })
+    })
+
+    it('有真实 video 轨且切出非空段（既有主夹具 draft）→ structure 仍记 extracted', () => {
+      const { meta } = parseJianyingDraft(draft)
+      expect(meta.provenance).toContainEqual({ path: 'structure', status: 'extracted' })
+      expect(meta.structure.segments.length).toBeGreaterThan(0)
+    })
+  })
+
+  // 自查发现的同类问题：找到候选段（sticker/text）不等于真读到了字体/颜色/标题文字——
+  // 中间有一层 `||`/`??` 静默保留 DEFAULT_PARAMS 默认值的逻辑，不能因为"找到了候选段"
+  // 就无条件记 extracted。
+  describe('自查发现的同类问题：候选段存在但取值仍是默认值', () => {
+    it('正片字幕候选段存在，但字体不在 FONT_FAMILY_MAP、颜色缺失 → 两个叶子字段都记 defaulted', () => {
+      const input = {
+        canvas_config: { width: 720, height: 960 },
+        duration: 5_000_000,
+        materials: {
+          texts: [
+            { id: 't1', content: JSON.stringify({ text: '开场标题', styles: [{ font: { path: 'x/未知字体.ttf' } }] }) },
+            { id: 't2', content: JSON.stringify({ text: '这是正片字幕', styles: [{ font: { path: 'x/未知字体.ttf' } }] }) },
+          ],
+        },
+        tracks: [
+          { type: 'sticker', segments: [
+            { material_id: 't1', target_timerange: { start: 0, duration: 1_000_000 }, clip: { transform: { y: 0.5 } }, extra_material_refs: [] },
+            { material_id: 't2', target_timerange: { start: 1_000_000, duration: 3_000_000 }, clip: { transform: { y: -0.5 } }, extra_material_refs: [] },
+          ] },
+        ],
+      }
+      const { meta } = parseJianyingDraft(input)
+      expect(meta.provenance).toContainEqual({ path: 'body.subtitleFontFamily', status: 'defaulted' })
+      expect(meta.provenance).toContainEqual({ path: 'body.subtitleColor', status: 'defaulted' })
+      // subtitlePosY 是直接计算值，没有"静默保留默认值"这层陷阱，候选段存在就应该仍是 extracted
+      expect(meta.provenance).toContainEqual({ path: 'body.subtitlePosY', status: 'extracted' })
+    })
+
+    it('开场候选段存在，但文字内容是空字符串 → open.titleText 记 defaulted，open.durationMs 仍记 extracted', () => {
+      const input = {
+        canvas_config: { width: 720, height: 960 },
+        duration: 5_000_000,
+        materials: { texts: [{ id: 't1', content: JSON.stringify({ text: '' }) }] },
+        tracks: [
+          { type: 'sticker', segments: [
+            { material_id: 't1', target_timerange: { start: 0, duration: 1_000_000 }, clip: { transform: { y: 0.5 } }, extra_material_refs: [] },
+          ] },
+        ],
+      }
+      const { meta } = parseJianyingDraft(input)
+      expect(meta.provenance).toContainEqual({ path: 'open.titleText', status: 'defaulted' })
+      expect(meta.provenance).toContainEqual({ path: 'open.durationMs', status: 'extracted' })
+    })
+  })
+
   // 评审 Important #1：canvas_config / duration 键完全缺失时，回退值 720x960 / 0
   // 恰好"看起来标准"，之前会被误判成 extracted。残缺草稿应该被记成 defaulted。
   describe('硬编码默认值不能冒充 extracted（评审 Important #1）', () => {

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import fs from 'fs'
+import path from 'path'
 import { parseJianyingDraft, transformYToNorm } from './parseJianyingDraft'
 import { DEFAULT_PARAMS } from './templateParams'
 
@@ -168,5 +170,77 @@ describe('开场动画与音效识别放宽', () => {
   })
   it('「鼠标单击」算开场音效', () => {
     expect(parseJianyingDraft(textDraft('text')).params.audio.sfx.openGear).toBe(true)
+  })
+})
+
+// 真实样例（未跟踪目录，可能不存在，缺失时用 it.skipIf 跳过样例相关用例）
+const SAMPLE = path.resolve(__dirname, '../../../../今天分享的是/draft_content.json')
+const hasSample = fs.existsSync(SAMPLE)
+
+describe('parseJianyingDraft —— provenance', () => {
+  it('meta.provenance 非空，且每条 warning 都有对应的 defaulted 条目', () => {
+    // 用空对象夹具：几乎所有字段都读不到，会触发一整批 warnings.push，
+    // 适合验证「每条 warning 都能在 provenance 里找到对应 defaulted 条目」
+    const { meta } = parseJianyingDraft({})
+    expect(meta.provenance.length).toBeGreaterThan(0)
+    const defaultedWithDetail = meta.provenance.filter((e) => e.status === 'defaulted' && e.detail)
+    expect(defaultedWithDetail.length).toBeGreaterThanOrEqual(meta.warnings.length)
+    for (const w of meta.warnings) {
+      expect(defaultedWithDetail.some((e) => e.detail === w)).toBe(true)
+    }
+  })
+
+  it.skipIf(!hasSample)('真实样例：provenance 含 unsupported 条目（特效轨等）', () => {
+    const draftSample = JSON.parse(fs.readFileSync(SAMPLE, 'utf8'))
+    const { meta } = parseJianyingDraft(draftSample)
+    const unsupportedPaths = meta.provenance.filter((e) => e.status === 'unsupported').map((e) => e.path)
+    expect(unsupportedPaths).toContain('effectTrack')
+    expect(unsupportedPaths).toContain('videoEffects')
+    expect(unsupportedPaths).toContain('textGlow')
+  })
+
+  // 回归红线：warnings 文案必须与改动前逐字节相同（web/app/admin/jianying/page.tsx 的
+  // buildReport() 消费这个数组翻译成运营看的报告，文案一变报告就静默变了）。
+  // 期望值是手写常量（改动前对同一夹具实际跑出来的结果，逐字节抄入，不是由被测代码算出来的）。
+  describe('回归红线：warnings 文案与改动前完全一致', () => {
+    it('基础夹具 draft → 无 warning', () => {
+      const { meta } = parseJianyingDraft(draft)
+      expect(meta.warnings).toEqual([])
+    })
+
+    it('空对象 {} → 8 条默认回退 warning，文案逐字不变', () => {
+      const { meta } = parseJianyingDraft({})
+      expect(meta.warnings).toEqual([
+        '未从文字素材中找到书名(《...》)',
+        '未找到开场标题段，回退默认标题/时长',
+        '未找到动画素材(material_animations)，开场动画(破镜重圆)回退默认值',
+        '未找到书名快闪段，回退默认快闪时长',
+        '未找到正片字幕段，回退默认字幕样式',
+        '未找到转场素材，回退默认转场时长',
+        '未找到动画素材(material_animations)，Ken-Burns 回退默认值',
+        '未找到音频轨道，BGM 音量/音效回退默认值',
+      ])
+    })
+
+    it('null → 全默认，仅 1 条 warning', () => {
+      const { meta } = parseJianyingDraft(null)
+      expect(meta.warnings).toEqual(['draft 不是可解析的对象，已回退全默认参数'])
+    })
+
+    it('缺失 material_animations → 2 条 warning，文案逐字不变', () => {
+      const { material_animations: _omit, ...restMaterials } = draft.materials as Record<string, unknown>
+      const d = { ...draft, materials: restMaterials }
+      const { meta } = parseJianyingDraft(d)
+      expect(meta.warnings).toEqual([
+        '未找到动画素材(material_animations)，开场动画(破镜重圆)回退默认值',
+        '未找到动画素材(material_animations)，Ken-Burns 回退默认值',
+      ])
+    })
+
+    it.skipIf(!hasSample)('真实样例 → 无 warning（样例数据完整，全部真提取）', () => {
+      const draftSample = JSON.parse(fs.readFileSync(SAMPLE, 'utf8'))
+      const { meta } = parseJianyingDraft(draftSample)
+      expect(meta.warnings).toEqual([])
+    })
   })
 })

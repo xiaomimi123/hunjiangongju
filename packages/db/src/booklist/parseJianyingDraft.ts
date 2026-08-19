@@ -8,6 +8,7 @@ import { extractDraftStructure, type DraftStructure } from './draftStructure'
 import { extractDraftGrade } from './draftGrade'
 import { extractDraftMoves } from './draftMotion'
 import { extractSubtitleEntrance } from './draftTextAnim'
+import { detectUnsupported, type ProvenanceEntry, type ProvenanceStatus } from './draftProvenance'
 
 export interface DraftMeta {
   canvas: { width: number; height: number }
@@ -18,6 +19,7 @@ export interface DraftMeta {
   warnings: string[]
   watermark?: string // 文字里以 @ 开头的一行（如「@欧子好读」）
   structure: DraftStructure // 主视频轨节奏切出的 开场/快闪/正片 三段结构（Task 8 页面报告用）
+  provenance: ProvenanceEntry[] // 结构化保真度记录：extracted/defaulted 与 warnings 同源写入，unsupported 来自 detectUnsupported
 }
 
 // ---- 纯函数 helpers（导出以便单测/复用） ----
@@ -135,9 +137,17 @@ function collectStickerSegs(tracks: unknown[]): StickerSeg[] {
 
 export function parseJianyingDraft(draft: unknown): { params: TemplateParams; meta: DraftMeta } {
   const warnings: string[] = []
+  const provenance: ProvenanceEntry[] = []
+  // note() 是 warnings 与 provenance 唯一的写入口：defaulted 且带 detail 时同时 push 进 warnings，
+  // 保证两份记录不会各写各的而漂移。文案必须与改动前 warnings.push 的字符串逐字节相同（回归红线）。
+  const note = (path: string, status: ProvenanceStatus, detail?: string) => {
+    provenance.push({ path, status, ...(detail ? { detail } : {}) })
+    if (status === 'defaulted' && detail) warnings.push(detail)
+  }
 
   if (!draft || typeof draft !== 'object' || Array.isArray(draft)) {
-    warnings.push('draft 不是可解析的对象，已回退全默认参数')
+    note('draft', 'defaulted', 'draft 不是可解析的对象，已回退全默认参数')
+    provenance.push(...detectUnsupported(draft))
     return {
       params: parseTemplateParams({ ...DEFAULT_PARAMS, mode: 'flash' }),
       meta: {
@@ -148,6 +158,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
         bookTitles: [],
         warnings,
         structure: extractDraftStructure(draft),
+        provenance,
       },
     }
   }
@@ -164,18 +175,21 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     const height = typeof cc.height === 'number' ? cc.height : 960
     canvas = { width, height }
     if (width !== 720 || height !== 960) {
-      warnings.push(`画布尺寸非 720x960 (${width}x${height})，可能影响排版比例`)
+      note('canvas', 'defaulted', `画布尺寸非 720x960 (${width}x${height})，可能影响排版比例`)
+    } else {
+      note('canvas', 'extracted')
     }
   } catch {
-    warnings.push('canvas_config 解析失败，回退 720x960')
+    note('canvas', 'defaulted', 'canvas_config 解析失败，回退 720x960')
   }
 
   // ---- duration ----
   let durationMs = 0
   try {
     durationMs = usToMs(d.duration)
+    note('durationMs', 'extracted')
   } catch {
-    warnings.push('duration 解析失败')
+    note('durationMs', 'defaulted', 'duration 解析失败')
   }
 
   // ---- video 段数 ----
@@ -183,16 +197,18 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   try {
     const videoTrack = tracks.map(obj).find((t) => t.type === 'video')
     segmentCount = videoTrack ? arr(videoTrack.segments).length : 0
+    note('segmentCount', 'extracted')
   } catch {
-    warnings.push('video track 段数解析失败')
+    note('segmentCount', 'defaulted', 'video track 段数解析失败')
   }
 
   // ---- texts 索引 ----
   let textsById = new Map<string, ParsedText>()
   try {
     textsById = parseTexts(materials)
+    note('texts', 'extracted')
   } catch {
-    warnings.push('文字素材解析失败')
+    note('texts', 'defaulted', '文字素材解析失败')
   }
 
   // ---- fontsNeeded ----
@@ -204,12 +220,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     }
     fontsNeeded = Array.from(set)
     for (const f of fontsNeeded) {
-      if (!(f in FONT_FAMILY_MAP)) {
-        warnings.push(`字体「${f}」未在 family 映射表中，需人工确认`)
+      if (f in FONT_FAMILY_MAP) {
+        note(`fontsNeeded.${f}`, 'extracted')
+      } else {
+        note(`fontsNeeded.${f}`, 'defaulted', `字体「${f}」未在 family 映射表中，需人工确认`)
       }
     }
   } catch {
-    warnings.push('fontsNeeded 解析失败')
+    note('fontsNeeded', 'defaulted', 'fontsNeeded 解析失败')
   }
 
   // ---- bookTitles ----
@@ -226,10 +244,12 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     }
     bookTitles = Array.from(set)
     if (bookTitles.length === 0) {
-      warnings.push('未从文字素材中找到书名(《...》)')
+      note('bookTitles', 'defaulted', '未从文字素材中找到书名(《...》)')
+    } else {
+      note('bookTitles', 'extracted')
     }
   } catch {
-    warnings.push('bookTitles 解析失败')
+    note('bookTitles', 'defaulted', 'bookTitles 解析失败')
   }
 
   // 水印：文字里以 @ 开头的一行（如「@欧子好读」）→ 供导入时写进 overlayTemplate.watermark
@@ -239,16 +259,18 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       const line = t.text.trim()
       if (line.startsWith('@') && line.length > 1) { watermark = line; break }
     }
+    if (watermark) note('watermark', 'extracted')
   } catch {
-    warnings.push('水印解析失败')
+    note('watermark', 'defaulted', '水印解析失败')
   }
 
   // ---- sticker 段 ----
   let stickers: StickerSeg[] = []
   try {
     stickers = collectStickerSegs(tracks)
+    note('stickers', 'extracted')
   } catch {
-    warnings.push('sticker track 解析失败')
+    note('stickers', 'defaulted', 'sticker track 解析失败')
   }
 
   const isBookName = (text: string) => /《[^》]+》/.test(text)
@@ -270,11 +292,13 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       openTitleText = chosen.t!.text || openTitleText
       openDurationMs = usToMs(chosen.s.durationUs)
       openTitleMaterialId = chosen.s.materialId
+      note('open.titleText', 'extracted')
+      note('open.durationMs', 'extracted')
     } else {
-      warnings.push('未找到开场标题段，回退默认标题/时长')
+      note('open.titleText', 'defaulted', '未找到开场标题段，回退默认标题/时长')
     }
   } catch {
-    warnings.push('开场标题解析失败')
+    note('open.titleText', 'defaulted', '开场标题解析失败')
   }
 
   // ---- 开场动画（破镜重圆/收拢） ----
@@ -282,7 +306,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   try {
     const animMaterialsRaw = arr(materials.material_animations)
     if (animMaterialsRaw.length === 0) {
-      warnings.push('未找到动画素材(material_animations)，开场动画(破镜重圆)回退默认值')
+      note('open.shatter', 'defaulted', '未找到动画素材(material_animations)，开场动画(破镜重圆)回退默认值')
     } else {
       const animMaterials = animMaterialsRaw.map(obj)
       let found = false
@@ -298,9 +322,10 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
         if (found) break
       }
       shatter = found
+      note('open.shatter', 'extracted')
     }
   } catch {
-    warnings.push('开场动画解析失败')
+    note('open.shatter', 'defaulted', '开场动画解析失败')
   }
 
   // ---- 书名快闪 ----
@@ -318,11 +343,13 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       const durs = flashSegs.map((s) => usToMs(s.durationUs))
       flashPerClipMs = Math.round(durs.reduce((a, b) => a + b, 0) / durs.length)
       flashMinClipMs = Math.min(...durs)
+      note('flash.perClipMs', 'extracted')
+      note('flash.minClipMs', 'extracted')
     } else {
-      warnings.push('未找到书名快闪段，回退默认快闪时长')
+      note('flash.perClipMs', 'defaulted', '未找到书名快闪段，回退默认快闪时长')
     }
   } catch {
-    warnings.push('书名快闪解析失败')
+    note('flash.perClipMs', 'defaulted', '书名快闪解析失败')
   }
 
   // 画面节奏优先：主视频轨切出的三段结构比「靠《书名》文字段」稳（空白模板没有书名也能切）。
@@ -333,7 +360,8 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       flashPerClipMs = structure.flashPerClipMs
       flashMinClipMs = structure.flashMinClipMs
     }
-  } catch { warnings.push('画面节奏结构解析失败') }
+    note('structure', 'extracted')
+  } catch { note('structure', 'defaulted', '画面节奏结构解析失败') }
 
   // ---- 正片字幕样式 ----
   let subtitleFontFamily = DEFAULT_PARAMS.body.subtitleFontFamily
@@ -356,11 +384,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       }
       if (t?.colorHex) subtitleColor = t.colorHex
       subtitlePosY = transformYToNorm(chosen.y)
+      note('body.subtitleFontFamily', 'extracted')
+      note('body.subtitleColor', 'extracted')
+      note('body.subtitlePosY', 'extracted')
     } else {
-      warnings.push('未找到正片字幕段，回退默认字幕样式')
+      note('body.subtitleStyle', 'defaulted', '未找到正片字幕段，回退默认字幕样式')
     }
   } catch {
-    warnings.push('正片字幕样式解析失败')
+    note('body.subtitleStyle', 'defaulted', '正片字幕样式解析失败')
   }
 
   // ---- 转场 ----
@@ -382,11 +413,12 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
         }
       }
       transitionDurationMs = usToMs(best)
+      note('transition.durationMs', 'extracted')
     } else {
-      warnings.push('未找到转场素材，回退默认转场时长')
+      note('transition.durationMs', 'defaulted', '未找到转场素材，回退默认转场时长')
     }
   } catch {
-    warnings.push('转场解析失败')
+    note('transition.durationMs', 'defaulted', '转场解析失败')
   }
 
   // ---- Ken-Burns ----
@@ -394,7 +426,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   try {
     const animMaterialsRaw = arr(materials.material_animations)
     if (animMaterialsRaw.length === 0) {
-      warnings.push('未找到动画素材(material_animations)，Ken-Burns 回退默认值')
+      note('body.kenBurns', 'defaulted', '未找到动画素材(material_animations)，Ken-Burns 回退默认值')
     } else {
       const animMaterials = animMaterialsRaw.map(obj)
       let hasVideoAnim = false
@@ -410,9 +442,10 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
         if (hasVideoAnim) break
       }
       kenBurns = hasVideoAnim ? 'subtle' : 'off'
+      note('body.kenBurns', 'extracted')
     }
   } catch {
-    warnings.push('Ken-Burns 动画解析失败')
+    note('body.kenBurns', 'defaulted', 'Ken-Burns 动画解析失败')
   }
 
   // ---- 音频 ----
@@ -444,41 +477,50 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     }
 
     if (audioSegs.length === 0) {
-      warnings.push('未找到音频轨道，BGM 音量/音效回退默认值')
+      note('audio', 'defaulted', '未找到音频轨道，BGM 音量/音效回退默认值')
     } else {
       const picked = pickBgmSegment(draft)
-      if (picked) bgmVolume = picked.volume
-      else warnings.push('未找到有效 BGM 音量，回退默认 BGM 音量')
+      if (picked) {
+        bgmVolume = picked.volume
+        note('audio.bgmVolume', 'extracted')
+      } else {
+        note('audio.bgmVolume', 'defaulted', '未找到有效 BGM 音量，回退默认 BGM 音量')
+      }
 
       openGear = audioSegs.some((s) => /齿轮|旋钮|鼠标|单击|点击/.test(s.name))
       transitionDrop = audioSegs.some((s) => /水滴/.test(s.name))
+      note('audio.sfx.openGear', 'extracted')
+      note('audio.sfx.transitionDrop', 'extracted')
     }
   } catch {
-    warnings.push('音频解析失败')
+    note('audio', 'defaulted', '音频解析失败')
   }
 
   // ---- 调色 ----
   let grade: ReturnType<typeof extractDraftGrade> = null
   try {
     grade = extractDraftGrade(draft)
+    if (grade) note('grade', 'extracted')
   } catch {
-    warnings.push('调色解析失败')
+    note('grade', 'defaulted', '调色解析失败')
   }
 
   // ---- 运镜 ----
   let moves: ReturnType<typeof extractDraftMoves> = []
   try {
     moves = extractDraftMoves(draft)
+    if (moves.length > 0) note('motion.moves', 'extracted')
   } catch {
-    warnings.push('运镜解析失败')
+    note('motion.moves', 'defaulted', '运镜解析失败')
   }
 
   // ---- 字幕入场动画 ----
   let entrance: ReturnType<typeof extractSubtitleEntrance> = null
   try {
     entrance = extractSubtitleEntrance(draft)
+    if (entrance) note('body.subtitleEntrance', 'extracted')
   } catch {
-    warnings.push('字幕入场动画解析失败')
+    note('body.subtitleEntrance', 'defaulted', '字幕入场动画解析失败')
   }
 
   const built: Record<string, unknown> = {
@@ -502,6 +544,14 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     ...(moves.length ? { motion: { moves } } : {}),
   }
 
+  // 最后合入 detectUnsupported：草稿里确实存在、但渲染器做不到的结构（如独立特效轨），
+  // 与前面逐字段记录的 extracted/defaulted 一起构成完整的三态 provenance。
+  try {
+    provenance.push(...detectUnsupported(draft))
+  } catch {
+    // detectUnsupported 自身已 never throw，这里仅作双重保险，不产生新 warning
+  }
+
   const meta: DraftMeta = {
     canvas,
     durationMs,
@@ -510,6 +560,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     bookTitles,
     warnings,
     structure,
+    provenance,
     ...(watermark ? { watermark } : {}),
   }
 

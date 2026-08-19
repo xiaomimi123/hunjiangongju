@@ -69,7 +69,8 @@ function note(path: string, status: ProvenanceStatus, detail?: string)
 ### D 落库与展示
 
 - `schema.prisma` 的 `CopyFramework` 新增 `draftFidelityReport Json?`，照搬同文件 `degradedNote`（第 100 行）的可空列先例，配一个迁移。
-- `import/route.ts` 建框架时写入；`save/route.ts` 同理（两条导入路径都要，否则从「保存」进来的框架没有报告）。
+- `import/route.ts`：收到的是**原始草稿文件**，报告在服务端算，权威可信。
+- `save/route.ts`：只收 `{ name, templateParams }`（见 `web/app/admin/jianying/page.tsx:222`），**服务端拿不到原始草稿、无法重算**。改为额外接收一个可选的 `fidelityReport`——它由 parse 接口在服务端算出、经前端原样回传。这是**客户端可篡改**的数据，但该接口已限运营、且报告纯属信息性展示（不参与任何渲染或计费决策），可以接受；落库前做形状校验，非法直接丢弃而不是硬失败。两条路径都要写，否则走「保存」进来的框架没有报告。
 - `web/app/admin/frameworks/page.tsx`：在既有 `degradedNote` 角标（第 131-133 行）旁加一个「保真度 N/M」角标，`title` 悬浮显示明细。复用同一套 UI 模式，不新造。
 
 报告结构：

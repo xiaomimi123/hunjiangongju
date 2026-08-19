@@ -8,6 +8,7 @@ import { extractDraftStructure, type DraftStructure } from './draftStructure'
 import { extractDraftGrade } from './draftGrade'
 import { extractDraftMoves } from './draftMotion'
 import { extractDraftKeyframes, type KeyframeScale } from './draftKeyframes'
+import { extractDraftTransitions } from './draftTransitions'
 import { extractSubtitleEntrance } from './draftTextAnim'
 import { detectUnsupported, type ProvenanceEntry, type ProvenanceStatus } from './draftProvenance'
 
@@ -591,6 +592,37 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     note('motion.moves', 'defaulted', '运镜解析失败')
   }
 
+  // ---- 逐边界转场（阶段1）----
+  // 现有的 transition.durationMs 是全局众数，抹平了各边界差异、也把"没有转场"当成了"有转场"。
+  // 这里补两个字段：进正片那一刀是否硬切、正片内部边界的实测序列。老字段保留不动（零回归）。
+  let enterBodyHardCut: boolean | undefined
+  let bodyCycle: { renderType: 'crossfade' | 'wipe' | 'shard' | 'glide-push' | 'blur-dissolve'; durationMs: number }[] = []
+  try {
+    const boundaries = extractDraftTransitions(draft)
+    const roles = structure.segments
+    const isBody = (i: number) => roles.find((x) => x.index === i)?.role === 'body'
+    const firstBody = roles.find((x) => x.role === 'body')?.index
+    if (typeof firstBody === 'number' && firstBody > 0 && boundaries.length >= firstBody) {
+      enterBodyHardCut = boundaries[firstBody - 1] === null
+    }
+    // 正片内部边界：段 i 与 i+1 都是正片
+    bodyCycle = boundaries
+      .map((b, i) => ({ b, i }))
+      .filter(({ b, i }) => b !== null && isBody(i) && isBody(i + 1))
+      .map(({ b }) => ({ renderType: b!.renderType, durationMs: b!.durationMs }))
+    if (bodyCycle.length > 0) {
+      note('transition.perBoundary', 'extracted')
+      const unmapped = boundaries.filter((b) => b && !b.mapped)
+      if (unmapped.length > 0) {
+        note('transition.type', 'unsupported', `${unmapped.length} 处转场名未在映射表中，已退化为叠化`)
+      }
+    } else {
+      note('transition.perBoundary', 'defaulted', '未提取到逐边界转场，沿用全局众数时长', false)
+    }
+  } catch {
+    note('transition.perBoundary', 'defaulted', '逐边界转场解析失败', false)
+  }
+
   // ---- 字幕入场动画 ----
   let entrance: ReturnType<typeof extractSubtitleEntrance> = null
   try {
@@ -610,7 +642,12 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       titleFontFamily: DEFAULT_PARAMS.flash.titleFontFamily,
       ...(structure.flashScale !== 1 ? { scale: structure.flashScale } : {}),
     },
-    transition: { type: 'dissolve', durationMs: transitionDurationMs },
+    transition: {
+      type: 'dissolve',
+      durationMs: transitionDurationMs,
+      ...(typeof enterBodyHardCut === 'boolean' ? { enterBodyHardCut } : {}),
+      ...(bodyCycle.length ? { bodyCycle } : {}),
+    },
     body: {
       subtitleFontFamily, subtitleColor, subtitlePosY, kenBurns,
       ...(structure.bodyScale !== 1 ? { photoScale: structure.bodyScale } : {}),

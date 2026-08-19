@@ -174,3 +174,52 @@ describe('renderIndexHtml — flash 常驻书名头', () => {
     expect(html).toMatch(/\.bh1'[^\n]*opacity: 1[^\n]*, 4\)/)
   })
 })
+
+// 阶段1：逐边界转场。实测样例的 13 个边界只有 3 个有转场（300/500/500），
+// 快闪→正片那一刀是硬切；现有实现取全局众数套给所有边界，既抹平差异也把硬切当成了叠化。
+describe('renderIndexHtml — 逐边界转场', () => {
+  const withCycle = (extra: Record<string, unknown>): BodyData => ({
+    ...flashData,
+    templateParams: {
+      ...flashData.templateParams!,
+      transition: { type: 'dissolve' as const, durationMs: 500, ...extra },
+    },
+    segments: [
+      { seqNo: 1, startMs: 0, endMs: 4000, subtitle: '今天分享的是', imageIndex: 0 },
+      { seqNo: 2, startMs: 4000, endMs: 9000, subtitle: 'A', imageIndex: 1 },
+      { seqNo: 3, startMs: 9000, endMs: 14000, subtitle: 'B', imageIndex: 1 },
+      { seqNo: 4, startMs: 14000, endMs: 19000, subtitle: 'C', imageIndex: 1 },
+    ],
+  })
+
+  it('enterBodyHardCut=true → 第一个正片段不生成任何转场 tween（硬切）', () => {
+    const html = renderIndexHtml(withCycle({
+      enterBodyHardCut: true,
+      bodyCycle: [{ renderType: 'crossfade', durationMs: 300 }, { renderType: 'crossfade', durationMs: 500 }],
+    }))
+    // .s2 是第一个正片段：应只有运镜，没有以 4 秒为起点的叠化
+    expect(html).not.toContain(`tl.fromTo('.s2', { opacity: 0 }`)
+  })
+
+  it('后续边界按 bodyCycle 循环套用各自时长，而非全片统一', () => {
+    const html = renderIndexHtml(withCycle({
+      enterBodyHardCut: true,
+      bodyCycle: [{ renderType: 'crossfade', durationMs: 300 }, { renderType: 'crossfade', durationMs: 500 }],
+    }))
+    // .s3 用 cyc[0]=300ms，.s4 用 cyc[1]=500ms
+    expect(html).toContain('duration: 0.3')
+    expect(html).toContain('duration: 0.5')
+  })
+
+  it('enterBodyHardCut 未提取（undefined）→ 第一个正片段仍有转场，不误判成硬切', () => {
+    const html = renderIndexHtml(withCycle({
+      bodyCycle: [{ renderType: 'crossfade', durationMs: 300 }],
+    }))
+    expect(html).toContain(`tl.fromTo('.s2', { opacity: 0 }`)
+  })
+
+  it('回归红线：bodyCycle 缺省时输出与改动前一致（走全局众数那条老路径）', () => {
+    const html = renderIndexHtml(flashData)
+    expect(html).toContain(`tl.fromTo('.s2', { opacity: 0 }`)
+  })
+})

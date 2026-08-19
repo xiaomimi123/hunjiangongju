@@ -13,7 +13,17 @@ export interface TemplateParams {
   // hardCut：快闪卡之间瞬时切换、不做淡入。可选字段，缺省即维持既有的 0.12s 淡入，老框架零回归。
   // 依据是草稿的快闪段边界上有无转场素材（实测原工程是硬切，而我们一直在加淡入）。
   flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number; hardCut?: boolean }
-  transition: { type: 'dissolve'; durationMs: number }
+  // enterBodyHardCut：快闪→正片那一刀是不是硬切（实测样例即是）。
+  // bodyCycle：正片**内部**边界的实测转场，按序循环套用到我们的正片边界上。
+  // 分开表达而不是合成一个序列——正片段数与草稿不等，若把"进正片那一刀"混进循环，
+  // 循环回绕时会在正片中间冒出一个原片没有的硬切。两者分开就没有这个假象。
+  // 阶段2槽位对齐后可升级为真正的逐边界，届时这两个字段合并。
+  transition: {
+    type: 'dissolve'
+    durationMs: number
+    enterBodyHardCut?: boolean
+    bodyCycle?: { renderType: 'crossfade' | 'wipe' | 'shard' | 'glide-push' | 'blur-dissolve'; durationMs: number }[]
+  }
   body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
   grade?: GradeParams
@@ -60,7 +70,19 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       ...(typeof flash.scale === 'number' && Number.isFinite(flash.scale) ? { scale: flash.scale } : {}),
       ...(typeof flash.hardCut === 'boolean' ? { hardCut: flash.hardCut } : {}),
     },
-    transition: { type: 'dissolve', durationMs: num(tr.durationMs, D.transition.durationMs) },
+    transition: {
+      type: 'dissolve',
+      durationMs: num(tr.durationMs, D.transition.durationMs),
+      ...(typeof tr.enterBodyHardCut === 'boolean' ? { enterBodyHardCut: tr.enterBodyHardCut } : {}),
+      ...(Array.isArray(tr.bodyCycle)
+        ? {
+            bodyCycle: (tr.bodyCycle as unknown[])
+              .map((x) => obj(x))
+              .filter((x) => typeof x.durationMs === 'number' && Number.isFinite(x.durationMs) && typeof x.renderType === 'string')
+              .map((x) => ({ renderType: x.renderType as 'crossfade', durationMs: x.durationMs as number })),
+          }
+        : {}),
+    },
     body: {
       subtitleFontFamily: str(body.subtitleFontFamily, D.body.subtitleFontFamily),
       subtitleColor: str(body.subtitleColor, D.body.subtitleColor),

@@ -239,6 +239,22 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       // 没有额外的"是否真提取到"标记位可用，两害相权，保留"未提取到"这条路径的输出不变更重要。
       // 窗口同时不得超出当前段自身时长（否则叠化会拖进下一段边界），也不能低至 0（否则等价于硬切，没有叠化
       // 效果）——这里双向夹住，下限 0.05s。
+      // 逐边界转场（阶段1）：bodyCycle 非空时优先用实测序列。
+      // 第 1 个正片段对应「快闪→正片」那一刀，单独看 enterBodyHardCut（实测样例是硬切）；
+      // 其后的边界循环套用 bodyCycle。两者分开，避免循环回绕时在正片中间冒出原片没有的硬切。
+      const cyc = p.transition.bodyCycle ?? []
+      if (cyc.length > 0) {
+        if (i === 1) {
+          if (p.transition.enterBodyHardCut !== true) {
+            motionLines.push(transTweens('crossfade', n, s.startMs, cyc[0].durationMs / 1000))
+          }
+          // enterBodyHardCut === true → 硬切，不生成任何转场 tween
+        } else {
+          const b = cyc[((i - 2) % cyc.length + cyc.length) % cyc.length]
+          motionLines.push(transTweens(b.renderType, n, s.startMs, Math.max(0.05, Math.min(b.durationMs / 1000, Math.max(0.05, sec(s.endMs - s.startMs))))))
+        }
+        return
+      }
       const extractedWindowSec = p.transition.durationMs / 1000
       const segLenSec = sec(s.endMs - s.startMs)
       const transWindowSec = p.transition.durationMs !== DEFAULT_PARAMS.transition.durationMs

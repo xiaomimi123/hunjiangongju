@@ -39,12 +39,23 @@ export function flashCardsHtml(covers: FlashCover[], titleFontFamily: string, co
     .join('\n')
 }
 
-export function flashCardsTweens(covers: FlashCover[], t: FlashTimeline, bounceIn: boolean): string {
+// hardCut：快闪卡之间瞬时切换，不做任何淡入。
+// 依据实测——原剪映工程的快闪段边界上没有任何转场素材（转场只挂在正片那 3 个边界上），
+// 也没有对应的入场动画，就是硬切。而默认的 0.12s 淡入放在一张只有 150-250ms 的卡上，
+// 超过一半的生命花在渐显，节奏感被抹软。hardCut 与 bounceIn 互斥：硬切下不存在"入场过程"，
+// 弹入无处可施，故忽略 bounceIn。
+// 缺省 false，保证未接入草稿时间轴的老框架输出逐字节不变。
+export function flashCardsTweens(covers: FlashCover[], t: FlashTimeline, bounceIn: boolean, hardCut = false): string {
   const lines: string[] = []
   covers.forEach((_c, i) => {
     const n = i + 1
     const at = sec(t.openEndMs + i * t.perClipMs)
     const off = sec(t.openEndMs + (i + 1) * t.perClipMs)
+    if (hardCut) {
+      lines.push(`  tl.set('.fc${n}', { opacity: 1 }, ${at});`)
+      lines.push(`  tl.set('.fc${n}', { opacity: 0 }, ${off});`)
+      return
+    }
     const from = bounceIn ? `{ opacity: 0, scale: 0.86 }` : `{ opacity: 0 }`
     const to = bounceIn ? `opacity: 1, scale: 1` : `opacity: 1`
     lines.push(`  tl.fromTo('.fc${n}', ${from}, { ${to}, duration: 0.12, ease: 'back.out(2)' }, ${at});`)

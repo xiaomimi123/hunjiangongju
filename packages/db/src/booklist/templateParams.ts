@@ -10,7 +10,9 @@ export interface GradeParams { filterName: string; intensity: number; contrast: 
 export interface TemplateParams {
   mode: TemplateMode
   open: { durationMs: number; shatter: boolean; titleText: string; sfx: boolean }
-  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number }
+  // hardCut：快闪卡之间瞬时切换、不做淡入。可选字段，缺省即维持既有的 0.12s 淡入，老框架零回归。
+  // 依据是草稿的快闪段边界上有无转场素材（实测原工程是硬切，而我们一直在加淡入）。
+  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number; hardCut?: boolean }
   transition: { type: 'dissolve'; durationMs: number }
   body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
@@ -53,6 +55,7 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       bounceIn: bool(flash.bounceIn, D.flash.bounceIn),
       titleFontFamily: str(flash.titleFontFamily, D.flash.titleFontFamily),
       ...(typeof flash.scale === 'number' && Number.isFinite(flash.scale) ? { scale: flash.scale } : {}),
+      ...(typeof flash.hardCut === 'boolean' ? { hardCut: flash.hardCut } : {}),
     },
     transition: { type: 'dissolve', durationMs: num(tr.durationMs, D.transition.durationMs) },
     body: {

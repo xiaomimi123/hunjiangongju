@@ -55,3 +55,47 @@ describe('flashCards', () => {
     expect(h).not.toContain('transform')
   })
 })
+
+// 阶段1 发现B：原剪映工程的快闪段之间没有任何转场素材，是硬切；而我们给每张卡加了 0.12s 淡入
+// （bounceIn 时还叠 scale 弹入）。一张快闪卡只有 150-250ms，0.12s 淡入占掉超过一半生命，
+// 原片干脆利落、我们每张都糊一下——这是快闪节奏感丢失的直接原因。
+describe('flashCardsTweens —— 硬切模式', () => {
+  const covers = [
+    { title: '活着', coverSrc: 'c1.png' },
+    { title: '兄弟', coverSrc: 'c2.png' },
+  ]
+  const t = { openEndMs: 2000, perClipMs: 200, flashEndMs: 2400 }
+
+  it('hardCut=true → 用 tl.set 瞬时切换，不产生任何 fromTo 淡入', () => {
+    const out = flashCardsTweens(covers, t, true, true)
+    expect(out).not.toContain('fromTo')
+    expect(out).not.toContain('duration: 0.12')
+    // 每张卡两条：出现(set opacity 1) 与 消失(set opacity 0)
+    expect(out).toContain(`tl.set('.fc1', { opacity: 1 }, 2)`)
+    expect(out).toContain(`tl.set('.fc1', { opacity: 0 }, 2.2)`)
+    expect(out).toContain(`tl.set('.fc2', { opacity: 1 }, 2.2)`)
+    expect(out).toContain(`tl.set('.fc2', { opacity: 0 }, 2.4)`)
+  })
+
+  it('硬切模式下 bounceIn 不再产生 scale 弹入（硬切与弹入互斥）', () => {
+    expect(flashCardsTweens(covers, t, true, true)).not.toContain('scale')
+  })
+
+  it('回归红线：hardCut 缺省时输出与改动前逐字节相同', () => {
+    const EXPECTED_BOUNCE = [
+      `  tl.fromTo('.fc1', { opacity: 0, scale: 0.86 }, { opacity: 1, scale: 1, duration: 0.12, ease: 'back.out(2)' }, 2);`,
+      `  tl.set('.fc1', { opacity: 0 }, 2.2);`,
+      `  tl.fromTo('.fc2', { opacity: 0, scale: 0.86 }, { opacity: 1, scale: 1, duration: 0.12, ease: 'back.out(2)' }, 2.2);`,
+      `  tl.set('.fc2', { opacity: 0 }, 2.4);`,
+    ].join('\n')
+    expect(flashCardsTweens(covers, t, true)).toBe(EXPECTED_BOUNCE)
+
+    const EXPECTED_PLAIN = [
+      `  tl.fromTo('.fc1', { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'back.out(2)' }, 2);`,
+      `  tl.set('.fc1', { opacity: 0 }, 2.2);`,
+      `  tl.fromTo('.fc2', { opacity: 0 }, { opacity: 1, duration: 0.12, ease: 'back.out(2)' }, 2.2);`,
+      `  tl.set('.fc2', { opacity: 0 }, 2.4);`,
+    ].join('\n')
+    expect(flashCardsTweens(covers, t, false)).toBe(EXPECTED_PLAIN)
+  })
+})

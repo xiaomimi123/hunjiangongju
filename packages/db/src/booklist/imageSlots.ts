@@ -4,14 +4,17 @@
 // 「第 3 张图」在不同片子里对应不同位置，逐槽配置无从谈起。槽位数由草稿的正片 photo 段数锁定，
 // 文案反过来被规整成这个段数（见 fitSegments.ts）。
 //
-// 画风不在这里配：画风来自框架的 imageStylePrompt，逐槽 prompt 只管「画什么」。
-// 两者拼接——这样改一次画风所有槽位一起变，不用逐个改。
+// 画风默认来自框架的 imageStylePrompt，逐槽 prompt 只管「画什么」——这样改一次画风
+// 所有槽位一起变。但同一条片子里确实会出现「开场卡通人物头像、后面达芬奇」这种需求，
+// 所以额外给每个槽位开了 style 覆盖；留空即沿用框架全局画风。
 
 export interface ImageSlot {
   index: number
   source: 'ai' | 'library'
   /** source==='ai' 时的主体提示词；留空则回退 artScenes 场景池 */
   prompt?: string
+  /** source==='ai' 时覆盖本槽位画风；留空则用框架的 imageStylePrompt */
+  style?: string
   /** source==='library' 时限定素材文件夹；留空则全库 */
   folder?: string
 }
@@ -46,6 +49,7 @@ export function readImageSlots(overlayTemplate: unknown): ImageSlotConfig | null
       index,
       source,
       ...(typeof s.prompt === 'string' && s.prompt.trim() ? { prompt: s.prompt.trim() } : {}),
+      ...(typeof s.style === 'string' && s.style.trim() ? { style: s.style.trim() } : {}),
       ...(typeof s.folder === 'string' && s.folder.trim() ? { folder: s.folder.trim() } : {}),
     })
   }

@@ -5,7 +5,7 @@ import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
 import { pickAssetsForSegments, readAssetSource } from './stockAssets'
-import { pickArtScenes, buildFreeArtPrompt } from './artScenes'
+import { pickArtScenes, buildFreeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
 import { makeThumb } from '../thumb'
 
 // 缩略图是锦上添花，绝不能因它失败拖垮生成/上传主流程：ffmpeg 缺失、损坏输入等一律吞掉只记 warning。
@@ -93,16 +93,18 @@ export async function generateImage(genTaskId: string): Promise<void> {
       imageUrl = `/api/files/gen/${genTaskId}/${seg.seqNo}${ext}`
     } else {
       // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildFreeArtPrompt
-      // 内保底，配 negative_prompt 强力压制。
-      // 槽位配了 prompt 就用它当主体，否则回退场景池方向。画风始终来自框架的 imageStylePrompt。
-      const prompt = buildFreeArtPrompt(stylePrompt, slot?.prompt ?? scenes[i])
+      // 内保底，再配 negative_prompt 强力压制。人物不再被硬禁——由画风提示词决定。
+      // 槽位配了 prompt 就用它当主体，否则回退场景池方向。
+      // 画风优先用槽位自己的 style（支持「开场卡通头像、后面达芬奇」这种同片多画风），
+      // 未配则沿用框架的 imageStylePrompt。
+      const prompt = buildFreeArtPrompt(slot?.style ?? stylePrompt, slot?.prompt ?? scenes[i])
       // 单张文生图偶发 504/超时是瞬时错误，逐图重试而非让整任务失败。
       const png = await withRetry(
         () =>
           imageGenerate({
             prompt,
             size: '720x960',
-            negativePrompt: '人, 人物, 人脸, 人像, 手, person, people, human, face, portrait, man, woman, hands, 文字, 字, 汉字, 字母, 单词, 书法, 标题, 字幕, 水印, text, letters, words, caption, watermark, signature',
+            negativePrompt: IMAGE_NEGATIVE_PROMPT,
           }),
         {
           attempts: 3,

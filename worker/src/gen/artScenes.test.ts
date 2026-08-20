@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ART_SCENES, pickArtScenes, buildFreeArtPrompt } from './artScenes'
+import { ART_SCENES, pickArtScenes, buildFreeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
 
 describe('pickArtScenes', () => {
   it('同一 seed 结果稳定（同任务重跑一致）', () => {
@@ -27,6 +27,16 @@ describe('pickArtScenes', () => {
     for (const s of pickArtScenes('task-c', 10)) expect(ART_SCENES).toContain(s)
   })
 
+  // 场景池原本全是梵高的母题(向日葵田/鸢尾花丛/柏树与旋转的云/星夜)。画风换成达芬奇时,
+  // 题材还是梵高的——「同一模板、不同配图风格」这个目标直接卡死在这里。
+  // 池子只负责「让 N 张图彼此不同」,必须与流派无关。
+  it('场景方向与流派无关(不含任何画家专属母题)', () => {
+    const motifs = ['梵高', '向日葵', '鸢尾', '柏树', '星夜', '莫奈', '达芬奇', '浮世绘']
+    for (const scene of ART_SCENES) {
+      for (const m of motifs) expect(scene).not.toContain(m)
+    }
+  })
+
   it('n 为 0 或负数 → 空数组', () => {
     expect(pickArtScenes('task-a', 0)).toEqual([])
     expect(pickArtScenes('task-a', -1)).toEqual([])
@@ -44,12 +54,31 @@ describe('buildFreeArtPrompt', () => {
 
   it('提示词里不含任何文案内容（主体只来自场景方向）', () => {
     // 这条是本次改动的核心：配图提示词与口播文案完全脱钩
-    const p = buildFreeArtPrompt('某画风', '星空下的夜色')
-    expect(p).toBe('某画风，星空下的夜色，竖屏背景，纯画面，不出现任何文字、字幕或水印')
+    const p = buildFreeArtPrompt('某画风', '静谧的窗边')
+    expect(p).toBe('某画风，静谧的窗边，竖屏构图，不出现任何文字、字幕或水印')
   })
 
   it('画风为空时不留空段', () => {
-    expect(buildFreeArtPrompt('', '麦田')).toBe('麦田，竖屏背景，纯画面，不出现任何文字、字幕或水印')
+    expect(buildFreeArtPrompt('', '麦田')).toBe('麦田，竖屏构图，不出现任何文字、字幕或水印')
     expect(buildFreeArtPrompt('   ', '麦田')).not.toContain('，，')
+  })
+
+  // 「纯画面」语义含糊,会被模型读成「不要主体」,与卡通人物头像这类需求直接打架。
+  it('不再带「纯画面」这种会压制主体的措辞', () => {
+    expect(buildFreeArtPrompt('某画风', '某场景')).not.toContain('纯画面')
+  })
+})
+
+// 负向提示词原本硬禁人物(人/人脸/portrait/face...),开场的卡通人物头像根本出不来。
+// 人物与否改由画风提示词决定;负向提示词只保留「禁文字」——文案被画进图里会与字幕层
+// 叠字糊成乱码,这条是渲染层的硬需求,不能交给提示词碰运气。
+describe('IMAGE_NEGATIVE_PROMPT', () => {
+  it('只禁文字,不禁人物', () => {
+    for (const kw of ['文字', '字幕', '水印', 'text', 'watermark']) {
+      expect(IMAGE_NEGATIVE_PROMPT).toContain(kw)
+    }
+    for (const kw of ['人物', '人脸', '人像', 'person', 'people', 'face', 'portrait', 'human']) {
+      expect(IMAGE_NEGATIVE_PROMPT).not.toContain(kw)
+    }
   })
 })

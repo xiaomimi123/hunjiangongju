@@ -43,6 +43,10 @@ const STYLE_PRESETS = [
   { label: '厚涂油画', v: '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物,静物/自然/动物' },
   { label: '梵高风', v: '梵高后印象派风格,旋转笔触,厚重颜料肌理,鲜明蓝黄对比,星夜质感,无人物' },
   { label: '治愈插画', v: '极简性冷淡治愈系艺术插画,动物自然静物,留白构图,无人物' },
+  // 达芬奇的代表作多是人物画,不加「无人物」——负向提示词也已不再硬禁人物
+  { label: '达芬奇', v: '达芬奇文艺复兴油画风格,晕涂法柔和过渡,明暗对照,大地色调,古典构图' },
+  // 开场那张人物特写头像用;必须显式点名人物,否则画风提示词会把它带偏成风景
+  { label: '日系卡通头像', v: '日系动漫赛璐璐画风,少年人物面部特写,清透大眼,柔和高光,浅色调,干净背景' },
 ]
 
 export default function FrameworksPage() {
@@ -258,7 +262,7 @@ export default function FrameworksPage() {
                 const next = slots.filter((x) => x.index !== i)
                 const merged = { ...at(i), ...patch }
                 // 清掉空串,避免写出 {"prompt":""} 这种噪音
-                for (const k of ['prompt', 'folder']) {
+                for (const k of ['prompt', 'folder', 'style']) {
                   if (typeof merged[k] === 'string' && !(merged[k] as string).trim()) delete merged[k]
                 }
                 next.push(merged)
@@ -269,11 +273,12 @@ export default function FrameworksPage() {
                 <div className="block">
                   <span className="eyebrow">图片槽位（{count} 张正片配图）</span>
                   <p className="mt-1 text-xs text-ink3">
-                    提示词只写「画什么」；画风统一由上面的「图片风格提示词」决定，改一次全部槽位生效。
+                    提示词只写「画什么」。画风默认取上面的「图片风格提示词」，改一次全部槽位生效；
+                    个别槽位要不同画风（例如开场用卡通人物头像、后面用达芬奇），在该槽位单独填「画风」覆盖。
                   </p>
                   <div className="mt-2 space-y-2">
                     {Array.from({ length: count }, (_, i) => {
-                      const sl = at(i) as { source?: string; prompt?: string; folder?: string }
+                      const sl = at(i) as { source?: string; prompt?: string; folder?: string; style?: string }
                       const isAi = sl.source !== 'library'
                       return (
                         <div key={i} className="flex flex-wrap items-center gap-2 rounded border border-line px-2 py-2">
@@ -287,12 +292,20 @@ export default function FrameworksPage() {
                             <option value="library">素材库</option>
                           </select>
                           {isAi ? (
-                            <input
-                              className="field flex-1 text-xs"
-                              value={sl.prompt ?? ''}
-                              onChange={(e) => write(i, { prompt: e.target.value })}
-                              placeholder="画什么（留空则用内置场景池随机）"
-                            />
+                            <>
+                              <input
+                                className="field flex-1 text-xs"
+                                value={sl.prompt ?? ''}
+                                onChange={(e) => write(i, { prompt: e.target.value })}
+                                placeholder="画什么（留空则用内置场景池随机）"
+                              />
+                              <input
+                                className="field flex-1 text-xs"
+                                value={sl.style ?? ''}
+                                onChange={(e) => write(i, { style: e.target.value })}
+                                placeholder="画风（留空 = 用上面的全局画风）"
+                              />
+                            </>
                           ) : (
                             <input
                               className="field flex-1 text-xs"

@@ -5,7 +5,9 @@ describe('DEFAULT_IMAGE_STYLE', () => {
   it('导出非空的梵高后印象派默认画风兜底文案', () => {
     expect(DEFAULT_IMAGE_STYLE).toBeTruthy()
     expect(DEFAULT_IMAGE_STYLE).toContain('梵高')
-    // 「无人物」是硬约束：书单号配图出现人脸会很违和,且与 negative_prompt 一致
+    // 默认画风保守带「无人物」：不配画风时产出风景/静物最稳。
+    // 注意 negative_prompt 已不再硬禁人物(见 artScenes.ts:IMAGE_NEGATIVE_PROMPT)——
+    // 要人物的槽位自己写画风即可,不必再改这个兜底值。
     expect(DEFAULT_IMAGE_STYLE).toContain('无人物')
   })
 })

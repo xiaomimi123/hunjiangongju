@@ -11,16 +11,33 @@ describe('buildBodyGraph —— 输入与单段链', () => {
       { inputArgs: [], filter: '', outLabel: '', totalMs: 0 })
   })
 
-  it('每段一个 -loop 1 静图输入，时长写在 -t 上', () => {
+  // 时长按**整数帧**算：5703ms @30fps = 171.09 帧 → 171 帧 = 5.7s。
+  // -t 多给一帧的余量，实际长度由滤镜里的 trim=end_frame 决定。
+  it('每段一个 -loop 1 静图输入，时长按整数帧给足', () => {
     const g = buildBodyGraph({ ...base, segments: [seg({ imageAbs: '/x/1.png', durationMs: 5703 })] })
-    expect(g.inputArgs).toEqual(['-loop', '1', '-framerate', '30', '-t', '5.703', '-i', '/x/1.png'])
+    expect(g.inputArgs).toEqual(['-loop', '1', '-framerate', '30', '-t', '5.733', '-i', '/x/1.png'])
+    expect(g.filter).toContain('trim=end_frame=171')
+    expect(g.totalMs).toBe(5700)
+  })
+
+  // ★ 半帧截断会让后一段的 PTS 整体偏离 30fps 网格,拼接后末端的 fps=30 靠复制帧来补,
+  // 实测表现为连续 4 帧完全不动然后猛跳 —— 也就是肉眼看到的卡顿。
+  it('时长一律落在整帧上，不留半帧', () => {
+    const g = buildBodyGraph({ ...base, segments: [
+      seg({ durationMs: 5703 }), seg({ durationMs: 8064, transitionIn: null }), seg({ durationMs: 6067, transitionIn: null }),
+    ] })
+    for (const m of g.filter.matchAll(/trim=end_frame=(\d+)/g)) expect(Number.isInteger(+m[1])).toBe(true)
+    // 171 + 242 + 182 = 595 帧 = 19833.333ms
+    expect(Math.round(g.totalMs)).toBe(19833)
   })
 
   // zoompan 是在**输入分辨率**上按整数像素裁剪的，直接在 720×960 上做 1.0→1.1
   // 会因取整误差产生肉眼可见的抖动。必须先预放大。
-  it('运镜前先预放大（否则 zoompan 逐帧取整会抖）', () => {
+  // 预放大倍数不是随便取的：实测 2x 逐帧变化 19/40/19/40/42/12 剧烈起伏(台阶抖动),
+  // 8x 是 8/8/4/11/5/9 平稳。调小它等于用肉眼可见的抖动换一点内存。
+  it('运镜前预放大 8 倍（2 倍会有台阶式抖动）', () => {
     const g = buildBodyGraph({ ...base, segments: [seg({ motion: { scaleFrom: 1, scaleTo: 1.108 } })] })
-    expect(g.filter).toContain('scale=1440:1920')
+    expect(g.filter).toContain('scale=5760:7680')
     expect(g.filter).toContain('zoompan=')
   })
 
@@ -40,8 +57,8 @@ describe('buildBodyGraph —— 输入与单段链', () => {
   it('静态缩放（首尾相同但不为 1）仍保留创作者的构图', () => {
     const g = buildBodyGraph({ ...base, segments: [seg({ motion: { scaleFrom: 1.189, scaleTo: 1.189 } })] })
     expect(g.filter).not.toContain('zoompan')
-    // 1440/1.189≈1211、1920/1.189≈1615，再缩回画布
-    expect(g.filter).toContain('crop=1211:1615')
+    // 5760/1.189≈4844、7680/1.189≈6459，再缩回画布
+    expect(g.filter).toContain('crop=4844:6459')
   })
 })
 

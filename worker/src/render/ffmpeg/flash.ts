@@ -134,7 +134,17 @@ export function buildFlashPlan(o: FlashOpts): FlashPlan {
     ...graph.inputArgs,
     '-filter_complex', filter,
     '-map', '[vout]',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
+    // 中间产物用高质量(crf 18)而不是成片的 28。两个理由:
+    //
+    // 1. **它还要被重编一次**。body.mp4 交给 render-video 混音时会再编码一遍,
+    //    中间产物压得狠等于把损失叠加两次。中间产物近无损是通行做法。
+    // 2. **低码率会把慢速运镜量化掉**。预放大 8 倍后每帧位移约 0.5 像素,
+    //    x264 在 crf 28 下把这点残差直接编成 skip 块 —— 实测连续两帧完全不动、
+    //    再靠一次刷新补回来,肉眼就是卡顿。实测逐帧变化:
+    //      crf 28: 2 2 2 … 0 0 42   (两帧卡住)
+    //      crf 18: 6 4 5 4 4 4 4 …  (0 帧卡住)
+    //    文件大到 10MB/23秒,但它是临时文件,混完就删。
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
     '-pix_fmt', 'yuv420p', '-profile:v', 'high',
     '-an',
     o.outAbs,

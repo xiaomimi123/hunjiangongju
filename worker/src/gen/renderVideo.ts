@@ -136,7 +136,13 @@ export function buildFfmpegArgs(opts: {
   args.push(
     '-filter_complex', `${vfilter};${afilter}`,
     '-map', '[v]', '-map', '[a]',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-pix_fmt', 'yuv420p', '-profile:v', 'high',
+    // crf 24 而不是 28：**28 会把慢速运镜量化掉**。
+    // 推近很慢时每帧位移不到 1 像素，x264 在 crf 28 下把这点残差编成 skip 块——
+    // 实测同一条片子连续两帧完全不动、再靠一次刷新补回来，肉眼就是卡顿。
+    //   crf 28: 卡住 4/35 帧，1.8MB
+    //   crf 24: 卡住 0/35 帧，3.5MB
+    // 23 秒竖屏片多出 1.7MB，换掉一个肉眼可见的卡顿，划算。
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '24', '-pix_fmt', 'yuv420p', '-profile:v', 'high',
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart', '-shortest',
     outAbs,

@@ -41,9 +41,12 @@ describe('buildFfmpegArgs — SFX', () => {
       sfx: { gearAbs: 'gear.mp3', openEndSec: 3.0, flashEndSec: 3.0, dropAtSec: 3.0 } }).join(' ')
     expect(a).not.toContain('gear.mp3')
   })
-  it('编码加 -crf 28 压小体积', () => {
+  // 28 会把慢速运镜量化成 skip 块 —— 实测连续两帧完全不动再靠刷新补回来,
+  // 肉眼就是卡顿(crf 28 卡住 4/35 帧, crf 24 卡住 0/35)。**不要为了体积调回 28。**
+  it('编码用 crf 24（28 会把慢速运镜量化掉，产生卡顿）', () => {
     const a = buildFfmpegArgs({ bodyAbs:'b.mp4', audioAbs:'a.wav', bgmAbs:null, durSec:10, outAbs:'o.mp4' }).join(' ')
-    expect(a).toContain('-crf 28')
+    expect(a).toContain('-crf 24')
+    expect(a).not.toContain('-crf 28')
   })
 })
 

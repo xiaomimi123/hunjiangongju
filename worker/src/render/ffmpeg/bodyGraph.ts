@@ -42,14 +42,21 @@ export interface BodyGraph {
 /**
  * 运镜的预放大倍数。
  *
- * zoompan 是**在输入分辨率上按整数像素裁剪**的，直接对 720×960 的图做 1.0→1.1 缩放，
- * 每帧裁剪窗口的取整误差会表现成肉眼可见的抖动（画面一顿一顿地跳）。
- * 先把图放大到 PRESCALE 倍再 zoompan，同样的取整误差落在更细的网格上，抖动不可见。
- * 这是 zoompan 众所周知的坑，不是可选优化。
+ * zoompan 是**在输入分辨率上按整数像素裁剪**的。推近很慢（1.0→1.108 摊到 171 帧，
+ * 每帧 zoom 只变 0.00063），裁剪矩形的宽度每帧变化不足 1 像素，于是**连着几帧落在
+ * 同一个整数上、然后猛跳一格**——台阶式抖动，肉眼看就是画面一顿一顿。
  *
- * 取 2 是成本与效果的折中：再高只增加内存与带宽，抖动已经看不出来。
+ * 实测逐帧变化像素占比（同一段推近，只改预放大倍数）：
+ *   2x   19 40 19 40 42 12 19 20 47 …  剧烈起伏
+ *   4x   26 18 14 16 16 14 17 26 22 …  收敛中
+ *   8x    8  8  4 11  5  9  6  7  5 …  平稳
+ *  10x    7  6  7  8  7  8  4  9  8 …  几乎恒定
+ *
+ * 取 8：10x 只再好一点点，但缓冲区是 7200×9600（约 69M 像素），内存代价明显。
+ * 8x 是 5760×7680，实测渲染耗时与 2x 相当（瓶颈在缩放器不在分辨率）。
+ * **不要为了省内存把它调回 2 或 4** —— 那是用肉眼可见的抖动换一点点内存。
  */
-const PRESCALE = 2
+const PRESCALE = 8
 
 /**
  * 每一路视频流的归一化后缀。
@@ -66,9 +73,22 @@ function r3(x: number): number {
   return Math.round(x * 1000) / 1000
 }
 
-/** 单段：静图 → 预放大 → 运镜 → 定时长。产出标签 [vN] */
+/** 段时长换算成**整数帧**。所有时间计算都以它为准，见 segmentChain 的说明。 */
+function segFrames(s: FfBodySegment, fps: number): number {
+  return Math.max(1, Math.round((s.durationMs / 1000) * fps))
+}
+
+/**
+ * 单段：静图 → 预放大 → 运镜 → 定时长。产出标签 [vN]
+ *
+ * 时长用 `trim=end_frame=N` 而不是 `trim=duration=秒`。
+ * 原因：草稿给的时长（5703/8064/6067ms）换成帧是 171.09/241.92/182.01 帧，
+ * 都不是整数。按秒截断会让每段末尾停在半帧上，拼接后**后一段的 PTS 整体偏离
+ * 30fps 网格**，末端的 `fps=30` 只好靠复制帧来补——实测表现为连续 4 帧完全不动、
+ * 然后猛跳一下，也就是肉眼看到的卡顿。用帧号截断就没有半帧可言。
+ */
 function segmentChain(s: FfBodySegment, i: number, o: BodyGraphOpts): string {
-  const frames = Math.max(1, Math.round((s.durationMs / 1000) * o.fps))
+  const frames = segFrames(s, o.fps)
   const from = s.motion?.scaleFrom ?? 1
   const to = s.motion?.scaleTo ?? 1
   const pre = `[${i}:v]scale=${o.width * PRESCALE}:${o.height * PRESCALE}:force_original_aspect_ratio=increase,` +
@@ -82,7 +102,7 @@ function segmentChain(s: FfBodySegment, i: number, o: BodyGraphOpts): string {
       ? `scale=${o.width}:${o.height}`
       // 静态缩放：直接按倍数裁一块再缩回画布，等价于「定格在该缩放量上」
       : `crop=${Math.round((o.width * PRESCALE) / z)}:${Math.round((o.height * PRESCALE) / z)},scale=${o.width}:${o.height}`
-    return `${pre},${still},fps=${o.fps},trim=duration=${r3(s.durationMs / 1000)},setpts=PTS-STARTPTS,${norm(o.fps)}[v${i}]`
+    return `${pre},${still},fps=${o.fps},trim=end_frame=${frames},setpts=PTS-STARTPTS,${norm(o.fps)}[v${i}]`
   }
 
   // 逐帧线性插值，与剪映关键帧的语义一致（实测其控制点均为 (0,0) 即线性）。
@@ -90,7 +110,7 @@ function segmentChain(s: FfBodySegment, i: number, o: BodyGraphOpts): string {
   const denom = Math.max(1, frames - 1)
   const z = `'${r3(from)}+(${r3(to - from)})*on/${denom}'`
   return `${pre},zoompan=z=${z}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=${o.width}x${o.height}:fps=${o.fps},` +
-    `trim=duration=${r3(s.durationMs / 1000)},setpts=PTS-STARTPTS,${norm(o.fps)}[v${i}]`
+    `trim=end_frame=${frames},setpts=PTS-STARTPTS,${norm(o.fps)}[v${i}]`
 }
 
 /**
@@ -110,28 +130,31 @@ export function buildBodyGraph(o: BodyGraphOpts): BodyGraph {
 
   const inputArgs: string[] = []
   const chains: string[] = []
+  // 帧对齐后的每段时长（ms）。后面所有累计、转场 offset 都以它为准——
+  // 与滤镜里的 trim=end_frame 保持同一套算法，避免「算出来的时间」和「渲出来的时间」不一致。
+  const durMs = segs.map((s) => (segFrames(s, o.fps) / o.fps) * 1000)
   for (const [i, s] of segs.entries()) {
-    // -loop 1 把静图变成无限帧流，-t 限定时长；framerate 与输出一致，避免后续重采样
-    inputArgs.push('-loop', '1', '-framerate', String(o.fps), '-t', r3(s.durationMs / 1000).toString(), '-i', s.imageAbs)
+    // -loop 1 把静图变成无限帧流，-t 给足（多给一帧，实际长度由 trim=end_frame 决定）
+    inputArgs.push('-loop', '1', '-framerate', String(o.fps), '-t', r3((segFrames(s, o.fps) + 1) / o.fps).toString(), '-i', s.imageAbs)
     chains.push(segmentChain(s, i, o))
   }
 
   let acc = 'v0'
-  let accMs = segs[0].durationMs
+  let accMs = durMs[0]
   for (let i = 1; i < segs.length; i++) {
     const s = segs[i]
     const next = `m${i}`
     const hard = s.transitionIn == null
     if (hard) {
       chains.push(`[${acc}][v${i}]concat=n=2:v=1:a=0,${norm(o.fps)}[${next}]`)
-      accMs += s.durationMs
+      accMs += durMs[i]
     } else {
       // 转场窗口不得超过相邻两段中较短者，否则 xfade 会吃掉整段甚至报错
-      const maxMs = Math.min(accMs, s.durationMs)
+      const maxMs = Math.min(accMs, durMs[i])
       const dMs = Math.max(1, Math.min(s.transitionMs ?? 400, maxMs))
       const offset = r3((accMs - dMs) / 1000)
       chains.push(`[${acc}][v${i}]xfade=transition=fade:duration=${r3(dMs / 1000)}:offset=${offset}[${next}]`)
-      accMs += s.durationMs - dMs
+      accMs += durMs[i] - dMs
     }
     acc = next
   }

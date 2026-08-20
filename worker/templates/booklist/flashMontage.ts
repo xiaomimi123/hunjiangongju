@@ -53,10 +53,16 @@ export function flashCardsHtml(covers: FlashCover[], titleFontFamily: string, co
 // docs/superpowers/specs/2026-08-19-timeline-transitions-motion-design.md §二D1。
 export function flashCardsTweens(covers: FlashCover[], t: FlashTimeline, bounceIn: boolean, hardCut = false): string {
   const lines: string[] = []
+  // offsets 存在时按草稿的逐卡时长排布（长短相间的律动才是卡点的本质）；
+  // 否则回退 perClipMs 等分，保证老框架输出不变。
+  const startOf = (i: number) =>
+    t.offsets ? t.openEndMs + t.offsets[i] : t.openEndMs + i * t.perClipMs
+  const endOf = (i: number) =>
+    t.offsets ? (i + 1 < t.offsets.length ? t.openEndMs + t.offsets[i + 1] : t.flashEndMs) : t.openEndMs + (i + 1) * t.perClipMs
   covers.forEach((_c, i) => {
     const n = i + 1
-    const at = sec(t.openEndMs + i * t.perClipMs)
-    const off = sec(t.openEndMs + (i + 1) * t.perClipMs)
+    const at = sec(startOf(i))
+    const off = sec(endOf(i))
     if (hardCut) {
       lines.push(`  tl.set('.fc${n}', { opacity: 1 }, ${at});`)
       lines.push(`  tl.set('.fc${n}', { opacity: 0 }, ${off});`)

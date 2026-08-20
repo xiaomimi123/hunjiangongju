@@ -12,7 +12,11 @@ export interface TemplateParams {
   open: { durationMs: number; shatter: boolean; titleText: string; sfx: boolean }
   // hardCut：快闪卡之间瞬时切换、不做淡入。可选字段，缺省即维持既有的 0.12s 淡入，老框架零回归。
   // 依据是草稿的快闪段边界上有无转场素材（实测原工程是硬切，而我们一直在加淡入）。
-  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number; hardCut?: boolean }
+  // clipMs：草稿里每张快闪卡的实际时长序列。原工程各卡长短不一（如 150/251/195/191…），
+  // 而 flashTimeline 原本用 win/count 等分窗口，九张卡必然等间隔——实测成片切点偏差最大 58.7ms
+  // （近两帧）。有此字段时按其**相对比例**排布（窗口长度由第0段配音时长决定，未必等于草稿，
+  // 所以只能保比例不能照抄绝对毫秒；长短相间的律动才是卡点的本质）。
+  flash: { perClipMs: number; minClipMs: number; bounceIn: boolean; titleFontFamily: string; scale?: number; hardCut?: boolean; clipMs?: number[] }
   // enterBodyHardCut：快闪→正片那一刀是不是硬切（实测样例即是）。
   // bodyCycle：正片**内部**边界的实测转场，按序循环套用到我们的正片边界上。
   // 分开表达而不是合成一个序列——正片段数与草稿不等，若把"进正片那一刀"混进循环，
@@ -72,6 +76,13 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       titleFontFamily: str(flash.titleFontFamily, D.flash.titleFontFamily),
       ...(typeof flash.scale === 'number' && Number.isFinite(flash.scale) ? { scale: flash.scale } : {}),
       ...(typeof flash.hardCut === 'boolean' ? { hardCut: flash.hardCut } : {}),
+      ...(Array.isArray(flash.clipMs)
+        ? {
+            clipMs: (flash.clipMs as unknown[]).filter(
+              (x): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0,
+            ),
+          }
+        : {}),
     },
     transition: {
       type: 'dissolve',
@@ -134,7 +145,14 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
   }
 }
 
-export interface FlashTimeline { openEndMs: number; flashEndMs: number; perClipMs: number; count: number }
+export interface FlashTimeline {
+  openEndMs: number
+  flashEndMs: number
+  perClipMs: number
+  count: number
+  /** 各卡相对 openEndMs 的起点偏移(ms)；仅在草稿提供逐卡时长时存在，否则用 perClipMs 等分 */
+  offsets?: number[]
+}
 
 // 快闪落在第 0 段时间窗内：开场 [0,openEndMs] + 快闪 [openEndMs,seg0EndMs] 均分 N 本。
 export function flashTimeline(p: TemplateParams, seg0EndMs: number, bookCount: number): FlashTimeline {
@@ -143,5 +161,21 @@ export function flashTimeline(p: TemplateParams, seg0EndMs: number, bookCount: n
   if (count === 0) return { openEndMs, flashEndMs: seg0EndMs, perClipMs: 0, count: 0 }
   const win = Math.max(0, seg0EndMs - openEndMs)
   const perClipMs = Math.max(p.flash.minClipMs, win / count)
+
+  // 逐卡时长：按相对比例缩放到实际窗口。卡数多于草稿条目时循环复用比例。
+  const raw = (p.flash.clipMs ?? []).filter((x) => Number.isFinite(x) && x > 0)
+  if (raw.length > 0 && win > 0) {
+    const weights = Array.from({ length: count }, (_, i) => raw[i % raw.length])
+    const total = weights.reduce((a, b) => a + b, 0)
+    if (total > 0) {
+      const offsets: number[] = []
+      let acc = 0
+      for (const w of weights) {
+        offsets.push(Math.round(acc))
+        acc += (w / total) * win
+      }
+      return { openEndMs, flashEndMs: seg0EndMs, perClipMs, count, offsets }
+    }
+  }
   return { openEndMs, flashEndMs: seg0EndMs, perClipMs, count }
 }

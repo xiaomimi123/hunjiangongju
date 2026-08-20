@@ -592,6 +592,16 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     note('motion.moves', 'defaulted', '运镜解析失败')
   }
 
+  // ---- 快闪逐卡时长 ----
+  let flashClipMs: number[] = []
+  try {
+    flashClipMs = structure.segments.filter((x) => x.role === 'flash').map((x) => x.durationMs).filter((x) => x > 0)
+    if (flashClipMs.length > 1) note('flash.clipMs', 'extracted')
+    else note('flash.clipMs', 'defaulted', '未提取到逐卡时长，快闪按平均值等分', false)
+  } catch {
+    note('flash.clipMs', 'defaulted', '快闪逐卡时长解析失败', false)
+  }
+
   // ---- 逐边界转场（阶段1）----
   // 现有的 transition.durationMs 是全局众数，抹平了各边界差异、也把"没有转场"当成了"有转场"。
   // 这里补两个字段：进正片那一刀是否硬切、正片内部边界的实测序列。老字段保留不动（零回归）。
@@ -641,6 +651,9 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       bounceIn: DEFAULT_PARAMS.flash.bounceIn,
       titleFontFamily: DEFAULT_PARAMS.flash.titleFontFamily,
       ...(structure.flashScale !== 1 ? { scale: structure.flashScale } : {}),
+      // 逐卡时长：原工程各卡长短不一(150/251/195/191…)，只给平均值会让渲染层等分排布，
+      // 实测切点偏差最大 58.7ms(近两帧)。渲染层按相对比例缩放到实际窗口。
+      ...(flashClipMs.length > 1 ? { clipMs: flashClipMs } : {}),
     },
     transition: {
       type: 'dissolve',

@@ -99,3 +99,47 @@ describe('body.subtitleEntrance 可选字段', () => {
     expect(parseTemplateParams({ body: { subtitleEntrance: '' } }).body.subtitleEntrance).toBeUndefined()
   })
 })
+
+// 原工程每张快闪卡时长各不相同(150/251/195/191/204/197/189/222/221ms),
+// 而 flashTimeline 用 win/count 等分窗口,九张卡必然等间隔——实测成片切点偏差最大 58.7ms(近两帧)。
+// 修法:保留草稿的相对节奏比例,缩放到实际窗口(窗口长度由第0段配音时长决定,未必等于草稿)。
+describe('flashTimeline —— 逐卡时长', () => {
+  const base = { ...DEFAULT_PARAMS, mode: 'flash' as const }
+
+  it('无 clipMs → 维持等分行为(零回归)', () => {
+    const t = flashTimeline(base, 4000, 4)
+    expect(t.offsets).toBeUndefined()
+    expect(t.perClipMs).toBeGreaterThan(0)
+  })
+
+  it('有 clipMs → 按相对比例给出各卡起点偏移', () => {
+    const p = { ...base, flash: { ...base.flash, clipMs: [100, 300, 100, 300] } }
+    // 窗口 = 4000 - openEnd；比例 1:3:1:3 应原样保留
+    const t = flashTimeline(p, 4000, 4)
+    expect(t.offsets).toHaveLength(4)
+    const d = t.offsets!.map((o, i) => (i + 1 < t.offsets!.length ? t.offsets![i + 1] - o : t.flashEndMs - t.openEndMs - o))
+    // 第2段应约为第1段的3倍
+    expect(d[1] / d[0]).toBeCloseTo(3, 1)
+    expect(d[3] / d[2]).toBeCloseTo(3, 1)
+  })
+
+  it('各卡时长之和恰好填满窗口(不留空、不溢出)', () => {
+    const p = { ...base, flash: { ...base.flash, clipMs: [150, 251, 195, 191] } }
+    const t = flashTimeline(p, 5000, 4)
+    const win = t.flashEndMs - t.openEndMs
+    expect(t.offsets![0]).toBe(0)
+    expect(t.offsets![3]).toBeLessThan(win)
+  })
+
+  it('卡数多于 clipMs 条目 → 循环复用比例,不越界', () => {
+    const p = { ...base, flash: { ...base.flash, clipMs: [100, 300] } }
+    const t = flashTimeline(p, 4000, 5)
+    expect(t.offsets).toHaveLength(5)
+    expect(t.offsets!.every((o, i) => i === 0 || o > t.offsets![i - 1])).toBe(true)
+  })
+
+  it('clipMs 全为 0 或负 → 忽略,回退等分(防除零)', () => {
+    const p = { ...base, flash: { ...base.flash, clipMs: [0, 0, 0] } }
+    expect(flashTimeline(p, 4000, 3).offsets).toBeUndefined()
+  })
+})

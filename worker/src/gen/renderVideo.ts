@@ -59,6 +59,9 @@ function probeVideo(mp4Abs: string): { width: number; height: number; hasAudio: 
   return { width, height, hasAudio }
 }
 
+/** 水滴音有效长度（秒）。客户样例草稿把 1.595s 的素材截到 0.530s，只取起手那一声。 */
+const DROP_LEN_SEC = 0.53
+
 /** 构造 ffmpeg 参数：body 视觉 + 整篇配音（+可选 BGM/SFX）+ loudnorm，输出 final.mp4 */
 export function buildFfmpegArgs(opts: {
   bodyAbs: string
@@ -67,15 +70,19 @@ export function buildFfmpegArgs(opts: {
   durSec: number
   outAbs: string
   bgmVolume?: number
-  sfx?: { gearAbs?: string; dropAbs?: string; openEndSec: number; dropAtSec: number }
+  sfx?: { gearAbs?: string; dropAbs?: string; openEndSec: number; flashEndSec: number; dropAtSec: number }
 }): string[] {
   const { bodyAbs, audioAbs, bgmAbs, durSec, outAbs, sfx } = opts
   const bgmVol = typeof opts.bgmVolume === 'number' ? opts.bgmVolume : 0.32
   const args = ['-y', '-i', bodyAbs, '-i', audioAbs]
   let idx = 2
   let bgmIdx = -1, gearIdx = -1, dropIdx = -1
+  // 快闪窗口 = [开场结束, 快闪结束]，齿轮音铺满它。窗口非法（时长 <= 0）时整条不混入——
+  // 负时长会让 ffmpeg 的 atrim 直接产出空流，混进 amix 后是一路静音输入，排查起来毫无线索。
+  const gearLenSec = sfx ? sfx.flashEndSec - sfx.openEndSec : 0
+  const gearOk = !!sfx?.gearAbs && gearLenSec > 0
   if (bgmAbs) { args.push('-stream_loop', '-1', '-i', bgmAbs); bgmIdx = idx++ }
-  if (sfx?.gearAbs) { args.push('-i', sfx.gearAbs); gearIdx = idx++ }
+  if (gearOk) { args.push('-i', sfx!.gearAbs!); gearIdx = idx++ }
   if (sfx?.dropAbs) { args.push('-i', sfx.dropAbs); dropIdx = idx++ }
 
   // 开场特效（ffmpeg 层，逐帧滤镜，可靠——HyperFrames 渲不出开场动画，故在合成阶段补）：
@@ -93,8 +100,28 @@ export function buildFfmpegArgs(opts: {
   const chains: string[] = [`[1:a]aresample=48000,${VOICE_FX},volume=1.0[voice]`]
   const mixLabels = ['[voice]']
   if (bgmIdx >= 0) { chains.push(`[${bgmIdx}:a]atrim=0:${durSec.toFixed(3)},aresample=48000,volume=${bgmVol}[bgm]`); mixLabels.push('[bgm]') }
-  if (gearIdx >= 0) { chains.push(`[${gearIdx}:a]aresample=48000,atrim=0:${(sfx!.openEndSec).toFixed(3)},volume=0.7[gear]`); mixLabels.push('[gear]') }
-  if (dropIdx >= 0) { chains.push(`[${dropIdx}:a]aresample=48000,adelay=${Math.round(sfx!.dropAtSec * 1000)}|${Math.round(sfx!.dropAtSec * 1000)},volume=0.6[drop]`); mixLabels.push('[drop]') }
+  // 齿轮音：起点 = 开场结束，长度 = 快闪段时长。
+  // 原实现是 `atrim=0:openEndSec` 且不加 adelay —— 把「开场结束的时间点」当成了「时长」，
+  // 结果从 0 秒起播、整段盖在开场上，开场一结束就断。实测客户样例草稿是 2.159s→3.983s，
+  // 即**正好铺满 9 张书封的快闪轮播**，与开场无关。
+  if (gearIdx >= 0) {
+    const gearMs = Math.round(sfx!.openEndSec * 1000)
+    chains.push(
+      `[${gearIdx}:a]aresample=48000,atrim=0:${gearLenSec.toFixed(3)},asetpts=PTS-STARTPTS,` +
+        `adelay=${gearMs}|${gearMs},volume=0.7[gear]`,
+    )
+    mixLabels.push('[gear]')
+  }
+  // 水滴音：草稿把 1.595s 的素材只用了 0.530s（截断，不留尾音），音量 0.51（约为齿轮的一半）。
+  // 不截断会让水声一直拖进正片第一句台词。
+  if (dropIdx >= 0) {
+    const dropMs = Math.round(sfx!.dropAtSec * 1000)
+    chains.push(
+      `[${dropIdx}:a]aresample=48000,atrim=0:${DROP_LEN_SEC.toFixed(3)},asetpts=PTS-STARTPTS,` +
+        `adelay=${dropMs}|${dropMs},volume=0.36[drop]`,
+    )
+    mixLabels.push('[drop]')
+  }
 
   const afilter = mixLabels.length === 1
     ? `[1:a]aresample=48000,${VOICE_FX},loudnorm=I=-14:TP=-1:LRA=7,${aformat}[a]`
@@ -140,11 +167,11 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
   const timings = Array.isArray(genTask.bodyTimings) ? (genTask.bodyTimings as unknown as Timing[]) : []
   const sortedTimings = [...timings].sort((a, b) => a.startMs - b.startMs)
 
-  // flash 模板：把开场齿轮音 + 快闪→正文转场水滴音混进合成音轨；classic 模板不带 SFX（原行为）。
+  // flash 模板：把快闪段齿轮音 + 快闪→正文转场水滴音混进合成音轨；classic 模板不带 SFX（原行为）。
   const params = parseTemplateParams(
     (genTask.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
   )
-  let sfx: { gearAbs?: string; dropAbs?: string; openEndSec: number; dropAtSec: number } | undefined
+  let sfx: { gearAbs?: string; dropAbs?: string; openEndSec: number; flashEndSec: number; dropAtSec: number } | undefined
   let bgmVolume: number | undefined
   if (params.mode === 'flash') {
     const seg0EndMs = sortedTimings[0]?.endMs ?? 0
@@ -155,6 +182,7 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
     // SFX 需同时满足：模板开关开启(params.audio.sfx.*) + 资源文件存在
     sfx = {
       openEndSec: tl.openEndMs / 1000,
+      flashEndSec: tl.flashEndMs / 1000,
       dropAtSec: tl.flashEndMs / 1000,
       ...(params.audio.sfx.openGear && existsSync(gearAbs) ? { gearAbs } : {}),
       ...(params.audio.sfx.transitionDrop && existsSync(dropAbs) ? { dropAbs } : {}),

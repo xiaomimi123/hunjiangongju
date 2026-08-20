@@ -223,3 +223,56 @@ describe('renderIndexHtml — 逐边界转场', () => {
     expect(html).toContain(`tl.fromTo('.s2', { opacity: 0 }`)
   })
 })
+
+// ——— 复现并守住线上报的两个缺陷 ———
+describe('renderIndexHtml — 快闪→正片硬切 + 水波纹', () => {
+  const withHardCut = (extra: Record<string, unknown> = {}): BodyData => ({
+    ...flashData,
+    templateParams: parseTemplateParams({
+      mode: 'flash',
+      transition: {
+        type: 'dissolve',
+        durationMs: DEFAULT_PARAMS.transition.durationMs,
+        enterBodyHardCut: true,
+        bodyCycle: [{ renderType: 'crossfade', durationMs: 500 }],
+      },
+      ...extra,
+    }),
+  })
+
+  // 线上现象：书封快闪放完后，开场那张 AI 图又回来了，一直挂到下一个正片段淡入。
+  // 根因是硬切被实现成「不生成任何 tween」，而 .scene 的 CSS 默认 opacity:0——
+  // 于是 .s2 永不出现、.s1 永不消失。
+  it('硬切必须显式点亮正片第 1 段并关掉开场段', () => {
+    const html = renderIndexHtml(withHardCut())
+    expect(html).toContain("tl.set('.s2', { opacity: 1 }, 4)")
+    expect(html).toContain("tl.set('.s1', { opacity: 0 }, 4)")
+  })
+
+  it('叠化路径不受影响（仍走 transTweens，不产出硬切 set）', () => {
+    const html = renderIndexHtml({
+      ...flashData,
+      templateParams: parseTemplateParams({
+        mode: 'flash',
+        transition: { type: 'dissolve', durationMs: DEFAULT_PARAMS.transition.durationMs,
+          enterBodyHardCut: false, bodyCycle: [{ renderType: 'crossfade', durationMs: 500 }] },
+      }),
+    })
+    expect(html).toContain("tl.fromTo('.s2', { opacity: 0 }, { opacity: 1, duration: 0.5")
+    expect(html).not.toContain("tl.set('.s2', { opacity: 1 }, 4)")
+  })
+
+  // 水波纹与水滴音配对：草稿里它压在快闪结束那一刀上（偏移 +7ms、458ms）
+  it('配了 ripple → 波纹层与 tween 都在，起点 = 快闪结束 + 偏移', () => {
+    const html = renderIndexHtml(withHardCut({ effects: { ripple: { offsetMs: 7, durationMs: 458 } } }))
+    expect(html).toContain('class="ripple" data-layout-ignore')
+    expect(html).toContain('.rp-ring{')                       // CSS 也要注入
+    expect(html).toContain("tl.set('.ripple', { opacity: 1 }, 4.007)")  // 4000+7ms
+  })
+
+  it('没配 ripple → 波纹层与 CSS 都不出现（老框架零回归）', () => {
+    const html = renderIndexHtml(withHardCut())
+    expect(html).not.toContain('class="ripple"')
+    expect(html).not.toContain('.rp-ring{')
+  })
+})

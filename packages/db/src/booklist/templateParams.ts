@@ -35,6 +35,10 @@ export interface TemplateParams {
   // 与 moves 的区别：moves 是把曲线归类成 6 种预设招式、幅度硬编码；keyframes 是照抄原值。
   // 两者并存：keyframes 非空时优先，为空时回退 moves，老框架零回归。
   motion?: { moves: MoveId[]; keyframes?: { scaleFrom: number; scaleTo: number }[] }
+  // effects：草稿 effect 轨上的特效。目前只支持水波纹（样例里唯一出现的一种）。
+  // ripple.offsetMs 是**相对快闪结束那一刀**的偏移，不是绝对时间——我们的分镜时长由 TTS
+  // 决定、与草稿不等长，照搬绝对秒数必然落在别的画面上。理由详见 draftEffects.ts:deriveRipple。
+  effects?: { ripple?: { offsetMs: number; durationMs: number } }
 }
 
 /** 渲染器实际支持的转场类型白名单（与 worker/templates/booklist/motion.ts 的 TransId 对齐） */
@@ -142,6 +146,14 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
           },
         }
       : {}),
+    // effects.ripple：两个字段都必须是有限数才收，脏项整块丢弃（缺一个就无法定位/定长）
+    ...(() => {
+      const rp = obj(obj(r.effects).ripple)
+      return typeof rp.offsetMs === 'number' && Number.isFinite(rp.offsetMs) &&
+        typeof rp.durationMs === 'number' && Number.isFinite(rp.durationMs) && rp.durationMs > 0
+        ? { effects: { ripple: { offsetMs: rp.offsetMs, durationMs: rp.durationMs } } }
+        : {}
+    })(),
   }
 }
 

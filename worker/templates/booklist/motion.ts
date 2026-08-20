@@ -86,6 +86,22 @@ export function pickTrans(seqNo: number, offset: number): TransId {
 export const DEFAULT_TRANS_WINDOW = 0.72 // crossfade 窗口秒数（所有转场共用默认值，不占额外时长）
 
 /**
+ * 硬切：新场景瞬时出现、旧场景瞬时消失，无过渡。
+ *
+ * 为什么需要显式的一对 set：`.scene` 的 CSS 默认是 `opacity: 0`（layout.ts），
+ * 场景靠转场 tween 才被点亮。原实现把「硬切」写成「不生成任何 tween」，
+ * 于是新场景永远不出现、旧场景永远不消失——实拍表现是书封快闪放完后
+ * 开场那张图又回来了，一直挂到下一个正片段淡入才被盖掉。
+ * 「没有过渡」不等于「没有切换」。
+ */
+export function hardCutTweens(n: number, boundaryMs: number): string {
+  const b = sec(boundaryMs)
+  const lines = [`  tl.set('.s${n}', { opacity: 1 }, ${b});`]
+  if (n > 1) lines.push(`  tl.set('.s${n - 1}', { opacity: 0 }, ${b});`)
+  return lines.join('\n')
+}
+
+/**
  * 进入场景 n（上一场景 n-1）的转场，全部落在 boundarySec 起的 windowSec 窗内。
  * windowSec 缺省=DEFAULT_TRANS_WINDOW，保证不传参数时输出与改动前逐字节一致
  * （剪映工程提取到 transition.durationMs 时由调用方传入覆盖，见 indexHtml.ts flash 分支）。

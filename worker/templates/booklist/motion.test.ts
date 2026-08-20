@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW, keyframeTween } from './motion'
+import { MOVES, pickMove, moveTweens, TRANS, pickTrans, transTweens, shardGrid, shardOpeningTweens, DEFAULT_TRANS_WINDOW, keyframeTween, hardCutTweens } from './motion'
 
 describe('pickMove', () => {
   it('确定性、相邻 seqNo 不撞招', () => {
@@ -198,5 +198,21 @@ describe('keyframeTween —— 静态缩放段（有 clip.scale 但无关键帧�
 
   it('首尾相同且为 1 → 仍返回空串（scale 1 无需任何 transform）', () => {
     expect(keyframeTween({ scaleFrom: 1, scaleTo: 1 }, 1, 0, 3000)).toBe('')
+  })
+})
+
+// 硬切原本被实现成「不生成任何 tween」。但 .scene 的 CSS 默认 opacity:0(layout.ts),
+// 于是新场景永远不出现、旧场景永远不消失——实拍表现是「书封快闪放完，开场那张图又回来了,
+// 一直挂到下一个正片段淡入才被盖掉」。硬切要的是瞬时 set,不是什么都不做。
+describe('hardCutTweens', () => {
+  it('瞬时切换：新场景 set 为 1、旧场景 set 为 0，同一时间点', () => {
+    const out = hardCutTweens(2, 3984)
+    expect(out).toContain("tl.set('.s2', { opacity: 1 }, 3.984)")
+    expect(out).toContain("tl.set('.s1', { opacity: 0 }, 3.984)")
+    expect(out).not.toContain('duration')   // 硬切没有过渡时长
+  })
+
+  it('第 1 个场景没有前一个可关，不产出 .s0', () => {
+    expect(hardCutTweens(1, 0)).not.toContain('.s0')
   })
 })

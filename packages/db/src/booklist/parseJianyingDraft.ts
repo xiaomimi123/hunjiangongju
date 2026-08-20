@@ -8,6 +8,7 @@ import { extractDraftStructure, type DraftStructure } from './draftStructure'
 import { extractDraftGrade } from './draftGrade'
 import { extractDraftMoves } from './draftMotion'
 import { extractDraftKeyframes, type KeyframeScale } from './draftKeyframes'
+import { extractDraftEffects, deriveRipple } from './draftEffects'
 import { extractDraftTransitions } from './draftTransitions'
 import { deriveDraftCharBudget, deriveDraftSpeechRate } from './draftCharBudget'
 import { extractSubtitleEntrance } from './draftTextAnim'
@@ -654,6 +655,28 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     note('transition.perBoundary', 'defaulted', '逐边界转场解析失败', false)
   }
 
+  // ---- 特效轨（水波纹）----
+  // effect 轨与 materials.video_effects 此前从未被读过，样例的水波纹一直记为未复刻。
+  // 位置换算成相对「快闪结束」那一刀的偏移，理由见 draftEffects.ts:deriveRipple。
+  let ripple: { offsetMs: number; durationMs: number } | null = null
+  try {
+    const effs = extractDraftEffects(draft)
+    // 草稿里快闪结束点 = 开场段 + 全部快闪段的时长之和（主视频轨从 0 连续排布）
+    const draftFlashEndMs = structure.segments
+      .filter((x) => x.role === 'open' || x.role === 'flash')
+      .reduce((a, x) => a + x.durationMs, 0)
+    ripple = deriveRipple(effs, draftFlashEndMs)
+    if (ripple) {
+      note('effects.ripple', 'extracted')
+    } else if (effs.length > 0) {
+      // 有特效但没复刻：可能是名字不在映射表里，也可能离刀口太远。两种都如实报告。
+      const names = Array.from(new Set(effs.map((e) => e.sourceName).filter(Boolean))).join('、')
+      note('effects.ripple', 'unsupported', `${effs.length} 处特效未复刻（${names}）`)
+    }
+  } catch {
+    note('effects.ripple', 'defaulted', '特效轨解析失败', false)
+  }
+
   // ---- 字幕入场动画 ----
   let entrance: ReturnType<typeof extractSubtitleEntrance> = null
   try {
@@ -692,6 +715,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     ...(moves.length || keyframes.length
       ? { motion: { moves, ...(keyframes.length ? { keyframes } : {}) } }
       : {}),
+    ...(ripple ? { effects: { ripple } } : {}),
   }
 
   // 最后合入 detectUnsupported：草稿里确实存在、但渲染器做不到的结构（如独立特效轨），

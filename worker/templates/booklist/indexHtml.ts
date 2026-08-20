@@ -2,7 +2,8 @@
 // 所有特效叠在既有 startMs/endMs 之上，不新增时长；契约见 docs/superpowers/specs 2026-07-24。
 import { sec } from './util.js'
 import { selectPreset, seedInt, rootVarsCss } from './theme.js'
-import { pickMove, moveTweens, keyframeTween, pickTrans, transTweens, shardGrid, shardOpeningTweens } from './motion.js'
+import { pickMove, moveTweens, keyframeTween, pickTrans, transTweens, hardCutTweens, shardGrid, shardOpeningTweens } from './motion.js'
+import { rippleHtml, rippleCss, rippleTweens } from './effects.js'
 import { pickEntrance, captionUnit } from './captionsAnim.js'
 import { baseCss, sceneHtml, titleCardHtml, watermarkHtml, bookHeaderHtml, overlayDecorHtml, fontFaceCss, flashCss, subtitleVarsCss } from './layout.js'
 import { flashTimeline, DEFAULT_PARAMS } from './templateParams.js'
@@ -245,10 +246,13 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
       const cyc = p.transition.bodyCycle ?? []
       if (cyc.length > 0) {
         if (i === 1) {
-          if (p.transition.enterBodyHardCut !== true) {
+          if (p.transition.enterBodyHardCut === true) {
+            // 硬切仍必须显式切换可见性：.scene 默认 opacity:0，「不生成 tween」会让正片第 1 段
+            // 永远不出现、开场那张图一直挂着，直到第 2 段淡入才被盖掉。
+            motionLines.push(hardCutTweens(n, s.startMs))
+          } else {
             motionLines.push(transTweens('crossfade', n, s.startMs, cyc[0].durationMs / 1000))
           }
-          // enterBodyHardCut === true → 硬切，不生成任何转场 tween
         } else {
           const b = cyc[((i - 2) % cyc.length + cyc.length) % cyc.length]
           motionLines.push(transTweens(b.renderType, n, s.startMs, Math.max(0.05, Math.min(b.durationMs / 1000, Math.max(0.05, sec(s.endMs - s.startMs))))))
@@ -309,7 +313,13 @@ function renderFlash(data: BodyData, preset: import('./theme.js').PresetId, offs
   const decor = overlayDecorHtml(preset)
   const watermark = watermarkHtml(data.overlay.watermark)
   const fontsCss = fontFaceCss(data.fonts ?? [])
-  const allTweens = [motionLines.join('\n'), flashTweens, bookHeaderTweens, capTweenParts.join('\n')].filter(Boolean).join('\n')
+  // 水波纹：草稿把它压在快闪→正片那一刀上，与水滴音同时。offsetMs 是相对该刀口的偏移
+  // （不是绝对时间——我们的分镜时长由 TTS 决定，与草稿不等长）。未提取到则整层不渲染。
+  const rp = p.effects?.ripple
+  const rippleHtmlStr = rp ? rippleHtml() : ''
+  const rippleTweensStr = rp ? rippleTweens(t.flashEndMs + rp.offsetMs, rp.durationMs) : ''
+
+  const allTweens = [motionLines.join('\n'), flashTweens, bookHeaderTweens, capTweenParts.join('\n'), rippleTweensStr].filter(Boolean).join('\n')
   const gradeCssStr = gradeCss(p.grade)
   const gradeStyleBlock = gradeCssStr ? `\n${gradeCssStr}` : ''
 
@@ -322,12 +332,13 @@ ${rootVarsCss(preset)}
 ${subtitleVarsCss(p.body)}
 ${fontsCss}
 ${baseCss(preset)}
-${flashCss()}${gradeStyleBlock}
+${flashCss()}${rp ? '\n' + rippleCss() : ''}${gradeStyleBlock}
 </style></head>
 <body>
 <main id="root" data-composition-id="main" data-start="0" data-duration="${lastEndSec}" data-width="${width}" data-height="${height}">
 ${scenesHtml}
 ${openingShatterHtml}
+${rippleHtmlStr}
 ${scrim}
 ${decor}
 ${openHtml}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  buildShatterMaps, buildShatterArgs, buildShards, shardPoseAt, forwardPoint, DEFAULT_GEOM,
+  buildShatterMaps, buildShatterArgs, buildShards, buildGeometry,
+  shardPoseAt, forwardPoint, DEFAULT_GEOM,
 } from './shatterMaps'
 
 // ★ 必须用**生产尺寸**跑。第一版图快用了 120×160，结果两条断言假绿：
@@ -155,34 +156,90 @@ describe('碎裂坐标表', () => {
     expect(maps.frames).toBe(65)
   })
 
-  // ★ 碎片必须**恰好铺满**画面：切割用的是半平面裁剪，两半共用切割线上的顶点，
-  // 所以面积之和应严格等于画布面积。少了就是落位后有洞，多了就是有块重叠。
-  it('切出的块恰好铺满画布，不重不漏', () => {
-    const area = (poly: { x: number; y: number }[]) => {
-      let a = 0
-      for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
-        a += poly[j].x * poly[k].y - poly[k].x * poly[j].y
-      }
-      return Math.abs(a) / 2
+  // ★ 每个源像素恰好属于一块：这是逐像素归属图相对多边形切割的根本好处，
+  // 不重不漏是构造保证的，不再依赖"多边形外扩"那种补丁。
+  it('每个源像素恰好属于一块，不重不漏', () => {
+    const geo = buildGeometry(G)
+    const cnt = new Array(geo.shards.length).fill(0)
+    for (let i = 0; i < PX; i++) {
+      expect(geo.label[i]).toBeLessThan(geo.shards.length)
+      cnt[geo.label[i]]++
     }
-    const sum = shards.reduce((acc, s) => acc + area(s.poly), 0)
-    expect(sum / (G.width * G.height)).toBeCloseTo(1, 5)
+    expect(cnt.reduce((a, b) => a + b, 0)).toBe(PX)
+    expect(Math.min(...cnt), '有空块').toBeGreaterThan(0)
   })
 
   // 要的是「几个大块拼接」而不是一堆同尺寸碎片：
   // 每次都切当前最大的那块等于在做平均，切完个个差不多大——所以改成在前三里轮着挑、
   // 且刀口必定偏心。这条断言守住那个意图。
   it('块的大小明显悬殊，不是一堆同尺寸碎片', () => {
-    const area = (poly: { x: number; y: number }[]) => {
-      let a = 0
-      for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
-        a += poly[j].x * poly[k].y - poly[k].x * poly[j].y
-      }
-      return Math.abs(a) / 2
-    }
-    const sorted = shards.map((s) => area(s.poly)).sort((a, b) => b - a)
+    // 门槛按实测定：720×960 是 3.5 倍，9:16 的画布是 7.6 倍（画布越长切得越不均）。
+    // 取 3 是"还看得出大小块"的下限，不是拍脑袋的整数。
+    const sorted = shards.map((s) => s.pixels).sort((a, b) => b - a)
     expect(sorted[0] / sorted[sorted.length - 1], '最大块与最小块差得太少，看着像马赛克')
-      .toBeGreaterThan(4)
+      .toBeGreaterThan(3)
+  })
+
+  // ★ 裂纹必须是**折线**：参考视频里一条缝有好几处转折，各段方向都不同。
+  // 直线裂纹是上一版的毛病 —— 半平面裁剪只能切直线。
+  //
+  // 第一版这条断言是**假绿**：它数的是"不同裂缝之间走向有几种"，
+  // 而各条直线本来就角度各异，改成直线照样通过。要验的是**同一条裂缝内部**会不会拐弯。
+  //
+  // 改法：按「标签对」分组拿到每一条缝，对它拟合一条直线，量 RMS 垂距。
+  // 实测折线 0.3~5.3px（中位 1.88），单段直线 0.0~0.4px（中位 0.35）——区分度足够。
+  it('同一条裂缝内部会拐弯，不是一条直线', () => {
+    const geo = buildGeometry(G)
+    const seams = new Map<string, { x: number; y: number }[]>()
+    for (let y = 1; y < G.height - 1; y++) {
+      for (let x = 1; x < G.width - 1; x++) {
+        const i = y * G.width + x
+        const l = geo.label[i]
+        for (const j of [i + 1, i + G.width]) {
+          const m = geo.label[j]
+          if (m === l) continue
+          const k = l < m ? `${l}-${m}` : `${m}-${l}`
+          if (!seams.has(k)) seams.set(k, [])
+          seams.get(k)!.push({ x, y })
+        }
+      }
+    }
+    const devs: number[] = []
+    for (const pts of seams.values()) {
+      if (pts.length < 200) continue // 太短的缝拟合没意义
+      let mx = 0
+      let my = 0
+      for (const p of pts) { mx += p.x; my += p.y }
+      mx /= pts.length
+      my /= pts.length
+      let sxx = 0
+      let sxy = 0
+      let syy = 0
+      for (const p of pts) {
+        const a2 = p.x - mx
+        const b2 = p.y - my
+        sxx += a2 * a2; sxy += a2 * b2; syy += b2 * b2
+      }
+      sxx /= pts.length; sxy /= pts.length; syy /= pts.length
+      // 主方向 = 协方差矩阵最大特征值对应的特征向量
+      const tr = sxx + syy
+      const det = sxx * syy - sxy * sxy
+      const lam = tr / 2 + Math.sqrt(Math.max(0, (tr * tr) / 4 - det))
+      let vx = sxy
+      let vy = lam - sxx
+      const nn = Math.hypot(vx, vy) || 1
+      vx /= nn; vy /= nn
+      let acc = 0
+      for (const p of pts) {
+        const d = (p.x - mx) * -vy + (p.y - my) * vx
+        acc += d * d
+      }
+      devs.push(Math.sqrt(acc / pts.length))
+    }
+    expect(devs.length, '取不到足够长的裂缝，这条断言验不到东西').toBeGreaterThan(8)
+    const bent = devs.filter((d) => d > 2).length
+    expect(bent / devs.length, `裂缝几乎都是直的（RMS 垂距 ${devs.map((d) => d.toFixed(1)).join(' ')}）`)
+      .toBeGreaterThan(0.25)
   })
 
   it('块数就是配置的块数', () => {

@@ -43,7 +43,7 @@ export const DEFAULT_GEOM = { pieces: 16 } as const
  * 表现是「部署完了画面却没变」，而且查不到任何报错。**改动本文件里任何影响
  * 映射表数值的常量或算法，都要把这个号 +1。**
  */
-export const SHATTER_MAPS_VERSION = 3
+export const SHATTER_MAPS_VERSION = 4
 
 /** 碎片在整段时长的这个比例处合拢；之后留一点静置，避免刚落位就切场景 */
 const ASSEMBLE_AT = 0.78
@@ -54,9 +54,16 @@ const BATCHES = 6
 const MIN_SQUASH = 0.12
 
 export interface Shard {
-  poly: Pt[]
+  /** 形心（源图坐标）。旋转/缩放绕它做，星芒也画在它变换后的位置。 */
   cx: number
   cy: number
+  /** 该片在源图里的包围盒，用来算它在输出画面上的扫描范围 */
+  sx0: number
+  sy0: number
+  sx1: number
+  sy1: number
+  /** 该片占的像素数 */
+  pixels: number
   dx: number
   dy: number
   rot: number
@@ -67,112 +74,204 @@ export interface Shard {
   flashAt: number
 }
 
-type Pt = { x: number; y: number }
-
-/** 多边形的有向面积×2。正负表示绕向，取绝对值即面积的两倍。 */
-function area2(poly: Pt[]): number {
-  let s = 0
-  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
-    s += poly[j].x * poly[k].y - poly[k].x * poly[j].y
-  }
-  return s
+/**
+ * 碎片的几何：**逐像素归属图**，不是多边形。
+ *
+ * 为什么放弃多边形：多边形切割只能切**直线**，而参考视频里的裂纹是折线——
+ * 一条缝里有好几处转折，各段方向都不同。半平面裁剪做不出这个。
+ *
+ * 换成逐像素之后，裂纹形状想多不规则都行，而且「每个像素恰好属于一块」
+ * 是构造保证的：不重不漏不再依赖多边形外扩那种补丁。
+ */
+export interface ShatterGeometry {
+  shards: Shard[]
+  /** 源图每个像素属于哪一块 */
+  label: Uint8Array
+  /** 源图每个像素到最近裂缝的距离（像素）。棱光按它衰减。 */
+  edgeDist: Float32Array
 }
 
-/** 面积加权形心。不规则多边形不能用顶点平均——顶点密的那侧会把形心拽过去。 */
-function centroid(poly: Pt[]): Pt {
-  const a2 = area2(poly)
-  if (Math.abs(a2) < 1e-9) {
-    // 退化成一条线时按顶点平均兜底，避免除零
-    let sx = 0, sy = 0
-    for (const p of poly) { sx += p.x; sy += p.y }
-    return { x: sx / poly.length, y: sy / poly.length }
+/** 确定性哈希，取值 0..1。本仓禁用 Math.random：随机会让同一模板每次渲染都不同。 */
+function hash01(a: number, b: number): number {
+  let h = (a * 374761393 + b * 668265263) | 0
+  h = ((h ^ (h >> 13)) * 1274126177) | 0
+  return ((h ^ (h >> 16)) >>> 0) / 4294967295
+}
+
+/** 一刀的最小占比：两侧都得留住这么多，否则只是削出一条碎渣 */
+const MIN_SPLIT = 0.22
+/** 折线的分段数与每段长度（占该块尺度的比例） */
+const CRACK_SEGS = 16
+const SEG_MIN = 0.10
+const SEG_SPAN = 0.13
+/** 每段相对基准方向的最大偏摆（弧度，约 ±25°）——折角的"折"就是它 */
+const KINK = 0.88
+
+/**
+ * 用一条**折线**把某一块切成两半。
+ *
+ * 关键：每段方向是「基准方向 ± 有界扰动」，**不是逐段累加**。
+ * 累加就是随机游走，折线拐着拐着会卷回去、横穿不过整块，
+ * 结果一刀只削下一条碎渣（实测最大块能占到 89%）。
+ */
+function crackPolyline(
+  step: number, cx: number, cy: number, ext: number,
+): [number, number, number, number][] {
+  const base = (((step * 137.5) % 180) * Math.PI) / 180 + Math.PI / 2
+  // 刀口偏离形心，两半面积不等 —— 大小悬殊的几大块由此而来
+  const offMag = (0.20 + hash01(step, 3) * 0.30) * ext * 0.5 * (step % 2 ? 1 : -1)
+  let px = cx + Math.cos(base + Math.PI / 2) * offMag - Math.cos(base) * ext
+  let py = cy + Math.sin(base + Math.PI / 2) * offMag - Math.sin(base) * ext
+  const segs: [number, number, number, number][] = []
+  for (let k = 0; k < CRACK_SEGS; k++) {
+    const dir = base + (hash01(step, k * 7 + 1) - 0.5) * KINK
+    const len = ext * (SEG_MIN + hash01(step, k * 11 + 5) * SEG_SPAN)
+    const nx = px + Math.cos(dir) * len
+    const ny = py + Math.sin(dir) * len
+    segs.push([px, py, nx, ny])
+    px = nx
+    py = ny
   }
-  let cx = 0, cy = 0
-  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
-    const cross = poly[j].x * poly[k].y - poly[k].x * poly[j].y
-    cx += (poly[j].x + poly[k].x) * cross
-    cy += (poly[j].y + poly[k].y) * cross
+  return segs
+}
+
+/** 点在折线的哪一侧：取最近的那一段，用它的叉积定号 */
+function sideOf(x: number, y: number, segs: [number, number, number, number][]): number {
+  let bd = Infinity
+  let best = segs[0]
+  for (const s of segs) {
+    const [ax, ay, bx, by] = s
+    const vx = bx - ax
+    const vy = by - ay
+    const L2 = vx * vx + vy * vy
+    let t = L2 > 0 ? ((x - ax) * vx + (y - ay) * vy) / L2 : 0
+    t = t < 0 ? 0 : t > 1 ? 1 : t
+    const ddx = x - (ax + t * vx)
+    const ddy = y - (ay + t * vy)
+    const d = ddx * ddx + ddy * ddy
+    if (d < bd) { bd = d; best = s }
   }
-  return { x: cx / (3 * a2), y: cy / (3 * a2) }
+  const [ax, ay, bx, by] = best
+  return (bx - ax) * (y - ay) - (by - ay) * (x - ax)
 }
 
 /**
- * 用一条直线把多边形切成两半（Sutherland–Hodgman 半平面裁剪）。
- * 直线：nx*x + ny*y = d。两半**共用切割线上的顶点**，所以拼回去严丝合缝。
+ * 到最近裂缝的距离（倒角距离变换，两趟扫描）。
+ *
+ * 画布四边也算裂缝：飞行中的碎片外沿也是断口，应该一圈都发光。
+ * 落位后棱光包络归零，所以不会在成片边上留一圈亮框。
  */
-function cut(poly: Pt[], nx: number, ny: number, d: number): [Pt[], Pt[]] {
-  const pos: Pt[] = []
-  const neg: Pt[] = []
-  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
-    const a = poly[j]
-    const b = poly[k]
-    const sa = nx * a.x + ny * a.y - d
-    const sb = nx * b.x + ny * b.y - d
-    if (sa >= 0) pos.push(a)
-    if (sa <= 0) neg.push(a)
-    if ((sa > 0 && sb < 0) || (sa < 0 && sb > 0)) {
-      const t = sa / (sa - sb)
-      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
-      pos.push(p)
-      neg.push(p)
+function crackDistance(label: Uint8Array, W: number, H: number): Float32Array {
+  const d = new Float32Array(W * H)
+  const BIG = 1e9
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x
+      const l = label[i]
+      const border = x === 0 || y === 0 || x === W - 1 || y === H - 1
+      const seam = border
+        || label[i - 1] !== l || label[i + 1] !== l
+        || label[i - W] !== l || label[i + W] !== l
+      d[i] = seam ? 0 : BIG
     }
   }
-  return [pos, neg]
-}
-
-/**
- * 递归切割：整块画面被一条条长直裂纹反复切开。
- *
- * 每次挑**当前面积最大**的那块下刀，所以不会切出一堆碎渣；
- * 刀口从形心偏移一段，两半面积不等 —— 这正是"大小悬殊的几大块"的来源。
- * 角度按黄金角绕圈，裂纹方向不会扎堆。
- *
- * 所有量都由步数派生：本仓禁用 Math.random，且随机会让同一模板每次渲染都不同。
- */
-function tessellate(W: number, H: number, pieces: number): Pt[][] {
-  let polys: Pt[][] = [[{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }]]
-  for (let i = 0; polys.length < pieces; i++) {
-    // 在**面积前三**里轮着挑，不是每次都切最大的那块。
-    // 每次都切最大等于在做平均，切完 16 块个个差不多大；轮着挑才留得下几块明显大的。
-    const rank = [...polys.keys()].sort((a, b) => Math.abs(area2(polys[b])) - Math.abs(area2(polys[a])))
-    const bi = rank[i % Math.min(3, rank.length)]
-    const target = polys[bi]
-    const c = centroid(target)
-    const ang = ((i * 137.5) % 180) * (Math.PI / 180)
-    const nx = Math.cos(ang)
-    const ny = Math.sin(ang)
-    // 刀口**必定偏心**：偏移量至少占该块尺度的 20%，最多 50%。
-    // 允许接近正中会切出两块等大的，累积下来就是一堆同尺寸碎片。
-    let ext = 0
-    for (const p of target) ext = Math.max(ext, Math.abs((p.x - c.x) * nx + (p.y - c.y) * ny))
-    const mag = (0.20 + (((i * 29) % 100) / 100) * 0.30) * ext
-    const off = i % 2 === 0 ? mag : -mag
-    const d = nx * c.x + ny * c.y + off
-    const [a, b] = cut(target, nx, ny, d)
-    // 切歪了（有一半退化）就跳过这一刀，换下一个角度，避免死循环产出空多边形
-    if (a.length < 3 || b.length < 3) continue
-    polys = [...polys.slice(0, bi), a, b, ...polys.slice(bi + 1)]
+  const D1 = 1
+  const D2 = Math.SQRT2
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x
+      let v = d[i]
+      if (y > 0) {
+        v = Math.min(v, d[i - W] + D1)
+        if (x > 0) v = Math.min(v, d[i - W - 1] + D2)
+        if (x < W - 1) v = Math.min(v, d[i - W + 1] + D2)
+      }
+      if (x > 0) v = Math.min(v, d[i - 1] + D1)
+      d[i] = v
+    }
   }
-  return polys
+  for (let y = H - 1; y >= 0; y--) {
+    for (let x = W - 1; x >= 0; x--) {
+      const i = y * W + x
+      let v = d[i]
+      if (y < H - 1) {
+        v = Math.min(v, d[i + W] + D1)
+        if (x > 0) v = Math.min(v, d[i + W - 1] + D2)
+        if (x < W - 1) v = Math.min(v, d[i + W + 1] + D2)
+      }
+      if (x < W - 1) v = Math.min(v, d[i + 1] + D1)
+      d[i] = v
+    }
+  }
+  return d
 }
 
 /**
- * 碎片几何 + 逐片飞入参数。
+ * 碎片几何：反复用折线把当前**面积前三**里的一块切成两半。
  *
- * 碎片来自递归切割，相邻块**共用切割线上的顶点**，所以落位后能严丝合缝铺满画面
- * （这是最早那版做错的地方：每片各自向内裁，拼合后满屏黑缝）。
+ * 不能每次都切最大的那块——那等于在做平均，切完个个差不多大；
+ * 在前三里轮着挑才留得下几块明显大的。
  */
-export function buildShards(g: ShatterGeom): Shard[] {
-  // 飞入距离按**画布对角线**取比例，不能写死像素：写死的话换个画布尺寸，
-  // 碎片可能全程都在画面外（小画布）或起手就贴着边（大画布），效果整个跑偏。
-  const diag = Math.hypot(g.width, g.height)
-  return tessellate(g.width, g.height, g.pieces).map((poly, i) => {
-    const c = centroid(poly)
-    // 飞入方向按黄金角绕圈，保证四面八方都有来路
+export function buildGeometry(g: ShatterGeom): ShatterGeometry {
+  const { width: W, height: H } = g
+  const label = new Uint8Array(W * H)
+  let n = 1
+
+  interface Acc { pixels: number; x0: number; y0: number; x1: number; y1: number; sx: number; sy: number }
+  const measure = (): Acc[] => {
+    const a: Acc[] = []
+    for (let i = 0; i < n; i++) a.push({ pixels: 0, x0: W, y0: H, x1: -1, y1: -1, sx: 0, sy: 0 })
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const t = a[label[y * W + x]]
+        t.pixels++
+        t.sx += x
+        t.sy += y
+        if (x < t.x0) t.x0 = x
+        if (y < t.y0) t.y0 = y
+        if (x > t.x1) t.x1 = x
+        if (y > t.y1) t.y1 = y
+      }
+    }
+    return a
+  }
+
+  let acc = measure()
+  // 步数上限：几何上每一刀都可能因两侧太小而作废，给个远高于所需的上限兜底，
+  // 免得参数没调好时死循环
+  for (let step = 0; n < g.pieces && step < g.pieces * 12; step++) {
+    const rank = [...acc.keys()].sort((a, b) => acc[b].pixels - acc[a].pixels)
+    const tgt = rank[step % Math.min(3, rank.length)]
+    const t = acc[tgt]
+    const ext = Math.hypot(t.x1 - t.x0, t.y1 - t.y0)
+    const segs = crackPolyline(step, (t.x0 + t.x1) / 2, (t.y0 + t.y1) / 2, ext)
+
+    const flip: number[] = []
+    for (let y = t.y0; y <= t.y1; y++) {
+      for (let x = t.x0; x <= t.x1; x++) {
+        const i = y * W + x
+        if (label[i] !== tgt) continue
+        if (sideOf(x, y, segs) > 0) flip.push(i)
+      }
+    }
+    // 两侧都得留住 MIN_SPLIT，否则这一刀只削出一条碎渣：换下一个角度重来
+    if (flip.length < t.pixels * MIN_SPLIT || t.pixels - flip.length < t.pixels * MIN_SPLIT) continue
+    for (const i of flip) label[i] = n
+    n++
+    acc = measure()
+  }
+
+  const diag = Math.hypot(W, H)
+  const shards: Shard[] = acc.map((a, i) => {
+    // 飞入方向按黄金角绕圈，保证四面八方都有来路。
+    // 距离按**画布对角线**取比例，写死像素的话换个画布尺寸效果就整个跑偏。
     const ang = (i * 137.5 * Math.PI) / 180
     const dist = diag * (0.4333 + ((i * 53) % 320) / 1200)
     return {
-      poly, cx: c.x, cy: c.y,
+      cx: a.sx / a.pixels,
+      cy: a.sy / a.pixels,
+      sx0: a.x0, sy0: a.y0, sx1: a.x1, sy1: a.y1,
+      pixels: a.pixels,
       dx: Math.cos(ang) * dist,
       dy: Math.sin(ang) * dist - diag * 0.075,
       rot: (Math.sin(i * 1.31) * 120 * Math.PI) / 180,
@@ -183,6 +282,12 @@ export function buildShards(g: ShatterGeom): Shard[] {
       flashAt: 0.16 + ((i * 37) % 100) / 100 * 0.46,
     }
   })
+  return { shards, label, edgeDist: crackDistance(label, W, H) }
+}
+
+/** 只要碎片参数时用它（验收测试）。要映射表请用 buildShatterMaps。 */
+export function buildShards(g: ShatterGeom): Shard[] {
+  return buildGeometry(g).shards
 }
 
 /** 某片碎片在归一化时刻 t 的姿态。progress=1 表示已落位（此时是恒等变换）。 */
@@ -228,64 +333,6 @@ export function forwardPoint(
     x: ux * ca - uy * sa + s.cx + pose.dx,
     y: ux * sa + uy * ca + s.cy + pose.dy,
   }
-}
-
-/**
- * 点是否在多边形内 —— 射线法。
- *
- * 不能用「叉积同号」那种凸多边形判定。递归切割出的块虽然都是凸的，但早先的抖动格网
- * 会造出凹四边形，凹角那侧既不被本片认领、也不被邻片认领，落位后画面上留一条黑线。
- * 射线法对任意简单多边形都成立，边数也不限，不必假设是四边形。
- */
-function inPoly(px: number, py: number, q: Pt[]): boolean {
-  let inside = false
-  for (let k = 0, j = q.length - 1; k < q.length; j = k++) {
-    const a = q[k]
-    const b = q[j]
-    if ((a.y > py) !== (b.y > py) && px < ((b.x - a.x) * (py - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside
-    }
-  }
-  return inside
-}
-
-/**
- * 把多边形绕形心外扩一点点。
- *
- * 相邻碎片共用边，射线法在边上只判给其中一侧——遇到取整误差就可能**两侧都不认领**，
- * 留下 1px 黑缝。外扩让两侧略微重叠：重叠处后画的盖住先画的，源坐标只差不到 1px，
- * 肉眼不可见；而「没人认领」是可见的。宁可重叠，不可留缝。
- */
-const EXPAND_PX = 0.6
-function expandPoly(poly: Pt[], cx: number, cy: number) {
-  return poly.map((p) => {
-    const d = Math.hypot(p.x - cx, p.y - cy) || 1
-    return { x: p.x + ((p.x - cx) / d) * EXPAND_PX, y: p.y + ((p.y - cy) / d) * EXPAND_PX }
-  })
-}
-
-/** 点到线段的距离平方。棱边宽度判定用得上，先比较平方值可以省掉大部分开方。 */
-function distSqToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const vx = bx - ax
-  const vy = by - ay
-  const len2 = vx * vx + vy * vy
-  let t = len2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0
-  t = t < 0 ? 0 : t > 1 ? 1 : t
-  const dx = px - (ax + t * vx)
-  const dy = py - (ay + t * vy)
-  return dx * dx + dy * dy
-}
-
-/** 点到多边形边界的最短距离 */
-function distToEdge(px: number, py: number, q: Pt[]): number {
-  let m = Infinity
-  for (let k = 0; k < q.length; k++) {
-    const a = q[k]
-    const b = q[(k + 1) % q.length]
-    const d = distSqToSeg(px, py, a.x, a.y, b.x, b.y)
-    if (d < m) m = d
-  }
-  return Math.sqrt(m)
 }
 
 /**
@@ -386,17 +433,16 @@ const OUT_OF_RANGE = 65535
  * 要跑 21 亿次判断。
  */
 export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
-  const shards = buildShards(g)
-  // 认领范围用外扩后的多边形（只算一次）；源坐标仍取自原图，外扩只影响"谁认领这个像素"
-  const hit = shards.map((s) => expandPoly(s.poly, s.cx, s.cy))
+  const { width: W, height: H } = g
+  const { shards, label, edgeDist } = buildGeometry(g)
   const frames = Math.max(1, Math.round((g.durationMs / 1000) * g.fps))
-  const px = g.width * g.height
+  const px = W * H
   const xmap = Buffer.alloc(px * 2 * frames)
   const ymap = Buffer.alloc(px * 2 * frames)
   const bloom = Buffer.alloc(px * frames) // gray8，0 初始 = 不过曝
   const spec = Buffer.alloc(px * frames) // gray8，0 初始 = 无棱光
   // 棱边宽度与星芒半径按画布缩放，理由同飞入距离：写死像素换尺寸就跑偏
-  const scale = Math.hypot(g.width, g.height) / 1200
+  const scale = Math.hypot(W, H) / 1200
   const rimPx = RIM_PX * scale
   const starR = 130 * scale
 
@@ -412,7 +458,6 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
 
     for (let si = 0; si < shards.length; si++) {
       const s = shards[si]
-      const quad = hit[si]
       const pose = shardPoseAt(s, t)
       const { dx, dy, ang, sx, sy, progress: p } = pose
       if (p <= 0) continue // 还没起飞：保持越界 → 黑
@@ -429,19 +474,20 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
       const flash = Math.exp(-fd * fd * 6)
       const faceLit = FLASH_PEAK * flash
 
-      // 变换后包围盒：把四个顶点正变换过去取极值
+      // 该片在输出画面上的扫描范围：把源图包围盒的四角正变换过去取极值。
+      // 变换是仿射的，所以这样一定包住该片变换后的全部像素。
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-      for (const q of quad) {
-        const { x: X, y: Y } = forwardPoint(s, pose, q.x, q.y)
+      for (const [qx, qy] of [[s.sx0, s.sy0], [s.sx1, s.sy0], [s.sx1, s.sy1], [s.sx0, s.sy1]]) {
+        const { x: X, y: Y } = forwardPoint(s, pose, qx, qy)
         if (X < minX) minX = X
         if (X > maxX) maxX = X
         if (Y < minY) minY = Y
         if (Y > maxY) maxY = Y
       }
       const x0 = Math.max(0, Math.floor(minX))
-      const x1 = Math.min(g.width - 1, Math.ceil(maxX))
+      const x1 = Math.min(W - 1, Math.ceil(maxX))
       const y0 = Math.max(0, Math.floor(minY))
-      const y1 = Math.min(g.height - 1, Math.ceil(maxY))
+      const y1 = Math.min(H - 1, Math.ceil(maxY))
       if (x1 < x0 || y1 < y0) continue
 
       for (let Y = y0; Y <= y1; Y++) {
@@ -451,17 +497,19 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
           const ay = Y - s.cy - dy
           const bx = ax * ca - ay * sa
           const by = ax * sa + ay * ca
-          const u = bx / sx + s.cx
-          const v = by / sy + s.cy
-          if (u < 0 || u >= g.width || v < 0 || v >= g.height) continue
-          if (!inPoly(u, v, quad)) continue
-          const idx = Y * g.width + X
-          xmap.writeUInt16LE(Math.round(u), base + idx * 2)
-          ymap.writeUInt16LE(Math.round(v), base + idx * 2)
+          const u = Math.round(bx / sx + s.cx)
+          const v = Math.round(by / sy + s.cy)
+          if (u < 0 || u >= W || v < 0 || v >= H) continue
+          const src = v * W + u
+          // 归属直接查表：每个源像素恰好属于一块，不重不漏是构造保证的
+          if (label[src] !== si) continue
+          const idx = Y * W + X
+          xmap.writeUInt16LE(u, base + idx * 2)
+          ymap.writeUInt16LE(v, base + idx * 2)
           bloom[bbase + idx] = bl
-          // 棱光：距断口越近越亮。距离在**源图坐标系**上量，
+          // 棱光：距裂缝越近越亮。距离在**源图坐标系**上量，
           // 这样碎片被压扁时棱边也跟着压扁，不会看出是后期贴上去的
-          const d = distToEdge(u, v, quad)
+          const d = edgeDist[src]
           let lit = faceLit
           if (d < rimPx) lit += RIM_PEAK * Math.pow(1 - d / rimPx, 1.7) * rimEnv
           if (lit > 2) spec[bbase + idx] = lit > 255 ? 255 : lit
@@ -471,7 +519,7 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
       // 星芒：反光最强的那一瞬间在碎片当前位置炸一个
       if (flash > STAR_TRIGGER) {
         const c = forwardPoint(s, pose, s.cx, s.cy)
-        drawStar(spec, bbase, g.width, g.height, c.x, c.y, starR, STAR_PEAK * flash)
+        drawStar(spec, bbase, W, H, c.x, c.y, starR, STAR_PEAK * flash)
       }
     }
   }

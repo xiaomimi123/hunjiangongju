@@ -20,14 +20,42 @@ function ff(args: string[]): { ok: boolean; out: string } {
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }
 
-/** 某帧 PNG 里，距中心 [r1,r2) 环带内的平均 alpha */
-function ringAlpha(png: string, r1: number, r2: number): number {
-  // 直接把 alpha 通道抽成灰度，再在 Node 里按半径取样
+/**
+ * 某帧 PNG 里「环所在的半径」——alpha 加权的平均半径。
+ *
+ * 比「固定环带里的平均 alpha」稳健得多：后者的测量带是按某一版环宽标定的，
+ * 环一调细就跑到带外、两边都接近 0，断言失去意义（第一版就是这么写的，
+ * 把 RING_W 从 26 调到 13 之后直接红了）。峰值半径与环宽、透明度都无关。
+ */
+function ringRadius(png: string): number {
+  const b = alphaBuf(png)
+  const cx = W / 2
+  const cy = H / 2
+  let sum = 0
+  let wsum = 0
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const a = b[y * W + x]
+      if (a <= 8) continue
+      sum += Math.hypot(x - cx, y - cy) * a
+      wsum += a
+    }
+  }
+  return wsum ? sum / wsum : 0
+}
+
+function alphaBuf(png: string): Buffer {
   const r = spawnSync(FFMPEG, ['-v', 'error', '-i', png,
     '-vf', 'alphaextract,format=gray', '-f', 'rawvideo', '-'],
     { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 })
   const b = r.stdout as unknown as Buffer
   if (!b || b.length !== W * H) throw new Error(`抽 alpha 失败 ${png}: 得到 ${b?.length} 字节`)
+  return b
+}
+
+/** 某帧 PNG 里，距中心 [r1,r2) 环带内的平均 alpha */
+function ringAlpha(png: string, r1: number, r2: number): number {
+  const b = alphaBuf(png)
   const cx = W / 2
   const cy = H / 2
   let sum = 0
@@ -63,21 +91,20 @@ d('真渲验收 —— 水波纹预渲染', () => {
     expect(frames.length).toBeLessThanOrEqual(16)
   })
 
-  // ★ 环确实存在：早期帧里靠近中心的环带有明显 alpha
+  // ★ 环确实存在，且从中心附近出发
   it('早期帧：环在靠近中心处', () => {
-    const early = frames[2]
-    const inner = ringAlpha(early, 20, 70)
-    const outer = ringAlpha(early, 180, 230)
-    expect(inner, `早期帧中心附近没有环: ${inner}`).toBeGreaterThan(8)
-    expect(outer, `早期帧外圈就已经有环了(环没有从中心出发): ${outer}`).toBeLessThan(inner)
+    const r = ringRadius(frames[2])
+    expect(r, `早期帧没有可测的环: ${r}`).toBeGreaterThan(0)
+    expect(r, `环一上来就在外圈(没有从中心出发): ${r}`).toBeLessThan(H / 4)
   })
 
-  // ★ 环在向外走：后期帧的能量重心移到外圈
-  it('后期帧：环已扩散到外圈，中心附近清空', () => {
-    const late = frames[frames.length - 3]
-    const inner = ringAlpha(late, 20, 70)
-    const outer = ringAlpha(late, 150, 220)
-    expect(outer, `后期帧外圈没有环(环没有扩散): 内=${inner} 外=${outer}`).toBeGreaterThan(inner)
+  // ★ 环在向外走：半径随时间单调外移
+  it('环随时间向外扩散（半径逐帧变大）', () => {
+    const rs = [2, 5, 8, frames.length - 3].map((i) => ringRadius(frames[i]))
+    for (let i = 1; i < rs.length; i++) {
+      expect(rs[i], `第 ${i} 个采样点半径没有变大: ${JSON.stringify(rs.map((x) => Math.round(x)))}`)
+        .toBeGreaterThan(rs[i - 1])
+    }
   })
 
   // ★ 反证：环数为 0 时整张图必须全透明。

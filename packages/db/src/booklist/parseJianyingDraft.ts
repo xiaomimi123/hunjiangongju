@@ -25,7 +25,7 @@ export interface DraftMeta {
   structure: DraftStructure // 主视频轨节奏切出的 开场/快闪/正片 三段结构（Task 8 页面报告用）
   provenance: ProvenanceEntry[] // 结构化保真度记录：extracted/defaulted 与 warnings 同源写入，unsupported 来自 detectUnsupported
   /** 按正片时长 × 实测语速推出的文案预算；缺省表示推不出来，落库时不写、走通用默认 */
-  charBudget?: { maxLines: number; maxTotalChars: number }
+  charBudget?: { maxLines: number; maxTotalChars: number; hardCapChars: number }
 }
 
 // ---- 纯函数 helpers（导出以便单测/复用） ----
@@ -599,15 +599,22 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   // ---- 文案字数预算（按正片时长 × 实测语速）----
   // 不推导的话生成时会走代码默认的 220 字。客户样例正片仅 20.6 秒，220 字等于 10.7 字/秒，
   // 是原片实测语速(4.7)的两倍多——AI 按预算写满，文案长得离谱，还被迫复述原著情节填字数。
-  let charBudget: { maxLines: number; maxTotalChars: number } | null = null
+  let charBudget: { maxLines: number; maxTotalChars: number; hardCapChars: number } | null = null
   try {
     const bodyMs = structure.segments.filter((x) => x.role === 'body').reduce((a, x) => a + x.durationMs, 0)
     // 语速样本取正文文字段（排除书名卡与开场标题：它们是标签不是口播，字数/时长比例不同）
     const samples = stickers
       .map((x) => ({ text: (textsById.get(x.materialId)?.text ?? '').trim(), durationMs: usToMs(x.durationUs) }))
       .filter((x) => x.text && !isBookName(x.text) && !x.text.startsWith('@') && x.text !== openTitleText)
-    const rate = deriveDraftSpeechRate(samples) ?? undefined
-    charBudget = deriveDraftCharBudget(bodyMs, structure.bodyCount, rate)
+    // 开场 + 快闪的时长：30 秒硬上限要减掉它，剩下的才是能留给正文的
+    const nonBodyMs = structure.segments
+      .filter((x) => x.role === 'open' || x.role === 'flash')
+      .reduce((a, x) => a + x.durationMs, 0)
+    charBudget = deriveDraftCharBudget(bodyMs, structure.bodyCount, nonBodyMs)
+    // 实测语速不再参与预算（理由见 draftCharBudget.ts 顶部），但仍如实记录：
+    // 它说明的是原片的疏密程度，属于保真度信息。
+    const rate = deriveDraftSpeechRate(samples)
+    if (rate) note('charBudget.sourceRate', 'extracted', `原片语速约 ${rate.toFixed(1)} 字/秒`, false)
     if (charBudget) note('charBudget', 'extracted', undefined, false)
     else note('charBudget', 'defaulted', '未能按草稿时长推导字数上限，走通用默认值', false)
   } catch {

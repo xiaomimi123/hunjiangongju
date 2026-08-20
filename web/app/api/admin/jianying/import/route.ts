@@ -46,7 +46,7 @@ export const POST = handler(async (req) => {
   // 收到的客户端回传报告更可信。缺失/不是合法 JSON 时报告直接置空，不影响导入本身
   // （报告纯信息性展示，沿用本路由"缺省字段一律不写、不因此拒绝导入"的既有口径）。
   let fidelityReport: ReturnType<typeof buildFidelityReport> | null = null
-  let charBudget: { maxLines: number; maxTotalChars: number } | null = null
+  let charBudget: { maxLines: number; maxTotalChars: number; hardCapChars: number } | null = null
   const draftJsonRaw = form.get('draftJson')
   if (typeof draftJsonRaw === 'string' && draftJsonRaw.trim()) {
     try {
@@ -137,6 +137,9 @@ export const POST = handler(async (req) => {
   // 图片槽位数 = 草稿正片段数。填了它，generate-script 会把文案规整成恰好这么多段，
   // 「第 N 张图」才有稳定含义，运营才能逐张配来源与提示词。slots 留空表示全部走默认行为。
   if (bodyCount) overlayTemplate.__imageSlots = { count: bodyCount, slots: [] }
+  // 文案字数硬上限（30 秒成片反推）。软预算走 maxTotalChars 列，硬上限没有对应列，
+  // 沿用 __bookCount 这套私有键约定放进 overlayTemplate，避免为一个数加迁移。
+  if (charBudget) overlayTemplate.__charHardCap = charBudget.hardCapChars
 
   const fw = await prisma.copyFramework.create({
     data: {

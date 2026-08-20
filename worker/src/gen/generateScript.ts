@@ -3,6 +3,7 @@ import {
   llmComplete,
   validateScript,
   trimToBudget,
+  readCharHardCap,
   splitCaptionPhrases,
   setGenerationStatus,
   enqueueGen,
@@ -425,6 +426,10 @@ export async function generateScript(genTaskId: string): Promise<void> {
   const segCount = fw.suggestedSegmentCount ?? 8
   const maxLines = fw.maxLines ?? 21
   const maxTotalChars = fw.maxTotalChars ?? 220
+  // 裁剪只在超过**硬上限**时才做。软预算(maxTotalChars)是告诉 AI 的目标,
+  // 写超一点点不该被裁 —— 裁剪从尾部整行丢弃,丢掉的正是收尾句,
+  // 听感上就是「话没说完就结束了」(线上实测: 105 字被裁到 89,收尾句没了)。
+  const hardCap = readCharHardCap(fw.overlayTemplate, maxTotalChars) ?? maxTotalChars
 
   const resolved = resolveScriptMode(task.variables)
   const mode = resolved.mode
@@ -454,8 +459,8 @@ export async function generateScript(genTaskId: string): Promise<void> {
       await setGenerationStatus(genTaskId, 'FAILED')
       throw new Error('自定义文案为空或无法切分')
     }
-    // 安全上限：极端超预算仍裁剪（不硬失败）
-    clean = trimToBudget(clean, maxLines, maxTotalChars)
+    // 安全上限：只有超过硬上限（30 秒成片反推）才裁剪
+    clean = trimToBudget(clean, maxLines, hardCap)
   } else {
     // imitate: 用参考仿写；auto: 现状。二者复用现有 validate/重试/兜底循环。
     const angle = pickAngle(genTaskId)
@@ -508,11 +513,15 @@ export async function generateScript(genTaskId: string): Promise<void> {
         await setGenerationStatus(genTaskId, 'FAILED')
         throw new Error(`文案生成为空（已重试 ${MAX_ATTEMPTS} 次）：${lastErrors.join('；')}`)
       }
-      clean = trimToBudget(lastClean, maxLines, maxTotalChars)
+      clean = trimToBudget(lastClean, maxLines, hardCap)
       // trimToBudget 只从尾部整行丢弃且保持顺序，故按裁剪后长度截取序号即可保持配对；
       // 这依赖 parseBookMarkedLines 已保证每条 text 非空（否则 trimToBudget 的 filter(Boolean) 会错位）。
       markedIdxs = lastIdxs ? lastIdxs.slice(0, clean.length) : null
-      console.warn(`[gen] generate-script ${genTaskId}: 超预算兜底裁剪 (${lastErrors.join('；')}) → ${clean.length} 行`)
+      if (clean.length < lastClean.length) {
+        console.warn(`[gen] generate-script ${genTaskId}: 超**硬上限** ${hardCap} 字，裁剪 ${lastClean.length}→${clean.length} 行 (${lastErrors.join('；')})`)
+      } else {
+        console.log(`[gen] generate-script ${genTaskId}: 超软预算但在硬上限 ${hardCap} 字内，原样采用 (${lastErrors.join('；')})`)
+      }
     }
 
     if (wantsBookMark && !markedIdxs) {

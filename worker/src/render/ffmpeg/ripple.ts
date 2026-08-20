@@ -21,9 +21,15 @@ export interface RippleAssetOpts {
   outPattern: string
 }
 
-/** 环的起始半径(px)与线宽(px)。线宽决定「水纹」的粗细手感 */
+/**
+ * 环的起始半径(px)、线宽(px)与峰值不透明度。
+ *
+ * 第一版 RING_W=26 / 峰值 255 实测太重：白得发光、粗得像「传送门」，
+ * 不像水纹。水波纹的观感靠**细、淡、多圈**，不靠亮。
+ */
 const R0 = 24
-const RING_W = 26
+const RING_W = 13
+const PEAK_ALPHA = 130
 
 /**
  * 构造 alpha 通道表达式。
@@ -55,7 +61,7 @@ export function rippleAlphaExpr(o: RippleAssetOpts): string {
     const fall = `exp(-pow((ld(0)-${r})/${RING_W},2))`
     // 进度为 0 时不显示（环还没起步），否则三个环会在 t=0 挤在圆心
     const gate = `gt(ld(1),0)*lt(ld(1),1)`
-    parts.push(`(${p}*0+${gate}*(1-ld(1))*255*${fall})`)
+    parts.push(`(${p}*0+${gate}*(1-ld(1))*${PEAK_ALPHA}*${fall})`)
   }
   if (parts.length === 0) return '0'
   // 逐个取 max：环之间是叠加关系，取和会在交叠处过曝成一片白

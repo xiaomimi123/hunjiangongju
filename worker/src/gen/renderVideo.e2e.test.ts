@@ -19,6 +19,7 @@ import { mkdtempSync, rmSync, existsSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildFfmpegArgs } from './renderVideo'
+import { minAdjacentChangedRatio, STILL_RATIO } from '../render/ffmpeg/testkit'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const ENABLED = process.env.RENDER_E2E === '1'
@@ -111,11 +112,11 @@ d('真渲验收 —— 混音阶段', () => {
 
   // ★ 这条就是当初漏掉 zoompan 冻帧事故的那一条。
   // 八个时刻两两不同 —— 任何「画面定格」都过不了。
-  it('画面全程在动：八个时刻的帧指纹互不相同', () => {
-    const ts = [0.5, 1.5, 3, 5, 7, 9, 10.5, 11.5]
-    const hashes = ts.map((t) => frameHash(out, t))
-    const dup = hashes.filter((h, i) => hashes.indexOf(h) !== i)
-    expect(dup, `出现重复帧指纹(画面定格): ${JSON.stringify(hashes)}`).toEqual([])
+  it('画面全程在动：任意两个时刻之间画面都有实质变化', () => {
+    // 原来用帧指纹判定,在有纹理画面上是假绿(x264 逐帧调 QP 让定格画面也给出不同指纹)。
+    // 改用帧间平均绝对差,见 render/ffmpeg/testkit.ts。
+    const m = minAdjacentChangedRatio(out, [0.5, 1.5, 3, 5, 7, 9, 10.5, 11.5])
+    expect(m, `相邻采样之间画面几乎没变(画面定格): 最小变化像素占比=${m}`).toBeGreaterThan(STILL_RATIO)
   })
 
   // ★ 这条对应另一次事故：齿轮音本该铺在书封快闪段，却被写成从 0 秒盖在开场上。

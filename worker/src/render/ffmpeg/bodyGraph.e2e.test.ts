@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildBodyGraph, type FfBodySegment } from './bodyGraph'
+import { changedRatio, minAdjacentChangedRatio, STILL_RATIO } from './testkit'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -82,9 +83,8 @@ d('真渲验收 —— 正片滤镜图', () => {
       { imageAbs: img[0], durationMs: 6000, motion: { scaleFrom: 1, scaleTo: 1.108 } },
     ]
     const out = render(dir, segs, 'motion')
-    const hs = [0.5, 2, 3.5, 5].map((t) => frameHash(out, t))
-    const dup = hs.filter((h, i) => hs.indexOf(h) !== i)
-    expect(dup, `运镜段内出现重复帧(运镜没生效): ${JSON.stringify(hs)}`).toEqual([])
+    const m = minAdjacentChangedRatio(out, [0.5, 2, 3.5, 5])
+    expect(m, `运镜段内画面几乎没变(运镜没生效): 最小变化像素占比=${m}`).toBeGreaterThan(0.03)
   })
 
   // ★ 对照组：显式声明静止的段**应该**是定格的。
@@ -92,8 +92,8 @@ d('真渲验收 —— 正片滤镜图', () => {
   it('静止段确实定格（反证上一条断言有效）', () => {
     const segs: FfBodySegment[] = [{ imageAbs: img[0], durationMs: 6000 }]
     const out = render(dir, segs, 'still')
-    const hs = [0.5, 2, 3.5, 5].map((t) => frameHash(out, t))
-    expect(new Set(hs).size, `静止段却每帧不同，说明取帧逻辑失效: ${JSON.stringify(hs)}`).toBe(1)
+    const m = changedRatio(out, 0.5, 5)
+    expect(m, `静止段却在动，说明测量失效: 变化像素占比=${m}`).toBeLessThan(STILL_RATIO)
   })
 
   it('硬切在预期时刻换图，前后两侧画面不同', () => {

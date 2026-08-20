@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildRenderBodyPlan, type RenderBodySegment } from './renderBody'
+import { minAdjacentChangedRatio } from './testkit'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -92,9 +93,9 @@ d('真渲验收 —— 整条正片管线', () => {
   })
 
   it('画面全程在动（运镜生效，没有任何一段定格）', () => {
-    const hs = [1, 3, 6, 8, 11, 13].map((t) => frameHash(out, t))
-    const dup = hs.filter((h, i) => hs.indexOf(h) !== i)
-    expect(dup, `出现重复帧: ${JSON.stringify(hs)}`).toEqual([])
+    // 帧指纹在有纹理画面上是假绿(x264 逐帧调 QP)，用帧间平均绝对差，见 testkit.ts
+    const m = minAdjacentChangedRatio(out, [1, 3, 6, 8, 11, 13])
+    expect(m, `相邻采样之间画面几乎没变(疑似定格): 最小变化像素占比=${m}`).toBeGreaterThan(0.03)
   })
 
   // 三段底图用 eq=brightness -0.25/0/+0.25 拉开，换场后中部亮度应逐段升高。

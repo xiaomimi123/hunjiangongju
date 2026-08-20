@@ -234,7 +234,9 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     //
     // 两条路径产出**同一份契约**的 body.mp4（720×960、无声、全片长），后面的
     // render-video（混音/BGM/音效/loudnorm）一行都不用改，所以随时可以切回去。
-    // 默认仍走 HyperFrames；框架显式声明 __renderer='ffmpeg' 才走新渲染器。
+    // 默认走 ffmpeg；框架显式写 __renderer='hyperframes' 才退回旧渲染器。
+    // 注意「退回旧渲染器」不等于「不用 HyperFrames」——开场碎裂那 2.16 秒
+    // 两条路径都靠它渲（碎片要带本条片子自己的图）。
     const outRel = path.join('renders', 'body.mp4')
     const outAbs = path.join(hfDir, outRel)
     if (readRenderer(task.framework.overlayTemplate) === 'ffmpeg') {

@@ -58,7 +58,12 @@
 
 **注意结论边界**：没有证据表明那是「老版本的已知 bug」——用上游 5.1 与 7.1 的静态构建、喂同样的 HyperFrames 输出（`time_base 1/15360`、30fps CFR），两种滤镜写法都**复现不出来**。真正的问题是「发行版打过补丁的那个二进制行为不可控」，而不是「版本旧」。
 
-改为从 `mwader/static-ffmpeg` 拷贝固定版本静态二进制：
+改为**用 HTTPS 下载**固定版本静态二进制（`registry.npmmirror.com` 的 `ffmpeg-static` 二进制目录，
+内容是 johnvansickle 的 ffmpeg 7.0.2 静态构建，`ffmpeg` 与 `ffprobe` 同目录）：
+
+**为什么不从 Docker Hub 拉镜像**：服务器的镜像加速源只代理官方 `library/*`，
+用户镜像（`mwader/static-ffmpeg` 之类）一律 **403 Forbidden**，构建直接失败。
+走 HTTPS 下二进制与 npm 是同一条通路，已验证可达。
 
 1. 版本写死在 `ARG FFMPEG_VERSION` 里，升级是一次显式改动，不随基础镜像漂移
 2. **本地开发与服务器跑同一个二进制**，滤镜行为差异这个变量被彻底消掉

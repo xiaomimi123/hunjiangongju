@@ -33,6 +33,9 @@ export interface TemplateParams {
   motion?: { moves: MoveId[]; keyframes?: { scaleFrom: number; scaleTo: number }[] }
 }
 
+/** 渲染器实际支持的转场类型白名单（与 worker/templates/booklist/motion.ts 的 TransId 对齐） */
+export const TRANS_RENDER_TYPES = ['crossfade', 'wipe', 'shard', 'glide-push', 'blur-dissolve'] as const
+
 export const DEFAULT_PARAMS: TemplateParams = {
   mode: 'classic',
   open: { durationMs: 2160, shatter: true, titleText: '今天分享的是', sfx: true },
@@ -78,8 +81,17 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
         ? {
             bodyCycle: (tr.bodyCycle as unknown[])
               .map((x) => obj(x))
-              .filter((x) => typeof x.durationMs === 'number' && Number.isFinite(x.durationMs) && typeof x.renderType === 'string')
-              .map((x) => ({ renderType: x.renderType as 'crossfade', durationMs: x.durationMs as number })),
+              // renderType 必须落在渲染器支持的五种之内。只校验"是字符串"不够——
+              // transTweens 的 switch 没有 default，非法值会静默返回空串，
+              // 表现为"那条边界悄悄没了转场"，不报错、不崩，回放时才发现节奏不对。
+              .filter(
+                (x) =>
+                  typeof x.durationMs === 'number' &&
+                  Number.isFinite(x.durationMs) &&
+                  typeof x.renderType === 'string' &&
+                  (TRANS_RENDER_TYPES as readonly string[]).includes(x.renderType),
+              )
+              .map((x) => ({ renderType: x.renderType as (typeof TRANS_RENDER_TYPES)[number], durationMs: x.durationMs as number })),
           }
         : {}),
     },

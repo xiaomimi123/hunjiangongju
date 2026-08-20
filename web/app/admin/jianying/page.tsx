@@ -443,22 +443,30 @@ export default function JianyingTemplatePage() {
                 <span className="eyebrow">框架名</span>
                 <input className="field mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：活着快闪模板" />
               </label>
-              {folderFiles.length > 0 && media && (
+              {/* 两个按钮都会建框架，名字上却看不出来——运营两个都点就会白建一个残缺框架。
+                  「保存为框架」这条路径拿不到原始草稿，建出的框架只有 __templateParams，
+                  缺 __imageSlots(图片槽位)/__bookCount/__defaultBgmId/__defaultAssetFolder
+                  与 suggestedSegmentCount(正片段数)——用它生成会让人误以为新功能没生效。
+                  因此：选了文件夹时只给「一键导入」这一条路；「保存为框架」降级为兜底，
+                  仅在拿不到素材文件夹时可用，并明确标注它是残缺的。 */}
+              {folderFiles.length > 0 && media ? (
                 <button
                   onClick={importAll}
                   disabled={importing || !templateParams || !name.trim()}
                   className="btn-primary px-5 disabled:opacity-50"
                 >
-                  {importing ? '导入中…' : '一键导入（含 BGM/素材）'}
+                  {importing ? '导入中…' : '一键导入（建框架 + BGM/素材入库）'}
+                </button>
+              ) : (
+                <button
+                  onClick={save}
+                  disabled={saving || !templateParams || !name.trim()}
+                  className="btn-ghost px-5 disabled:opacity-50"
+                  title="仅建框架，不含 BGM/素材，且缺少图片槽位等依赖素材文件夹的参数。建议改用「选择文件夹」后一键导入。"
+                >
+                  {saving ? '保存中…' : '仅保存参数（残缺，不推荐）'}
                 </button>
               )}
-              <button
-                onClick={save}
-                disabled={saving || !templateParams || !name.trim()}
-                className="btn-primary px-5 disabled:opacity-50"
-              >
-                {saving ? '保存中…' : '保存为框架'}
-              </button>
             </div>
             {saveErr && <p className="pill pill-bad mt-2">{saveErr}</p>}
             {savedId && (

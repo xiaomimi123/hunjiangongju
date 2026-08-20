@@ -8,7 +8,7 @@ import Modal from '@/components/admin/Modal'
 type ProvenanceEntry = { path: string; status: 'extracted' | 'defaulted' | 'unsupported'; detail?: string }
 type DraftFidelityReport = { parsedAt: string; summary: { extracted: number; defaulted: number; unsupported: number }; entries: ProvenanceEntry[] }
 
-type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; degradedNote?: string | null; draftFidelityReport?: DraftFidelityReport | null; createdAt: string }
+type FrameworkRow = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; published: boolean; degradedNote?: string | null; draftFidelityReport?: DraftFidelityReport | null; createdAt: string; imageSlotCount?: number | null }
 type FrameworkFull = {
   id: string; name: string | null; frameworkText: string; industryCategory: string | null
   imageStylePrompt: string | null; overlayTemplate: unknown; renderTemplate: string | null
@@ -150,6 +150,14 @@ export default function FrameworksPage() {
               <tr key={f.id} className="cursor-pointer hover:bg-surface2" onClick={() => openEdit(f.id)}>
                 <td className="px-4 py-3 font-medium text-flame">
                   {f.name ?? f.id.slice(0, 8)}
+                  {f.imageSlotCount == null && (
+                    <span
+                      title="该框架缺少图片槽位等参数，多半不是走「一键导入」建的。用它生成时逐槽配置不会生效，建议重新导入工程文件夹。"
+                      className="ml-2 cursor-help rounded bg-rose-500/15 px-1.5 py-0.5 text-xs text-rose-600"
+                    >
+                      ⚠️ 无图片槽位
+                    </span>
+                  )}
                   {f.degradedNote && (
                     <span title={f.degradedNote} className="ml-2 cursor-help rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-600">
                       ⚠️ 降级

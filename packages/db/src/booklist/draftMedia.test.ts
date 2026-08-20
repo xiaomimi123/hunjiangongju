@@ -30,12 +30,14 @@ describe('extractDraftMedia', () => {
     expect(extractDraftMedia(draft)).toEqual({
       bgm: [{ fileName: '9DF714A2.mp3', title: '歌曲20260702-02' }],
       images: ['IMG_A.png', 'IMG_B.jpg'],
+      // 这份 fixture 没有主视频轨,切不出快闪角色 → 全部当正片图
+      coverImages: [],
     })
   })
   it('非对象/缺 materials → 空清单', () => {
-    expect(extractDraftMedia(null)).toEqual({ bgm: [], images: [] })
-    expect(extractDraftMedia({})).toEqual({ bgm: [], images: [] })
-    expect(extractDraftMedia({ materials: { audios: 'x', videos: 42 } })).toEqual({ bgm: [], images: [] })
+    expect(extractDraftMedia(null)).toEqual({ bgm: [], images: [], coverImages: [] })
+    expect(extractDraftMedia({})).toEqual({ bgm: [], images: [], coverImages: [] })
+    expect(extractDraftMedia({ materials: { audios: 'x', videos: 42 } })).toEqual({ bgm: [], images: [], coverImages: [] })
   })
 })
 
@@ -105,5 +107,58 @@ describe('readFrameworkDefaults', () => {
     expect(readFrameworkDefaults({})).toEqual({ bgmId: null, assetFolder: null })
     expect(readFrameworkDefaults({ __defaultBgmId: '', __defaultAssetFolder: 42 })).toEqual({ bgmId: null, assetFolder: null })
     expect(readFrameworkDefaults(null)).toEqual({ bgmId: null, assetFolder: null })
+  })
+})
+
+// ★ 书封必须和正片配图分开。混在同一个素材库文件夹里，正片槽位会随机抽到书封当配图
+// ——客户样例实测 13 张图里 9 张是书封，成片 3 张正片图有 2 张是书封。
+describe('extractDraftMedia —— 书封与正片配图分开', () => {
+  // 主视频轨：第 0 段=开场，随后连续的短段(<500ms)=快闪书封，其余=正片
+  const withRoles = {
+    materials: {
+      videos: [
+        { id: 'o1', type: 'photo', path: `${P}/video/OPEN.png` },
+        { id: 'c1', type: 'photo', path: `${P}/video/COVER_1.png` },
+        { id: 'c2', type: 'photo', path: `${P}/video/COVER_2.png` },
+        { id: 'c3', type: 'photo', path: `${P}/video/COVER_3.png` },
+        { id: 'b1', type: 'photo', path: `${P}/video/BODY_1.png` },
+        { id: 'b2', type: 'photo', path: `${P}/video/BODY_2.png` },
+      ],
+    },
+    tracks: [
+      {
+        type: 'video',
+        attribute: 1,
+        segments: [
+          { material_id: 'o1', target_timerange: { start: 0, duration: 2159000 } },
+          { material_id: 'c1', target_timerange: { start: 2159000, duration: 200000 } },
+          { material_id: 'c2', target_timerange: { start: 2359000, duration: 190000 } },
+          { material_id: 'c3', target_timerange: { start: 2549000, duration: 210000 } },
+          { material_id: 'b1', target_timerange: { start: 2759000, duration: 5703000 } },
+          { material_id: 'b2', target_timerange: { start: 8462000, duration: 6067000 } },
+        ],
+      },
+    ],
+  }
+
+  it('快闪段的图被认成书封，开场与正片的图不在其中', () => {
+    const m = extractDraftMedia(withRoles)
+    expect(m.coverImages.sort()).toEqual(['COVER_1.png', 'COVER_2.png', 'COVER_3.png'])
+    expect(m.images).toContain('OPEN.png')
+    expect(m.images).toContain('BODY_1.png')
+    expect(m.coverImages).not.toContain('BODY_1.png')
+    expect(m.coverImages).not.toContain('OPEN.png')
+  })
+
+  it('images 仍是全量（老调用方按它做校验，不能少给）', () => {
+    const m = extractDraftMedia(withRoles)
+    expect(m.images).toHaveLength(6)
+  })
+
+  // 切不出角色时退化成「全部当正片图」——与加这个字段之前的行为一致，不能因此炸掉导入
+  it('没有主视频轨时不报错，书封清单为空', () => {
+    const m = extractDraftMedia({ materials: withRoles.materials, tracks: [] })
+    expect(m.coverImages).toEqual([])
+    expect(m.images).toHaveLength(6)
   })
 })

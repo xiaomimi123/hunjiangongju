@@ -116,7 +116,9 @@ describe('POST /api/admin/jianying/parse', () => {
     const res = await POST(req({ draftJson }), { params: {} })
     expect(res.status).toBe(200)
     const json = await res.json()
-    expect(json.media).toEqual({ bgm: [{ fileName: 'song.mp3', title: '歌曲A' }], images: ['pic.png'] })
+    // coverImages：这份 fixture 没有主视频轨,切不出快闪角色 → 全部当正片图。
+    // 用整对象比较,新增字段必须一并声明,否则它不受约束。
+    expect(json.media).toEqual({ bgm: [{ fileName: 'song.mp3', title: '歌曲A' }], images: ['pic.png'], coverImages: [] })
   })
 })
 

@@ -23,7 +23,7 @@ export {
 export type { TemplateParams, TemplateMode, FlashTimeline, GradeParams } from './booklist/templateParams'
 export { parseJianyingDraft } from './booklist/parseJianyingDraft'
 export type { DraftMeta } from './booklist/parseJianyingDraft'
-export { extractDraftMedia, readFrameworkDefaults } from './booklist/draftMedia'
+export { extractDraftMedia, readFrameworkDefaults, COVER_FOLDER_SUFFIX } from './booklist/draftMedia'
 export type { DraftMediaWanted, FrameworkDefaults } from './booklist/draftMedia'
 export { extractDraftStructure } from './booklist/draftStructure'
 export type { DraftStructure } from './booklist/draftStructure'

@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import path from 'path'
 import fs from 'fs/promises'
 import type { Prisma } from '@prisma/client'
-import { prisma, parseTemplateParams, parseJianyingDraft, buildFidelityReport } from '@mixcut/db'
+import { prisma, parseTemplateParams, parseJianyingDraft, buildFidelityReport, extractDraftMedia, COVER_FOLDER_SUFFIX } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
@@ -47,6 +47,10 @@ export const POST = handler(async (req) => {
   // （报告纯信息性展示，沿用本路由"缺省字段一律不写、不因此拒绝导入"的既有口径）。
   let fidelityReport: ReturnType<typeof buildFidelityReport> | null = null
   let charBudget: { maxLines: number; maxTotalChars: number; hardCapChars: number } | null = null
+  // 快闪书封的文件名。这些图**不能**和正片配图进同一个素材库文件夹：
+  // 正片槽位从该文件夹随机抽，混在一起就会抽到书封当配图（客户样例实测 13 张里 9 张是书封，
+  // 成片 3 张正片图有 2 张中招）。而书封在新片子里本来就按书目重新生成，原工程那几张用不上。
+  let coverNames = new Set<string>()
   const draftJsonRaw = form.get('draftJson')
   if (typeof draftJsonRaw === 'string' && draftJsonRaw.trim()) {
     try {
@@ -54,9 +58,11 @@ export const POST = handler(async (req) => {
       const { meta } = parseJianyingDraft(draft)
       fidelityReport = buildFidelityReport(meta.provenance, new Date().toISOString())
       charBudget = meta.charBudget ?? null
+      coverNames = new Set(extractDraftMedia(draft).coverImages)
     } catch {
       fidelityReport = null
       charBudget = null
+      coverNames = new Set()
     }
   }
 
@@ -81,7 +87,7 @@ export const POST = handler(async (req) => {
 
   const skipped: string[] = []
   const bgmStat = { imported: 0, reused: 0 }
-  const assetStat = { imported: 0, reused: 0 }
+  const assetStat = { imported: 0, reused: 0, covers: 0 }
 
   // BGM 入库（幂等键：folder=工程名 + name=曲名）
   let defaultBgmId: string | null = null
@@ -104,13 +110,17 @@ export const POST = handler(async (req) => {
     defaultBgmId = defaultBgmId ?? id
   }
 
-  // 图片素材入库（幂等键：folder=工程名 + name=去扩展名文件名）
+  // 图片素材入库（幂等键：folder + name=去扩展名文件名）。
+  // 书封另放一个文件夹：保留下来备查，但正片槽位（读 __defaultAssetFolder=工程名）抽不到它们。
   await fs.mkdir(path.join(DATA_DIR, 'assets'), { recursive: true })
   for (const f of imageFiles) {
     const assetName = path.basename(f.name, path.extname(f.name))
-    const existing = await prisma.stockAsset.findFirst({ where: { folder: projectName, name: assetName } })
+    const isCover = coverNames.has(f.name)
+    const folder = isCover ? `${projectName}${COVER_FOLDER_SUFFIX}` : projectName
+    const existing = await prisma.stockAsset.findFirst({ where: { folder, name: assetName } })
     if (existing) {
       assetStat.reused++
+      if (isCover) assetStat.covers++
       continue
     }
     const id = randomUUID()
@@ -123,15 +133,18 @@ export const POST = handler(async (req) => {
     } catch (err) {
       console.warn(`[jianying/import] makeThumb 异常(已忽略) ${abs}: ${(err as Error).message}`)
     }
-    await prisma.stockAsset.create({ data: { id, kind: 'image', name: assetName, folder: projectName, fileUrl: `/api/files/${rel}` } })
+    await prisma.stockAsset.create({ data: { id, kind: 'image', name: assetName, folder, fileUrl: `/api/files/${rel}` } })
     assetStat.imported++
+    if (isCover) assetStat.covers++
   }
 
   // 建框架（口径同 jianying/save）+ 默认值
   const normalized = { ...parseTemplateParams(templateParams), mode: 'flash' as const }
   const overlayTemplate: Record<string, unknown> = { __templateParams: normalized }
   if (defaultBgmId) overlayTemplate.__defaultBgmId = defaultBgmId
-  if (assetStat.imported + assetStat.reused > 0) overlayTemplate.__defaultAssetFolder = projectName
+  // 只有真的存在**非书封**图片时才预填配图来源。全是书封却预填，正片会拿到空库然后
+  // 回退 AI 生图——那反而是对的，但预填一个空文件夹会让运营以为库里有货。
+  if (assetStat.imported + assetStat.reused > assetStat.covers) overlayTemplate.__defaultAssetFolder = projectName
   if (watermark) overlayTemplate.watermark = watermark
   if (flashCount) overlayTemplate.__bookCount = flashCount
   // 图片槽位数 = 草稿正片段数。填了它，generate-script 会把文案规整成恰好这么多段，

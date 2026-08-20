@@ -13,7 +13,12 @@ export interface DraftStructure {
   bodyAvgMs: number
   flashScale: number // 快闪段「相对填满(cover)」缩放中位数——只取素材 type==='photo' 的段，换算见 coverRelativeScale（无则 1）
   bodyScale: number  // 正片段「相对填满(cover)」缩放中位数——只取素材 type==='photo' 的段，换算见 coverRelativeScale（无则 1）
-  segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number; materialType?: string }[]
+  /**
+   * fileName：该段用的素材文件名（去路径）。
+   * 导入侧靠它把「快闪书封」和「正片配图」分开入库——两者混在一个素材库文件夹里，
+   * 正片槽位就会抽到书封当配图（实测 13 张里 9 张是书封，成片 3 张有 2 张中招）。
+   */
+  segments: { index: number; role: 'open' | 'flash' | 'body'; durationMs: number; scale: number; materialType?: string; fileName?: string }[]
 }
 
 function obj(x: unknown): Record<string, unknown> {
@@ -34,6 +39,18 @@ function avg(xs: number[]): number {
 // material_id → materials.videos[].type（剪映把 photo/video 素材都放在 materials.videos[] 里，靠 type 区分）。
 // AI 生成图会替换 photo 素材位，video 素材是创作者自己的实拍/成片镜头，不是"图片位"，
 // 缩放基准（flashScale/bodyScale）只应参考 photo 段，否则 video 段的满幅 scale=1 会拉偏中位数。
+// material_id → 素材文件名（去路径）
+function materialFileById(materials: Record<string, unknown>): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const raw of arr(materials.videos)) {
+    const v = obj(raw)
+    if (typeof v.id !== 'string' || typeof v.path !== 'string') continue
+    const base = v.path.split('/').pop()
+    if (base) out.set(v.id, base)
+  }
+  return out
+}
+
 function materialTypeById(materials: Record<string, unknown>): Map<string, string> {
   const out = new Map<string, string>()
   for (const raw of arr(materials.videos)) {
@@ -81,6 +98,7 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
     const materials = obj(d.materials)
     const typeById = materialTypeById(materials)
     const dimsById = materialDimsById(materials)
+    const fileById = materialFileById(materials)
     const cc = obj(d.canvas_config)
     const canvasW = typeof cc.width === 'number' && cc.width > 0 ? cc.width : 720
     const canvasH = typeof cc.height === 'number' && cc.height > 0 ? cc.height : 960
@@ -95,6 +113,7 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
         scale: rawScale,
         relScale: coverRelativeScale(rawScale, dims?.width, dims?.height, canvasW, canvasH),
         materialType: materialId ? typeById.get(materialId) : undefined,
+        fileName: materialId ? fileById.get(materialId) : undefined,
       }
     })
     if (segs.length === 0) return EMPTY
@@ -125,7 +144,7 @@ export function extractDraftStructure(draft: unknown): DraftStructure {
       bodyAvgMs: avg(bodyDurs),
       flashScale: median(segs.filter((s, k) => roles[k] === 'flash' && isPhoto(s)).map((s) => s.relScale)),
       bodyScale: median(segs.filter((s, k) => roles[k] === 'body' && isPhoto(s)).map((s) => s.relScale)),
-      segments: segs.map((s, k) => ({ index: k, role: roles[k], durationMs: s.durationMs, scale: s.scale, materialType: s.materialType })),
+      segments: segs.map((s, k) => ({ index: k, role: roles[k], durationMs: s.durationMs, scale: s.scale, materialType: s.materialType, fileName: s.fileName })),
     }
   } catch {
     return EMPTY

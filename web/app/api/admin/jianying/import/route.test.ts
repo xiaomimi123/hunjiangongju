@@ -127,7 +127,7 @@ describe('POST /api/admin/jianying/import', () => {
     const j = await res.json()
     createdFw.push(j.id)
     expect(j.bgm).toEqual({ imported: 1, reused: 0 })
-    expect(j.assets).toEqual({ imported: 1, reused: 0 })
+    expect(j.assets).toEqual({ imported: 1, reused: 0, covers: 0 })
     const fw = await prisma.copyFramework.findUniqueOrThrow({ where: { id: j.id } })
     const ot = fw.overlayTemplate as Record<string, unknown>
     const bgm = await prisma.bgmLibrary.findFirstOrThrow({ where: { folder: PROJECT, name: '歌曲A' } })
@@ -144,7 +144,7 @@ describe('POST /api/admin/jianying/import', () => {
     const j = await res.json()
     createdFw.push(j.id)
     expect(j.bgm).toEqual({ imported: 0, reused: 1 })
-    expect(j.assets).toEqual({ imported: 0, reused: 1 })
+    expect(j.assets).toEqual({ imported: 0, reused: 1, covers: 0 })
     expect(await prisma.bgmLibrary.count({ where: { folder: PROJECT, name: '歌曲A' } })).toBe(1)
   })
 
@@ -260,7 +260,7 @@ describe('POST /api/admin/jianying/import', () => {
     const j = await res.json()
     createdFw.push(j.id)
     await trackBgm('导入测试工程-缩略图失败')
-    expect(j.assets).toEqual({ imported: 1, reused: 0 })
+    expect(j.assets).toEqual({ imported: 1, reused: 0, covers: 0 })
     const asset = await prisma.stockAsset.findFirstOrThrow({ where: { folder: '导入测试工程-缩略图失败', name: 'bad' } })
     createdAssets.push(asset.id)
   })
@@ -287,6 +287,57 @@ describe('POST /api/admin/jianying/import', () => {
     expect(typeof report.summary.unsupported).toBe('number')
     expect(Array.isArray(report.entries)).toBe(true)
     expect(report.entries.length).toBeGreaterThan(0)
+  })
+
+  // ★ 书封不能和正片配图进同一个素材库文件夹：正片槽位从该文件夹随机抽，
+  // 混在一起就会抽到书封当配图（客户样例实测 13 张图里 9 张是书封，
+  // 成片 3 张正片图有 2 张中招）。而书封在新片子里本来就按书目重新生成，原工程那几张用不上。
+  it('快闪书封入到「<工程名>·书封」文件夹，正片配图留在「<工程名>」', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-cover-1', role: 'operator' })
+    const folder = '导入测试工程-书封分离'
+    // 主视频轨：开场 + 两张短段(快闪书封) + 一张长段(正片)
+    const draft = {
+      ...SAMPLE_DRAFT,
+      materials: {
+        ...SAMPLE_DRAFT.materials,
+        videos: [
+          { id: 'v_open', type: 'photo', path: 'x/open.png' },
+          { id: 'v_c1', type: 'photo', path: 'x/cover1.png' },
+          { id: 'v_c2', type: 'photo', path: 'x/cover2.png' },
+          { id: 'v_b1', type: 'photo', path: 'x/body1.png' },
+        ],
+      },
+      tracks: [
+        { type: 'video', attribute: 1, segments: [
+          { material_id: 'v_open', target_timerange: { start: 0, duration: 2158988 } },
+          { material_id: 'v_c1', target_timerange: { start: 2158988, duration: 200000 } },
+          { material_id: 'v_c2', target_timerange: { start: 2358988, duration: 190000 } },
+          { material_id: 'v_b1', target_timerange: { start: 2548988, duration: 5703000 } },
+        ] },
+        ...SAMPLE_DRAFT.tracks.filter((t) => t.type !== 'video'),
+      ],
+    }
+    const form = makeForm({ projectName: folder, draftJson: JSON.stringify(draft) })
+    // makeForm 默认那张 pic.png 之外，再挂上草稿里那四张
+    for (const n of ['open.png', 'cover1.png', 'cover2.png', 'body1.png']) {
+      form.append('imageFiles', new File([new Uint8Array([9, 9])], n, { type: 'image/png' }))
+    }
+    const res = await call(form)
+    expect(res.status).toBe(200)
+    createdFw.push((await res.json()).id)
+    await trackBgm(folder)
+
+    const coverFolder = `${folder}·书封`
+    const inMain = await prisma.stockAsset.findMany({ where: { folder } })
+    const inCover = await prisma.stockAsset.findMany({ where: { folder: coverFolder } })
+    createdAssets.push(...inMain.map((a) => a.id), ...inCover.map((a) => a.id))
+
+    expect(inCover.map((a) => a.name).sort()).toEqual(['cover1', 'cover2'])
+    const mainNames = inMain.map((a) => a.name).sort()
+    expect(mainNames).toContain('body1')
+    expect(mainNames).toContain('open')
+    expect(mainNames, '书封漏进了正片配图库').not.toContain('cover1')
+    expect(mainNames).not.toContain('cover2')
   })
 
   it('不带 draftJson → draftFidelityReport 为 null（与现状一致，零回归）', async () => {

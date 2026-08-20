@@ -21,7 +21,7 @@ import { buildBodyGraph, type FfBodySegment } from './bodyGraph'
 import { buildDecorChain, type DecorOpts } from './decor'
 import { buildAss, subtitlesFilter, type AssStyleOpts, type AssFlashCue } from './ass'
 import { bookTitleRuns, captionCues, type RenderBodySegment } from './renderBody'
-import { rippleOverlayChain } from './ripple'
+import { rippleOverlayChain, rippleDisplaceChain } from './ripple'
 
 export interface FullFlashCard {
   coverAbs: string
@@ -45,8 +45,12 @@ export interface RenderFullOpts {
   watermark?: string
   assStyle: AssStyleOpts
   decor: Omit<DecorOpts, 'width' | 'height'>
-  /** 水波纹素材：PNG 序列的模式串 + 起点/时长（绝对时间）。缺省则不叠 */
-  ripple?: { patternAbs: string; atMs: number; durationMs: number }
+  /**
+   * 水波纹素材（预渲染）。缺省则不叠。
+   * - patternAbs: 高光环 RGBA 序列
+   * - xmapAbs/ymapAbs: 位移图序列；给了才会真的折射底图，只给高光环就退化成「画一圈白环」
+   */
+  ripple?: { patternAbs: string; xmapAbs?: string; ymapAbs?: string; atMs: number; durationMs: number }
   assAbs: string
   outAbs: string
   fontsDir?: string
@@ -132,7 +136,19 @@ export function buildRenderFullPlan(o: RenderFullOpts): RenderFullPlan {
   cur = 'dec'
 
   // ---- 水波纹：预渲染素材，叠在绝对时刻 ----
+  //
+  // 顺序刻意排在**字幕之前**：草稿里水波纹在视频轨上、文字轨在它之上，
+  // 所以波纹折射的是画面，不该把书名和台词一起扭歪。
   if (o.ripple) {
+    // 位移层：真把像素推开，这是水纹的本体
+    if (o.ripple.xmapAbs && o.ripple.ymapAbs) {
+      inputArgs.push('-framerate', String(o.fps), '-i', o.ripple.xmapAbs)
+      inputArgs.push('-framerate', String(o.fps), '-i', o.ripple.ymapAbs)
+      chains.push(rippleDisplaceChain(cur, 'rpd', idx, idx + 1, o.ripple.atMs, o.ripple.durationMs))
+      cur = 'rpd'
+      idx += 2
+    }
+    // 高光层：让波峰有反光。单靠位移在低对比度画面上看不出来。
     inputArgs.push('-framerate', String(o.fps), '-i', o.ripple.patternAbs)
     chains.push(rippleOverlayChain(cur, 'rip', idx, o.ripple.atMs, o.ripple.durationMs))
     cur = 'rip'

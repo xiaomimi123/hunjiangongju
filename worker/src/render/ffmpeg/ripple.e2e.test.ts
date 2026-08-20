@@ -8,7 +8,7 @@ import { spawnSync } from 'child_process'
 import { mkdtempSync, rmSync, mkdirSync, readdirSync } from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildRippleAssetArgs, rippleAlphaExpr, rippleOverlayChain, type RippleAssetOpts } from './ripple'
+import { buildRippleAssetArgs, rippleAlphaExpr, rippleOverlayChain, buildRippleDisplaceArgs, rippleDisplaceExpr, type RippleAssetOpts } from './ripple'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -128,5 +128,56 @@ d('真渲验收 —— 水波纹预渲染', () => {
     expect(c).toContain('setpts=PTS-STARTPTS+3.984/TB')
     expect(c).toContain("enable='between(t,3.984,4.442)'")
     expect(c).toContain('eof_action=pass')
+  })
+})
+
+// 位移层：断言它**真的把底图推开了**，而不只是画了一圈白环。
+d('真渲验收 —— 水波纹位移层', () => {
+  let dir = ''
+  const OPTS: RippleAssetOpts = { width: W, height: H, fps: 30, durationMs: 458, rings: 3, outPattern: '' }
+
+  beforeAll(() => { dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-rpd-')) })
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('位移图以 128 为零位移，环处偏离 128', () => {
+    const out = path.join(dir, 'x%03d.png')
+    const r = ff(buildRippleDisplaceArgs(OPTS, 'x', out))
+    expect(r.ok, `位移图渲染失败: ${r.out.slice(-400)}`).toBe(true)
+    const f = readdirSync(dir).filter((x) => x.startsWith('x')).sort().map((x) => path.join(dir, x))
+    const b = spawnSync(FFMPEG, ['-v', 'error', '-i', f[5], '-vf', 'format=gray', '-f', 'rawvideo', '-'],
+      { encoding: 'buffer', maxBuffer: 1 << 26 }).stdout as unknown as Buffer
+    let far = 0
+    for (const v of b) if (Math.abs(v - 128) > 6) far++
+    // 环所在的一圈应有可观比例偏离 128；全是 128 说明位移根本没算出来
+    expect(far / b.length, `位移图几乎全是 128（没有位移）: ${far / b.length}`).toBeGreaterThan(0.01)
+  })
+
+  // ★ 反证：rings=0 时位移图必须处处是 128，否则上面那条量的不是「环」
+  it('rings=0 时位移图处处为 128（反证）', () => {
+    expect(rippleDisplaceExpr({ ...OPTS, rings: 0 }, 'x')).toBe('128')
+  })
+
+  // ★ 真把画面推开了：同一张底图过 displace 前后必须不同，且差异集中在环上
+  it('displace 真的折射底图', () => {
+    const bg = path.join(dir, 'bg.png')
+    expect(ff(['-v', 'error', '-f', 'lavfi', '-i', `testsrc=size=${W}x${H}:rate=1:duration=1`,
+      '-frames:v', '1', '-y', bg]).ok).toBe(true)
+    const xm = path.join(dir, 'dx.png')
+    const ym = path.join(dir, 'dy.png')
+    ff(buildRippleDisplaceArgs(OPTS, 'x', xm.replace('.png', '%03d.png')))
+    ff(buildRippleDisplaceArgs(OPTS, 'y', ym.replace('.png', '%03d.png')))
+    const x5 = path.join(dir, 'dx006.png')
+    const y5 = path.join(dir, 'dy006.png')
+    const out = path.join(dir, 'disp.png')
+    const r = ff(['-y', '-i', bg, '-i', x5, '-i', y5,
+      '-filter_complex', '[0][1][2]displace=edge=smear', '-frames:v', '1', out])
+    expect(r.ok, `displace 失败: ${r.out.slice(-500)}`).toBe(true)
+    const px = (f: string) => spawnSync(FFMPEG, ['-v', 'error', '-i', f, '-vf', 'format=gray', '-f', 'rawvideo', '-'],
+      { encoding: 'buffer', maxBuffer: 1 << 26 }).stdout as unknown as Buffer
+    const a = px(bg)
+    const b = px(out)
+    let diff = 0
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (Math.abs(a[i] - b[i]) > 12) diff++
+    expect(diff / a.length, `displace 后画面没变（位移没生效）: ${diff / a.length}`).toBeGreaterThan(0.01)
   })
 })

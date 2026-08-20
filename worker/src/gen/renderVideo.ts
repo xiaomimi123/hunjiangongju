@@ -85,10 +85,16 @@ export function buildFfmpegArgs(opts: {
   if (gearOk) { args.push('-i', sfx!.gearAbs!); gearIdx = idx++ }
   if (sfx?.dropAbs) { args.push('-i', sfx.dropAbs); dropIdx = idx++ }
 
-  // 开场特效（ffmpeg 层，逐帧滤镜，可靠——HyperFrames 渲不出开场动画，故在合成阶段补）：
-  // 前 ~1.1s 从黑淡入 + 画面由 1.12x 缓缓拉回到 1.0（电影感「揭开」）。on=输出帧号，30fps → 前 33 帧做缩放。
-  const vfilter =
-    "[0:v]zoompan=z='if(lte(on,33),1.12-0.12*on/33,1)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=720x960:fps=30,fade=t=in:st=0:d=0.7,format=yuv420p[v]"
+  // 【不要再加 zoompan】原本这里有一句 zoompan 做「前 1.1s 从 1.12x 拉回 1.0」的开场推近。
+  // 它在服务器的 ffmpeg 5.1.9 上会**把画面冻住**：实测拿真 body.mp4 隔离验证，
+  // 过 zoompan 后 t=3/8/10 三个帧指纹完全相同，不过则四个全不同。
+  // 本机 ffmpeg 9.0.1 复现不出来——是老版 zoompan 在 d=1 时不逐帧取新输入的行为，新版已修。
+  // 症状是每条成片从约 2 秒起画面定格、字幕整条消失（字幕本身在 HTML 和 body.mp4 里都是好的，
+  // 只是被定格在了一个还没有字幕的时刻）。
+  //
+  // 那个推近本来也是我们自己加的装饰，客户工程里没有这一下；开场动效已由 HTML 的碎裂层负责，
+  // 去掉它反而更贴近「照抄工程文件」。scale 补上原先由 zoompan 的 s= 参数兜着的尺寸保证。
+  const vfilter = '[0:v]scale=720:960,fade=t=in:st=0:d=0.7,format=yuv420p[v]'
 
   const aformat = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
   // 人声后处理：把偏平的 TTS/克隆音色处理得更自然、厚实、有磁性——

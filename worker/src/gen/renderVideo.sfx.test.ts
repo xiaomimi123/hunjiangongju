@@ -46,3 +46,31 @@ describe('buildFfmpegArgs — SFX', () => {
     expect(a).toContain('-crf 28')
   })
 })
+
+// 线上事故（每条片子都中招）: 成片从约 2 秒起画面冻住、字幕整条消失。
+//
+// 定位过程: body.mp4(HyperFrames 产物) 577 帧全不同、完全正常; 冻结发生在混音这一步。
+// 服务器 ffmpeg 5.1.9 上拿真 body.mp4 做隔离实验:
+//   过 zoompan  → t=3/8/10 三个帧指纹完全相同(冻结)
+//   不过 zoompan → 四个全不同
+// 本机 ffmpeg 9.0.1 复现不出来 —— 是老版本 zoompan 在 d=1 时不逐帧取新输入的行为,
+// 新版已修。服务器用 Debian 12 自带的 5.1.9,短期不打算换 ffmpeg,所以从滤镜链里去掉它。
+//
+// 顺带: 那个 1.12→1.0 的开场推近本来就是我们自己加的装饰,客户工程里没有这一下,
+// 去掉反而更贴近「照抄工程文件」;开场动效已由 HTML 的碎裂层负责。
+describe('buildFfmpegArgs —— 不得再用 zoompan', () => {
+  it('滤镜链里没有 zoompan（老版 ffmpeg 上会冻帧）', () => {
+    const a = buildFfmpegArgs({ ...base, bgmAbs: null }).join(' ')
+    expect(a).not.toContain('zoompan')
+  })
+
+  it('仍保证输出尺寸与像素格式（原本由 zoompan 的 s= 参数兜着）', () => {
+    const a = buildFfmpegArgs({ ...base, bgmAbs: null }).join(' ')
+    expect(a).toContain('scale=720:960')
+    expect(a).toContain('format=yuv420p')
+  })
+
+  it('开场淡入保留', () => {
+    expect(buildFfmpegArgs({ ...base, bgmAbs: null }).join(' ')).toContain('fade=t=in:st=0:d=0.7')
+  })
+})

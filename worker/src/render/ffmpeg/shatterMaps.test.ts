@@ -124,24 +124,55 @@ describe('碎裂坐标表', () => {
     expect(mx, '落位帧仍有棱光，画面会留下发光裂纹').toBe(0)
   })
 
-  // ★ 这条抓的是一个真出过的 bug：反光原本算成翻转角的 cos^14，
-  // 而翻转角在落位时收敛到 0 ⇒ cos(0)=1 ⇒ **每片落位那一刻都被打满反光**，
-  // 所有碎片的脸同时提亮成一片灰，暗色原图整个被吃掉。
+  // ★ 这条抓两个真出过的 bug：
   //
-  // 「落位帧棱光为 0」那条抓不到它（那一帧 rimEnv 也是 0，正好掩盖）。
-  // 要抓必须看**临落位**的帧：那时反光应该已经过去了，不该还在峰值。
-  it('反光在临落位时已经过去，不是落位那一刻最亮', () => {
+  // 1. 反光原本算成翻转角的 cos^14，而翻转角在落位时收敛到 0 ⇒ cos(0)=1
+  //    ⇒ **每片落位那一刻都被打满反光**，所有碎片的脸同时提亮成一片灰。
+  // 2. 棱光淡出原本是 `min(1,(1-p)/0.18)` —— 直到 p=0.82 才开始收，而那正是画面
+  //    拼好的时刻，成片拼合那几帧是**一张发光的裂纹网**（参考视频里这时裂纹几乎看不见）。
+  //
+  // 「落位帧棱光为 0」那条两个都抓不到（那一帧包络也是 0，正好掩盖）。
+  // 要抓必须看**临拼合**的帧。实测飞行中均值 49.5、临拼合 0.28（0.6%）、拼合后 0.00。
+  it('临拼合时棱光已经收干净，不留发光裂纹网', () => {
     const lit = (f: number) => {
-      const s = frameS(f)
+      const sp = frameS(f)
       let sum = 0
-      for (let i = 0; i < PX; i++) sum += s[i]
+      for (let i = 0; i < PX; i++) sum += sp[i]
       return sum / PX
     }
-    // 各片 flashAt 铺在 0.16~0.62，换算到时间轴大致在前 60%
-    const early = Math.round(LAST * 0.3)
-    const nearLanding = Math.round(LAST * 0.72) // 绝大多数碎片 p>0.9，尚未落位
-    expect(lit(nearLanding), '临落位反而最亮，说明反光峰位跟着落位走了')
-      .toBeLessThan(lit(early) * 0.6)
+    const flying = lit(Math.round(LAST * 0.35))
+    const joining = lit(Math.round(LAST * 0.72)) // 绝大多数碎片 p>0.9，正在归位
+    expect(flying, '飞行中根本没有棱光，这条断言验不到东西').toBeGreaterThan(5)
+    expect(joining / flying, `临拼合仍有 ${(joining / flying * 100).toFixed(1)}% 的棱光，会看到发光裂纹网`)
+      .toBeLessThan(0.05)
+  })
+
+  // ★ 玻璃质感的关键不在边缘，在**一片之内的明暗渐变**：迎光那头亮、背光那头暗。
+  // 平涂一个亮度会让碎片看着像纸片——这是拿成片和参考逐帧比出来的。
+  // 实测同片内最亮/最暗比值 1.17~2.81（中位约 2.0）；没有渐变时恒为 1.00。
+  it('同一碎片内部有明暗渐变，不是平涂', () => {
+    const geo = buildGeometry(G)
+    const f = Math.round(LAST * 0.35)
+    const xm = maps.xmap.subarray(f * PX * 2, (f + 1) * PX * 2)
+    const ym = maps.ymap.subarray(f * PX * 2, (f + 1) * PX * 2)
+    const bl = frameB(f)
+    const lo = new Map<number, number>()
+    const hi = new Map<number, number>()
+    for (let i = 0; i < PX; i++) {
+      const u = xm.readUInt16LE(i * 2)
+      if (u === OUT_OF_RANGE) continue
+      const v = ym.readUInt16LE(i * 2)
+      const l = geo.label[v * G.width + u]
+      const b = bl[i]
+      if (b === 0) continue
+      lo.set(l, Math.min(lo.get(l) ?? 255, b))
+      hi.set(l, Math.max(hi.get(l) ?? 0, b))
+    }
+    const spans = [...hi.keys()].map((k) => hi.get(k)! / Math.max(1, lo.get(k)!)).sort((a, b) => a - b)
+    expect(spans.length, '这一帧没有碎片在过曝，验不到东西').toBeGreaterThan(6)
+    const median = spans[Math.floor(spans.length / 2)]
+    expect(median, `同片内明暗几乎没变化（各片比值 ${spans.map((v) => v.toFixed(2)).join(' ')}），碎片会像纸片`)
+      .toBeGreaterThan(1.5)
   })
 
   // 本仓禁用 Math.random：随机会让同一模板每次渲染都不同，出问题无法复现

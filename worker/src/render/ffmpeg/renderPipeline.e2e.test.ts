@@ -139,7 +139,7 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
 
   // 碎裂坐标表同理按模板缓存：算一次约 2.5 秒，不该每条片子重算
   it('碎裂坐标表落在模板级缓存里，三张表俱全', async () => {
-    const dir = path.join(cacheRoot, 'shatter', `v4-${W}x${H}@30-2159`)
+    const dir = path.join(cacheRoot, 'shatter', `v5-${W}x${H}@30-2159`)
     expect(existsSync(path.join(dir, '.done')), '缺完成标记，缓存下次会失效').toBe(true)
     for (const f of ['x.mkv', 'y.mkv', 'bloom.mkv']) {
       expect(existsSync(path.join(dir, f)), `缺 ${f}`).toBe(true)
@@ -149,7 +149,7 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
   it('缓存命中时不重渲（第二次调用不改动缓存目录的 mtime）', async () => {
     const marks = [
       path.join(cacheRoot, 'ripple', `${W}x${H}@30-458`, '.done'),
-      path.join(cacheRoot, 'shatter', `v4-${W}x${H}@30-2159`, '.done'),
+      path.join(cacheRoot, 'shatter', `v5-${W}x${H}@30-2159`, '.done'),
     ]
     const before = await Promise.all(marks.map(async (m) => (await fsp.stat(m)).mtimeMs))
     await renderBodyWithFfmpeg(hfDir, data(), cacheRoot)

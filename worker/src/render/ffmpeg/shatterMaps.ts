@@ -43,7 +43,7 @@ export const DEFAULT_GEOM = { pieces: 16 } as const
  * 表现是「部署完了画面却没变」，而且查不到任何报错。**改动本文件里任何影响
  * 映射表数值的常量或算法，都要把这个号 +1。**
  */
-export const SHATTER_MAPS_VERSION = 4
+export const SHATTER_MAPS_VERSION = 5
 
 /** 碎片在整段时长的这个比例处合拢；之后留一点静置，避免刚落位就切场景 */
 const ASSEMBLE_AT = 0.78
@@ -402,8 +402,29 @@ const BLOOM_PEAK = 236
  * 硬边收窄、扩散光放宽 = 「淡淡的发光」；反过来会变成一条实心亮线，像描边不像玻璃。 */
 const RIM_PX = 9
 const RIM_PEAK = 205
-/** 棱光在飞行最后这一段淡出；必须在落位那一刻归零，否则成片上会留一张发光的网格 */
-const RIM_FADE = 0.18
+/**
+ * 棱光淡出。
+ *
+ * 第一版是 `min(1,(1-p)/0.18)` —— 直到 p=0.82 才开始收，而那正是画面拼好的时刻，
+ * 于是成片拼合那几帧是**一张发光的裂纹网**。参考视频在同一时刻裂纹几乎看不见。
+ * 改成从飞行中段就开始平方衰减：p=0.6 剩 49%、p=0.8 剩 10%、p=0.95 剩 0.5%。
+ */
+const RIM_FADE = 0.55
+const RIM_FALLOFF = 2.2
+
+/**
+ * 方向光。玻璃质感的关键不在碎片边缘，在**一片之内的明暗渐变**：
+ * 迎光那头亮、背光那头暗。平涂一个亮度会让碎片看着像纸片，这是对比参考图后发现的。
+ *
+ * 投影在**输出画面**坐标系上算，所以碎片翻转时渐变方向跟着变——光是场景里的，不是贴在片上的。
+ */
+const LIGHT_X = -0.55
+const LIGHT_Y = -0.84
+/** 渐变的最暗端保留多少（0=全黑，1=没渐变） */
+const SHADE_FLOOR = 0.30
+/** 扫光带：一条窄亮带随飞行进度扫过碎片表面，玻璃转动时反光挪位就是这个样子 */
+const SWEEP_WIDTH = 0.34
+const SWEEP_PEAK = 120
 /**
  * 翻面反光：每片碎片在**自己的时刻**闪一次。
  *
@@ -466,9 +487,14 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
       // 指数 <1：过曝先稳在高位、临落位才快速收干净，与参考视频的节奏一致
       const bl = p >= BLOOM_SPAN ? 0 : Math.round(BLOOM_PEAK * Math.pow(1 - p / BLOOM_SPAN, 0.55))
 
-      // 棱光：飞行全程都在，只在最后 RIM_FADE 那一段淡出。
-      // 参考视频里碎片快拼合时断口仍然很亮，是它撑住了"玻璃"这个观感。
-      const rimEnv = Math.min(1, (1 - p) / RIM_FADE)
+      // 棱光：从飞行中段起平方衰减，落位（p=1）时严格为 0
+      const rimEnv = Math.pow(Math.min(1, (1 - p) / RIM_FADE), RIM_FALLOFF)
+      // 该片在输出画面上的中心与尺度：方向光渐变按它归一化
+      const ocx = s.cx + dx
+      const ocy = s.cy + dy
+      const half = Math.max(8, Math.hypot(s.sx1 - s.sx0, s.sy1 - s.sy0) / 2)
+      // 扫光带随飞行进度从一头扫到另一头
+      const sweep = -1.1 + 2.2 * p
       // 翻面反光：以本片的 flashAt 为中心的窄峰，落位（p=1）时必然衰减到 0
       const fd = (p - s.flashAt) / FLASH_WIDTH
       const flash = Math.exp(-fd * fd * 6)
@@ -506,11 +532,17 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
           const idx = Y * W + X
           xmap.writeUInt16LE(u, base + idx * 2)
           ymap.writeUInt16LE(v, base + idx * 2)
-          bloom[bbase + idx] = bl
+          // 方向光渐变：迎光端亮、背光端暗。一片之内有明暗，才像玻璃不像纸片。
+          let proj = ((X - ocx) * LIGHT_X + (Y - ocy) * LIGHT_Y) / half
+          proj = proj < -1 ? -1 : proj > 1 ? 1 : proj
+          const shade = SHADE_FLOOR + (1 - SHADE_FLOOR) * (0.5 + 0.5 * proj)
+          bloom[bbase + idx] = Math.round(bl * shade)
           // 棱光：距裂缝越近越亮。距离在**源图坐标系**上量，
           // 这样碎片被压扁时棱边也跟着压扁，不会看出是后期贴上去的
           const d = edgeDist[src]
-          let lit = faceLit
+          // 扫光带：投影落在 sweep 附近的那一条窄带被提亮
+          const sd = (proj - sweep) / SWEEP_WIDTH
+          let lit = faceLit + SWEEP_PEAK * Math.exp(-sd * sd) * rimEnv
           if (d < rimPx) lit += RIM_PEAK * Math.pow(1 - d / rimPx, 1.7) * rimEnv
           if (lit > 2) spec[bbase + idx] = lit > 255 ? 255 : lit
         }
@@ -527,8 +559,8 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
 }
 
 /** 光晕的扩散半径与叠加强度 */
-const GLOW_SIGMA = 22
-const GLOW_OPACITY = 0.55
+const GLOW_SIGMA = 30
+const GLOW_OPACITY = 0.72
 /** 棱光的硬边强度，以及它那层扩散光的半径与强度 */
 const SPEC_OPACITY = 0.62
 const SPEC_GLOW_SIGMA = 11

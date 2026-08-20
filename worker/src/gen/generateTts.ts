@@ -1,7 +1,8 @@
 import { spawnSync } from 'child_process'
-import { promises as fs } from 'fs'
+import { promises as fs, renameSync } from 'fs'
 import path from 'path'
 import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
+import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { DATA_DIR } from '../paths'
 
 // 纯函数：从 GenerationTask.variables（Json）中取出运营在生成表单里选的克隆音色 voiceId。
@@ -27,6 +28,24 @@ function probeDurationMs(audioAbs: string): number {
   )
   const durSec = parseFloat((r.stdout ?? '').trim())
   return Number.isFinite(durSec) && durSec > 0 ? durSec * 1000 : 0
+}
+
+/**
+ * 在音频末尾补静音，使总长度达到 targetMs（**只补不截**）。
+ *
+ * 用 apad 的 whole_dur：它按目标总时长补，而不是按「补多少」，
+ * 省得先探测再算差值——少一步就少一处四舍五入。
+ * 原地替换：先写临时文件再改名，避免 ffmpeg 读写同一个文件产出空文件。
+ */
+function padSilenceTo(audioAbs: string, targetMs: number): void {
+  const tmp = `${audioAbs}.pad.wav`
+  const r = spawnSync(
+    'ffmpeg',
+    ['-y', '-i', audioAbs, '-af', `apad=whole_dur=${(targetMs / 1000).toFixed(3)}`, '-ar', '48000', '-ac', '1', tmp],
+    { encoding: 'utf8', stdio: 'pipe' },
+  )
+  if (r.status !== 0) throw new Error(`补静音失败: ${(r.stderr ?? '').slice(-400)}`)
+  renameSync(tmp, audioAbs)
 }
 
 // 把多个音频切片按顺序无缝拼成一条 wav（concat filter 会重采样统一格式，容忍各片格式不一）。
@@ -63,7 +82,10 @@ export function parseBeats(captionBeats: unknown, fallbackText: string): Beat[] 
  */
 export async function generateTts(genTaskId: string): Promise<void> {
   const [task, segments] = await Promise.all([
-    prisma.generationTask.findUnique({ where: { id: genTaskId }, select: { variables: true } }),
+    prisma.generationTask.findUnique({
+      where: { id: genTaskId },
+      select: { variables: true, framework: { select: { overlayTemplate: true } } },
+    }),
     prisma.generatedSegment.findMany({ where: { generationTaskId: genTaskId }, orderBy: { seqNo: 'asc' } }),
   ])
   const voiceId = readVoiceId(task?.variables)
@@ -73,6 +95,22 @@ export async function generateTts(genTaskId: string): Promise<void> {
   const clipsDir = path.join(dir, 'clips')
   await fs.rm(clipsDir, { recursive: true, force: true }).catch(() => {})
   await fs.mkdir(clipsDir, { recursive: true })
+
+  // ── 第 0 段要占满草稿的「开场 + 快闪」窗口 ──
+  //
+  // 第 0 段在 flash 模板里不出字幕，它的时间窗就是开场碎裂 + 书封快闪的总长度
+  // （indexHtml 的 flashTimeline 直接拿它切开场与快闪）。而这一段的旁白很短
+  // （「今天分享的是《X》」约 2.2 秒），窗口就被压到 2.2 秒——草稿是 3.98 秒，
+  // 快闪被硬生生压缩，9 张书封挤在不到 2 秒里闪完。
+  //
+  // 解法是把第 0 段的**音频**补静音到草稿长度：画面时间轴是从 bodyTimings 来的，
+  // 音频一对齐，快闪与正片起点自动就跟草稿一致，不会音画错位。
+  // 静音补在旁白**之后**——与草稿一致：开场念标题，快闪那 1.8 秒只有齿轮音。
+  const tp = parseTemplateParams(
+    (task?.framework?.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
+  )
+  const flashTotalMs = (tp.flash.clipMs ?? []).reduce((a, b) => a + b, 0)
+  const openFlashMs = tp.mode === 'flash' && flashTotalMs > 0 ? tp.open.durationMs + flashTotalMs : 0
 
   const clipPaths: string[] = []
   const bodyTimings: { seqNo: number; startMs: number; endMs: number }[] = []
@@ -93,13 +131,22 @@ export async function generateTts(genTaskId: string): Promise<void> {
     )
     const clipPath = path.join(clipsDir, `c${i}.wav`)
     await fs.writeFile(clipPath, audio)
-    const durMs = probeDurationMs(clipPath) || 2000 // 探测失败给个兜底时长
+    const speechMs = probeDurationMs(clipPath) || 2000 // 探测失败给个兜底时长
+    // 第 0 段补静音到草稿的开场+快闪长度（只补不截：旁白比草稿还长时按旁白走，
+    // 截断会把话说到一半切掉）
+    let durMs = speechMs
+    if (i === 0 && openFlashMs > speechMs) {
+      padSilenceTo(clipPath, openFlashMs)
+      durMs = probeDurationMs(clipPath) || openFlashMs
+      console.log(`[gen] generate-tts ${genTaskId}: 第 0 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿开场+快闪）`)
+    }
     clipPaths.push(clipPath)
 
     const segStart = Math.round(cursorMs)
     const segEnd = Math.round(cursorMs + durMs)
-    // 段内短句：在本段【精确】窗口内按字数分布（timeCaptionBeats），带 startMs/endMs 写回。
-    const timedBeats = timeCaptionBeats(beats.map((b) => ({ zh: b.zh, en: b.en })), segStart, segEnd)
+    // 段内短句：按**旁白**的长度分布，不是按补过静音的窗口——
+    // 否则第 0 段的字幕会被摊到静音段上（flash 模板不出第 0 段字幕，但 classic 会）。
+    const timedBeats = timeCaptionBeats(beats.map((b) => ({ zh: b.zh, en: b.en })), segStart, Math.round(cursorMs + speechMs))
     await prisma.generatedSegment.update({ where: { id: seg.id }, data: { captionBeats: timedBeats } })
     bodyTimings.push({ seqNo: seg.seqNo, startMs: segStart, endMs: segEnd })
     cursorMs += durMs

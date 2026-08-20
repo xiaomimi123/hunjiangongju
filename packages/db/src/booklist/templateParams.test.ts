@@ -143,3 +143,36 @@ describe('flashTimeline —— 逐卡时长', () => {
     expect(flashTimeline(p, 4000, 3).offsets).toBeUndefined()
   })
 })
+
+// ★ 开场+快闪的窗口长度 = 第 0 段的时长。
+// 第 0 段的旁白很短（「今天分享的是《X》」约 2.2 秒），窗口就被压到 2.2 秒，
+// 9 张书封挤在不到 2 秒里闪完 —— 草稿是 3.98 秒。
+// 修法不在这里：generateTts 把第 0 段的**音频**补静音到草稿长度，
+// 画面时间轴从 bodyTimings 来，自然就跟着对齐（音画不会错位）。
+// 这组测试钉住「第 0 段对齐之后，切点确实回到草稿值」。
+describe('flashTimeline —— 第 0 段对齐草稿后的切点', () => {
+  const p = parseTemplateParams({
+    mode: 'flash',
+    open: { durationMs: 2159, shatter: true },
+    flash: { clipMs: [150, 252, 196, 192, 205, 198, 190, 222, 221] },
+  })
+
+  it('第 0 段补到 3984ms 时，开场结束回到 2159、快闪结束回到 3984', () => {
+    const t = flashTimeline(p, 3984, 9)
+    expect(t.openEndMs).toBe(2159)      // min(2159, 3984*0.55=2191)
+    expect(t.flashEndMs).toBe(3984)
+    expect(t.flashEndMs - t.openEndMs).toBe(1825)   // 九张卡的总时长
+  })
+
+  it('不补静音（第 0 段只有 2.2 秒旁白）时窗口被压掉一半 —— 这就是修之前的现象', () => {
+    const t = flashTimeline(p, 2200, 9)
+    expect(t.openEndMs).toBe(1210)               // 2200*0.55，开场被砍到 1.2 秒
+    expect(t.flashEndMs - t.openEndMs).toBe(990) // 快闪只剩 1 秒
+  })
+
+  it('旁白比草稿还长时按旁白走（只补不截，不会把话切一半）', () => {
+    const t = flashTimeline(p, 6000, 9)
+    expect(t.openEndMs).toBe(2159)   // 仍取 min(2159, 3300)
+    expect(t.flashEndMs).toBe(6000)
+  })
+})

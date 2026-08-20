@@ -10,6 +10,7 @@ import {
   isMockMode,
   pickAngle,
   parseTemplateParams,
+  fitToSegmentCount,
 } from '@mixcut/db'
 import { splitScriptToSegments } from './splitScript'
 
@@ -371,6 +372,16 @@ export function readBookTitle(variables: unknown): string | undefined {
  * 从 variables 读单本模式的主题书。存在即表示本次生成走「全篇只讲一本」的路径。
  * 由 select-books 写入；运营手填书单、manual/imitate、老任务重跑都不会有该字段。
  */
+/** 读框架配置的图片槽位数；未配置返回 0（表示不强制段数） */
+export function readImageSlotCount(overlayTemplate: unknown): number {
+  const ot = overlayTemplate && typeof overlayTemplate === 'object' && !Array.isArray(overlayTemplate)
+    ? (overlayTemplate as Record<string, unknown>) : null
+  const slots = ot?.__imageSlots
+  if (!slots || typeof slots !== 'object' || Array.isArray(slots)) return 0
+  const c = (slots as Record<string, unknown>).count
+  return typeof c === 'number' && Number.isInteger(c) && c > 0 ? c : 0
+}
+
 export function readThemeBook(variables: unknown): BookInput | undefined {
   const v = variables && typeof variables === 'object' && !Array.isArray(variables)
     ? (variables as Record<string, unknown>).themeBook : undefined
@@ -504,14 +515,26 @@ export async function generateScript(genTaskId: string): Promise<void> {
     }
   }
 
+  // 段数强约束：图片槽位数由草稿锁定时，文案必须恰好 N 段，否则「第 N 张图用这个提示词」
+  // 无从谈起（同一位置在不同片子里对应不同内容）。只在框架配了 __imageSlots 时强制，
+  // 老框架维持现状、零回归。规整是确定性的，不靠让 LLM 重写——段数不对是结构问题，
+  // 重写不保证收敛且每次都要一次 LLM 调用。
+  const slotCount = readImageSlotCount(fw.overlayTemplate)
+  let lines: string[] = clean
+  if (slotCount > 0 && lines.length !== slotCount) {
+    const before = lines.length
+    lines = fitToSegmentCount(lines, slotCount)
+    console.warn(`[gen] generate-script ${genTaskId}: 文案 ${before} 段 → 规整为 ${lines.length} 段（图片槽位数 ${slotCount}）`)
+  }
+
   // 单本模式：所有正文段统一挂主题书，不走位置均分、也不走书序号标记。
   const assigned = themeBook
-    ? clean.map((scriptText) => ({
+    ? lines.map((scriptText) => ({
         scriptText,
         bookTitle: themeBook.title,
         ...(themeBook.author ? { bookAuthor: themeBook.author } : {}),
       }))
-    : assignBooksToSegments(clean, booksForAssign(scriptMode, books), markedIdxs ?? undefined)
+    : assignBooksToSegments(lines, booksForAssign(scriptMode, books), markedIdxs ?? undefined)
   const assignedFinal = perGenBookTitle
     ? assigned.map((a) => ({ ...a, bookTitle: perGenBookTitle }))
     : assigned

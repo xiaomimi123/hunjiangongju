@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry } from '@mixcut/db'
+import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
@@ -54,9 +54,15 @@ export async function generateImage(genTaskId: string): Promise<void> {
   const dir = path.join(DATA_DIR, 'gen', genTaskId)
   await fs.mkdir(dir, { recursive: true })
 
+  // 逐槽位配置（框架配了 __imageSlots 时生效）：每个正片图片位单独指定来源与提示词。
+  // 典型用法是「前几张 AI 精修、后面素材库随机」。未配置的槽位维持全局行为。
+  const slotCfg = readImageSlots(task.framework.overlayTemplate)
+
   // 配图来源：素材库优先时，按分镜顺序分配素材库图片，够用的分镜跳过 AI 生图；不够的分镜（null）回退 AI。
   const { source: assetSource, folder: assetFolder } = readAssetSource(task.variables)
-  const libraryAssets = assetSource === 'library'
+  // 有逐槽配置时，只要任一槽位要素材库就得把库读出来（不能再依赖全局 assetSource）
+  const anySlotLibrary = (slotCfg?.slots ?? []).some((x: { source: string }) => x.source === 'library')
+  const libraryAssets = assetSource === 'library' || anySlotLibrary
     ? await prisma.stockAsset.findMany({
         where: { kind: 'image', ...(assetFolder ? { folder: assetFolder } : {}) },
         orderBy: { createdAt: 'asc' },
@@ -71,7 +77,11 @@ export async function generateImage(genTaskId: string): Promise<void> {
   const scenes = pickArtScenes(genTaskId, segments.length)
 
   for (const [i, seg] of segments.entries()) {
-    const asset = assignedAssets[i]
+    const slot = slotAt(slotCfg, i)
+    // 槽位显式指定 ai → 即使全局是素材库也走 AI；显式指定 library → 即使全局是 AI 也取库。
+    const asset = slot?.source === 'ai' ? null : slot?.source === 'library'
+      ? (assignedAssets[i] ?? null)
+      : assignedAssets[i]
     let imageUrl: string
 
     if (asset) {
@@ -84,7 +94,8 @@ export async function generateImage(genTaskId: string): Promise<void> {
     } else {
       // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildFreeArtPrompt
       // 内保底，配 negative_prompt 强力压制。
-      const prompt = buildFreeArtPrompt(stylePrompt, scenes[i])
+      // 槽位配了 prompt 就用它当主体，否则回退场景池方向。画风始终来自框架的 imageStylePrompt。
+      const prompt = buildFreeArtPrompt(stylePrompt, slot?.prompt ?? scenes[i])
       // 单张文生图偶发 504/超时是瞬时错误，逐图重试而非让整任务失败。
       const png = await withRetry(
         () =>

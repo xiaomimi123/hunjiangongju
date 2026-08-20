@@ -131,6 +131,9 @@ export const POST = handler(async (req) => {
   if (assetStat.imported + assetStat.reused > 0) overlayTemplate.__defaultAssetFolder = projectName
   if (watermark) overlayTemplate.watermark = watermark
   if (flashCount) overlayTemplate.__bookCount = flashCount
+  // 图片槽位数 = 草稿正片段数。填了它，generate-script 会把文案规整成恰好这么多段，
+  // 「第 N 张图」才有稳定含义，运营才能逐张配来源与提示词。slots 留空表示全部走默认行为。
+  if (bodyCount) overlayTemplate.__imageSlots = { count: bodyCount, slots: [] }
 
   const fw = await prisma.copyFramework.create({
     data: {

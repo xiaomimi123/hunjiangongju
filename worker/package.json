@@ -7,7 +7,8 @@
     "start": "tsx src/index.ts",
     "bootstrap": "tsx src/bootstrap.ts",
     "seed": "tsx src/seed.ts",
-    "test:render": "RENDER_E2E=1 ASS_FONT_STRICT=1 vitest run src/gen/renderVideo.e2e.test.ts src/render/ffmpeg"
+    "test:render": "RENDER_E2E=1 ASS_FONT_STRICT=1 vitest run src/gen/renderVideo.e2e.test.ts src/render/ffmpeg",
+    "requeue-render": "tsx src/requeueRender.ts"
   },
   "dependencies": {
     "@mixcut/db": "*",

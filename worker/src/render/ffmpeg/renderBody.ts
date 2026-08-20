@@ -59,7 +59,9 @@ export function bookTitleRuns(segs: RenderBodySegment[]): AssCue[] {
   for (const s of segs) {
     const title = (s.bookTitle ?? '').trim()
     if (!title) continue
-    const text = s.bookAuthor?.trim() ? `《${title}》\\N${s.bookAuthor.trim()}` : `《${title}》`
+    // 用真换行符,**不要**在这里写 ASS 的 \N —— escapeAssText 会把反斜杠再转义一次,
+    // 成片上会多出一个可见的反斜杠(《简爱》\ 换行 作者)。换行统一由 escapeAssText 负责。
+    const text = s.bookAuthor?.trim() ? `《${title}》\n${s.bookAuthor.trim()}` : `《${title}》`
     const prev = runs[runs.length - 1]
     if (prev && prev.text === text) prev.endMs = s.endMs
     else runs.push({ text, startMs: s.startMs, endMs: s.endMs })

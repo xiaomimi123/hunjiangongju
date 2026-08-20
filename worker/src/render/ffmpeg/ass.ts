@@ -13,6 +13,14 @@ export interface AssCue {
   endMs: number
 }
 
+/** 快闪书封卡上的书名/作者。与正文字幕分开是因为排版完全不同：居中大字、无压暗底。 */
+export interface AssFlashCue {
+  title: string
+  author?: string
+  startMs: number
+  endMs: number
+}
+
 export interface AssStyleOpts {
   /** ASS 的 Fontname 用的是**字体内部族名**，不是文件名。容器里装了 fonts-noto-cjk。 */
   fontName: string
@@ -26,6 +34,11 @@ export interface AssStyleOpts {
   titleColor: string
   /** 水印 */
   watermarkSizePx: number
+  /** 快闪书封卡（不给则不产出快闪样式） */
+  flashTitleSizePx?: number
+  flashTitleColor?: string
+  flashAuthorSizePx?: number
+  flashAuthorColor?: string
 }
 
 export interface AssOpts {
@@ -34,6 +47,8 @@ export interface AssOpts {
   captions: AssCue[]
   /** 常驻《书名》大标题，按连续同书名合并后的运行段 */
   bookTitles?: AssCue[]
+  /** 快闪书封卡，时间用**全片绝对值** */
+  flashCards?: AssFlashCue[]
   /** 全片水印文字；空则不渲染 */
   watermark?: string
   totalMs: number
@@ -108,6 +123,13 @@ export function buildAss(o: AssOpts): string {
     `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},0,0,0,0,100,100,0,0,1,3,2,2,60,60,${capMarginV},1`,
     `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,3,2,8,40,40,48,1`,
     `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},0,0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
+    // 快闪卡：an5(正中) + \pos 精确定位。只在给了尺寸时产出，老调用零回归。
+    ...(st.flashTitleSizePx
+      ? [
+          `Style: ft,${st.fontName},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,3,3,5,40,40,0,1`,
+          `Style: fa,${st.fontName},${st.flashAuthorSizePx ?? 28},${toAssColor(st.flashAuthorColor ?? '#ffcc88')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,2,2,5,40,40,0,1`,
+        ]
+      : []),
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -121,6 +143,17 @@ export function buildAss(o: AssOpts): string {
     ev.push(`Dialogue: ${layer},${toAssTime(c.startMs)},${toAssTime(c.endMs)},${style},,0,0,0,,${text}`)
   }
 
+  // 快闪卡在最底层：它出现的时段里本来就没有正文字幕与常驻书名
+  const fcx = Math.round(o.width / 2)
+  const fty = Math.round(o.height * 0.5)
+  const fay = Math.round(o.height * 0.62)
+  for (const c of o.flashCards ?? []) {
+    if (!(c.endMs > c.startMs)) continue
+    const t = escapeAssText(`《${c.title}》`)
+    if (t) ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},ft,,0,0,0,,{\\pos(${fcx},${fty})}${t}`)
+    const a = escapeAssText(c.author ?? '')
+    if (a) ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},fa,,0,0,0,,{\\pos(${fcx},${fay})}${a}`)
+  }
   for (const c of o.bookTitles ?? []) line(0, c, 'title')
   for (const c of o.captions) line(1, c, 'cap')
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {

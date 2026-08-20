@@ -25,9 +25,12 @@ describe('bookTitleRuns', () => {
       { text: '《活着》', startMs: 2000, endMs: 3000 },
     ])
   })
-  it('带作者时换行显示', () => {
-    expect(bookTitleRuns([seg({ startMs: 0, endMs: 1000, bookTitle: '简爱', bookAuthor: '夏洛蒂·勃朗特' })])[0].text)
-      .toBe('《简爱》\\N夏洛蒂·勃朗特')
+  // ★ 这里必须是**真换行符**。写成 ASS 的 \N 会被 escapeAssText 再转义一次,
+  // 成片上多出一个可见的反斜杠 —— 单测全绿,目视成片才发现。
+  it('带作者时用真换行符，交给 escapeAssText 转成 ASS 换行', () => {
+    const t = bookTitleRuns([seg({ startMs: 0, endMs: 1000, bookTitle: '简爱', bookAuthor: '夏洛蒂·勃朗特' })])[0].text
+    expect(t).toBe('《简爱》\n夏洛蒂·勃朗特')
+    expect(t).not.toContain('\\N')
   })
   it('无书名的段被跳过，不产出空标题', () => {
     expect(bookTitleRuns([seg({ startMs: 0, endMs: 1000 }), seg({ startMs: 1000, endMs: 2000, bookTitle: '  ' })])).toEqual([])
@@ -109,6 +112,14 @@ describe('buildRenderBodyPlan', () => {
     const f = p_filter(buildRenderBodyPlan(baseOpts(segs)))
     expect(f.indexOf('overlay=x=0')).toBeLessThan(f.indexOf('subtitles='))
     expect(f).toMatch(/\[dec\]subtitles=.*\[vout\]$/)
+  })
+
+  it('产出的 ASS 里书名头是 ASS 换行，且不带多余反斜杠', () => {
+    const a = buildRenderBodyPlan(baseOpts([
+      seg({ startMs: 0, endMs: 5000, bookTitle: '简爱', bookAuthor: '夏洛蒂·勃朗特' }),
+    ])).assContent
+    expect(a).toContain('《简爱》\\N夏洛蒂·勃朗特')   // ASS 里就该是 \N
+    expect(a).not.toContain('《简爱》\\\\N')          // 但不能是被转义过的 \\N
   })
 
   it('正片段不含音频（音频在最后一步与开场段一起混）', () => {

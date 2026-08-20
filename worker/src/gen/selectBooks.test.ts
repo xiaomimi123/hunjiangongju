@@ -659,3 +659,30 @@ describe('selectBooks：单本模式——主题书排末位并单独标出', ()
     expect(vars.books.slice(0, -1).some((b) => b.title === 'MOCK单本选题')).toBe(false)
   })
 })
+
+// 线上事故：学员填《简爱》,主题词提取失败 → theme 回退成书名「简爱」→
+// 提示词「推荐 8 本与主题『简爱』相关的书」被联网模型理解成「关于《简爱》的书」,
+// 返回 《Jane Eyre: New Casebooks》《The Brontë Myth》《The Madwoman in the Attic》…
+// 一整屏英文学术专著。书封快闪上全是英文书名。
+describe('buildRecommendPrompt —— 中文大众读物约束', () => {
+  it('要求中文书名（外文原著用通行中译名）', () => {
+    const p = buildRecommendPrompt('自我成长', 8)
+    expect(p).toContain('中文')
+    expect(p).toContain('中文译名')
+  })
+
+  it('明确排除研究/评论/导读类,避免「关于某本书的书」', () => {
+    const p = buildRecommendPrompt('简爱', 8)
+    expect(p).toContain('研究')
+    expect(p).toContain('评论')
+    // theme 本身是书名时,要的是气质相近的**其它书**
+    expect(p).toContain('其它书')
+  })
+
+  it('保留原有契约：本数与纯 JSON 数组格式', () => {
+    const p = buildRecommendPrompt('亲密关系', 5)
+    expect(p).toContain('5 本')
+    expect(p).toContain('JSON 数组')
+    expect(p).toContain('{"title":"书名","author":"作者","points":"一句话推荐要点"}')
+  })
+})

@@ -95,9 +95,22 @@ describe('shardGrid', () => {
   it('cols×rows 片、烘焙内联、无 Math.random', () => {
     const html = shardGrid({ containerClass: 'shatter s1shatter', imgSrc: 'media/01.png', cols: 4, rows: 5, width: 720, height: 960, startScattered: true })
     expect((html.match(/class="shard"/g) ?? []).length).toBe(20)
-    expect(html).toContain("background-image:url('media/01.png');background-size:720px 960px")
+    expect(html).toContain("background-image:url('media/01.png')")
     expect(html).toContain('transform:translate(')
     expect(html).not.toContain('Math.random')
+  })
+
+  // 原实现把贴图写成 background-size:720px 960px —— 那是**拉伸**到画布，不是裁切。
+  // .photo 用的是 cover（裁切），于是非 3:4 的图在开场碎片期被拉伸、0.82s 碎片层交棒给
+  // .photo 时又变成裁切，画面比例当场跳一下。两层必须用同一套几何。
+  // 做法：碎片格子只当窗口(overflow:hidden)，里面放一层整画布大小、cover 的贴图，
+  // 按格子偏移 -left/-top 反向定位——每片自然带着自己那块画面，且与 .photo 完全对齐。
+  it('碎片贴图与 .photo 同为 cover，不拉伸', () => {
+    const html = shardGrid({ containerClass: 'shatter', imgSrc: 'media/01.png', cols: 2, rows: 2, width: 720, height: 960 })
+    expect(html).not.toContain('background-size:720px 960px')
+    expect(html).toContain('class="shard-img"')
+    // 右下角那片：窗口在 (360,480)，内层反向偏移到 (-360,-480)，仍是整张 720×960
+    expect(html).toContain('left:-360px;top:-480px;width:720px;height:960px')
   })
 })
 

@@ -10,17 +10,24 @@ export function baseCss(_preset: PresetId): string {
     }
     #root { position: relative; width: 720px; height: 960px; overflow: hidden; background: var(--bg); }
     .scene { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
-    /* 背景模糊填充：非等比图不再露底，用同图放大模糊铺底 */
+    /* 背景模糊填充：主图 cover 后正常看不见它，留作兜底——万一将来出现 scale<1 的关键帧，
+       缩小的主图不会露出纯色底。 */
     .scene .bg-fill {
       position: absolute; inset: -40px; background-size: cover; background-position: center;
       filter: blur(28px) brightness(0.6); transform: scale(1.1);
     }
+    /* cover 而非 contain：剪映里 scale=1.0 的语义是「铺满画布」——把客户样例的 bodyScale
+       归一化成相对 cover 后正好是 ≈1.0（换算见 draftStructure.ts:coverRelativeScale）。
+       写成 contain 与草稿语义相反，非 3:4 的图会缩进去、四周留带；AI 生图固定 720x960
+       (正好 3:4) 时 contain==cover 看不出差别，所以这个缺陷只在素材库图上暴露。 */
     .scene .photo {
-      position: absolute; inset: -30px; background-size: contain; background-repeat: no-repeat;
+      position: absolute; inset: -30px; background-size: cover; background-repeat: no-repeat;
       background-position: center; will-change: transform;
     }
     .shatter, .tshatter { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
     .shard { position: absolute; overflow: hidden; will-change: transform, opacity; }
+    /* 碎片内层贴图：整画布大小 + cover，与 .photo 同一套几何，交棒时比例不跳 */
+    .shard .shard-img { position: absolute; background-size: cover; background-position: center; background-repeat: no-repeat; }
     /* 字幕压暗底：保证任意底图上字幕清晰 */
     .scrim {
       position: absolute; left: 0; right: 0; bottom: 0; height: 340px; z-index: 13;

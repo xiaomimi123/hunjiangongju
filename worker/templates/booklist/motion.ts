@@ -155,10 +155,14 @@ export function shardGrid(opts: {
         const dr = Math.round(Math.sin(idx * 3.3) * 55)
         scatter = `transform:translate(${dx}px,${dy}px) rotate(${dr}deg) scale(1.15);opacity:0.15;`
       }
+      // 格子本身只当窗口（.shard 有 overflow:hidden），贴图放在内层：整画布大小 + cover，
+      // 再按格子反向偏移 -left/-top，每片自然带着自己那块画面。
+      // 不能直接给格子写 background-size:${width}px ${height}px —— 那是**拉伸**到画布，
+      // 而 .photo 用的是 cover（裁切），非 3:4 的图会在碎片层交棒给 .photo 的瞬间比例跳变。
       shards.push(
-        `      <div class="shard" style="left:${left}px;top:${top}px;width:${w}px;height:${h}px;` +
-          `background-image:url('${esc(imgSrc)}');background-size:${width}px ${height}px;` +
-          `background-position:-${left}px -${top}px;${scatter}"></div>`,
+        `      <div class="shard" style="left:${left}px;top:${top}px;width:${w}px;height:${h}px;${scatter}">` +
+          `<div class="shard-img" style="left:${-left}px;top:${-top}px;width:${width}px;height:${height}px;` +
+          `background-image:url('${esc(imgSrc)}')"></div></div>`,
       )
     }
   }

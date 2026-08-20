@@ -9,6 +9,18 @@ describe('baseCss', () => {
     expect(css).toContain('inset: -30px')
     expect(css).toContain('.scrim') // 字幕压暗底
   })
+
+  // 剪映里 scale=1.0 的语义是「铺满画布」：把客户样例的 bodyScale 归一化成相对 cover 后是 ≈1.0
+  // （换算见 packages/db/src/booklist/draftStructure.ts:coverRelativeScale）。
+  // 原实现给 .photo 写的是 background-size:contain —— 与草稿语义相反，非 3:4 的图会缩进去、
+  // 四周留带。客户工程自己就有一张 1856×2304(4:5) 的图，作者在剪映里是放大到铺满的。
+  // AI 生图固定 720x960(正好 3:4)，contain==cover 看不出差别，所以这个缺陷只在素材库图上暴露。
+  it('.photo 用 cover 铺满，不留白', () => {
+    const css = baseCss('warm-literary')
+    const photoBlock = css.slice(css.indexOf('.scene .photo'), css.indexOf('.shatter, .tshatter'))
+    expect(photoBlock).toContain('background-size: cover')
+    expect(photoBlock).not.toContain('contain')
+  })
 })
 
 describe('sceneHtml', () => {

@@ -90,6 +90,30 @@ async function readDraftText(files: File[], draftFile: File): Promise<string> {
 // 单独上传/粘贴入口没有同工程的 Timelines 兜底可用——检测到密文时直接指路到「选择剪映工程文件夹」。
 const ENCRYPTED_DRAFT_HINT = '这份内容看起来是加密的剪映草稿（新版剪映约 6.5+ / iOS 19.x 起默认加密 draft_content.json），请改用上方「选择剪映工程文件夹」整体上传，会自动查找同工程内的明文时间线'
 
+// 上传前在浏览器端把图片压到接近画布尺寸。工程内图片常是手机相册原图（实测单张最高 8.5MB，
+// 13 张共 60MB），而渲染画布只有 720×960——传原图纯属浪费，且实测会导致请求超时(408)。
+// 压缩失败时原样返回该文件：宁可慢也不能丢素材。
+async function shrinkImage(file: File, maxW = 1080, maxH = 1440): Promise<File> {
+  try {
+    const bmp = await createImageBitmap(file)
+    const ratio = Math.min(1, maxW / bmp.width, maxH / bmp.height)
+    if (ratio >= 1) return file
+    const w = Math.round(bmp.width * ratio)
+    const h = Math.round(bmp.height * ratio)
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+    ctx.drawImage(bmp, 0, 0, w, h)
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.88))
+    if (!blob || blob.size >= file.size) return file
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })
+  } catch {
+    return file
+  }
+}
+
 export default function JianyingTemplatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
@@ -111,6 +135,10 @@ export default function JianyingTemplatePage() {
   const [projectName, setProjectName] = useState('')
   const [media, setMedia] = useState<Media | null>(null)
   const [importing, setImporting] = useState(false)
+  // 工程内图片常是手机相册原图（实测 13 张 60MB，单张最高 8.5MB），上传+逐张生成缩略图
+  // 会让请求超时（实测 408）。而框架参数全部来自 draft_content.json，与图片无关；
+  // 素材图现在由运营自己用 AI 备料，工程内的原图多数用不上。故默认不导。
+  const [importImages, setImportImages] = useState(false)
   const [importErr, setImportErr] = useState('')
   const [importResult, setImportResult] = useState<{ id: string; bgm: { imported: number; reused: number }; assets: { imported: number; reused: number } } | null>(null)
 
@@ -223,8 +251,13 @@ export default function JianyingTemplatePage() {
       const foundBgm = media.bgm.filter((b) => byName.has(b.fileName))
       form.set('bgmMeta', JSON.stringify(foundBgm))
       for (const b of foundBgm) form.append('bgmFiles', byName.get(b.fileName)!)
-      for (const img of media.images) { const f = byName.get(img); if (f) form.append('imageFiles', f) }
-      const missing = [...media.bgm.map((b) => b.fileName), ...media.images].filter((n) => !byName.has(n))
+      if (importImages) {
+        for (const img of media.images) {
+          const f = byName.get(img)
+          if (f) form.append('imageFiles', await shrinkImage(f))
+        }
+      }
+      const missing = [...media.bgm.map((b) => b.fileName), ...(importImages ? media.images : [])].filter((n) => !byName.has(n))
       const r = await fetch('/api/admin/jianying/import', { method: 'POST', body: form })
       if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error ?? `导入失败(${r.status})`)
       const j = await r.json()
@@ -450,13 +483,19 @@ export default function JianyingTemplatePage() {
                   因此：选了文件夹时只给「一键导入」这一条路；「保存为框架」降级为兜底，
                   仅在拿不到素材文件夹时可用，并明确标注它是残缺的。 */}
               {folderFiles.length > 0 && media ? (
+                <>
+                <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-ink2" title="框架参数全部来自 draft_content.json，与图片无关。工程内图片常是手机原图（本样例 13 张共 60MB），上传慢且多数用不上——素材图建议在素材库用 AI 单独备料。">
+                  <input type="checkbox" checked={importImages} onChange={(e) => setImportImages(e.target.checked)} />
+                  同时导入工程内图片{media.images.length > 0 && `（${media.images.length} 张，较慢）`}
+                </label>
                 <button
                   onClick={importAll}
                   disabled={importing || !templateParams || !name.trim()}
                   className="btn-primary px-5 disabled:opacity-50"
                 >
-                  {importing ? '导入中…' : '一键导入（建框架 + BGM/素材入库）'}
+                  {importing ? '导入中…' : '一键导入（建框架 + BGM）'}
                 </button>
+                </>
               ) : (
                 <button
                   onClick={save}

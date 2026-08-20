@@ -1,7 +1,7 @@
 // 正片视觉的 ffmpeg 滤镜图：静图 → 运镜 → 逐边界转场 → 一条连续视频流。
 //
 // 这是 FFmpeg 渲染迁移的核心。它替代 HyperFrames 承担片长约 80% 的那一段
-// （开场碎片仍由 HyperFrames 渲，见 docs/superpowers/specs/2026-08-20-ffmpeg-render-migration-design.md）。
+// （开场碎片见 shatterMaps.ts，同为 ffmpeg；设计见 docs/superpowers/specs/2026-08-20-ffmpeg-render-migration-design.md）。
 //
 // 纯函数：只拼字符串，不碰文件系统、不跑进程。这样单测能覆盖所有分支，
 // 真渲验收只需再跑一遍产出的命令即可。

@@ -1,4 +1,4 @@
-// 混合方案的总装：开场碎片(HyperFrames 渲好的短片) + 快闪书封 + 正片，
+// 总装：开场碎片(shatterMaps 渲好的短片) + 快闪书封 + 正片，
 // 拼成一条完整的**无声**视频，contract 与 HyperFrames 产出的 body.mp4 完全一致。
 //
 // 这样接入点极干净：render-visuals 换个实现产出同样的 body.mp4，
@@ -14,7 +14,7 @@
 // ── 为什么只编码一次 ──
 //
 // 三段如果各自编码再 concat，中间那两次编码是白付的（而且 -c copy 拼接要求
-// 三段编码参数完全一致，HyperFrames 那段不由我们控制，不能假设）。
+// 三段编码参数虽同出一源，但仍逐段归一化，不做"应该一致"的假设）。
 // 全部走一张滤镜图、末尾只编一次，成本最低且没有拼接兼容性问题。
 
 import { buildBodyGraph, type FfBodySegment } from './bodyGraph'
@@ -32,11 +32,11 @@ export interface FullFlashCard {
 }
 
 export interface RenderFullOpts {
-  /** HyperFrames 渲好的开场碎片片段（无声）。缺省时用 openStillAbs 补一段静止 */
+  /** 渲好的开场碎片片段（无声）。缺省时用 openStillAbs 补一段静止 */
   openingClipAbs?: string
   /**
    * 开场底图。模板不要碎裂开场（open.shatter=false）时，开场那段仍要有画面——
-   * HyperFrames 分支是把首图静止显示到快闪开始。**不能留空**：留空会让成片比音频
+   * 不做碎裂时应把首图静止显示到快闪开始。**不能留空**：留空会让成片比音频
    * 短掉整个开场时长，音画从头就错位。
    */
   openStillAbs?: string
@@ -81,14 +81,14 @@ export function buildRenderFullPlan(o: RenderFullOpts): RenderFullPlan {
   // 开场时长以快闪首卡的起点为准——快闪紧接开场，不留缝
   const openMs = o.flashCards[0]?.startMs ?? 0
   if (o.openingClipAbs) {
-    // HyperFrames 的产物，编码参数不由我们控制，必须先归一化
+    // 开场片段是单独一次编码的产物，拼接前必须先归一化时基
     inputArgs.push('-i', o.openingClipAbs)
     chains.push(`[${idx}:v]scale=${o.width}:${o.height},${norm},setpts=PTS-STARTPTS[op]`)
     parts.push('op')
     idx++
     totalMs = openMs
   } else if (o.openStillAbs && openMs > 0) {
-    // 不要碎裂开场时，首图静止铺满这一段（与 HyperFrames 分支一致）。
+    // 不要碎裂开场时，首图静止铺满这一段。
     // 复用 bodyGraph 的单段链，省得再写一套静图→定时长的拼装。
     const g = buildBodyGraph({
       segments: [{ imageAbs: o.openStillAbs, durationMs: openMs }],

@@ -16,7 +16,7 @@ import { selectPreset, hasGrain } from '../../../templates/booklist/theme'
 export interface FromBodyDataIo {
   /** hf 工作目录的绝对路径；images/covers 的相对路径以它为基准 */
   hfDir: string
-  /** HyperFrames 渲好的开场片段；缺省则整片从快闪开始 */
+  /** 渲好的开场碎裂片段；缺省则整片从快闪开始 */
   openingClipAbs?: string
   ripple?: { xmapAbs: string; ymapAbs: string }
   assAbs: string

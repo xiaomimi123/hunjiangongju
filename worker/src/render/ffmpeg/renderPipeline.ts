@@ -8,56 +8,86 @@ import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
 import type { BodyData } from '../../../templates/booklist/indexHtml'
-import { openingIndexHtml } from '../../../templates/booklist/openingHtml'
-import { selectPreset } from '../../../templates/booklist/theme'
 import { flashTimeline } from '../../../templates/booklist/templateParams'
 import { fromBodyData } from './fromBodyData'
 import { buildRenderFullPlan } from './renderFull'
 import { buildRippleDisplaceArgs } from './ripple'
+import { buildShatterMaps, buildShatterArgs, DEFAULT_GEOM } from './shatterMaps'
 
 const FPS = 30
 
-function run(bin: string, args: string[], cwd?: string): { ok: boolean; out: string } {
+function run(bin: string, args: string[], input?: Buffer): { ok: boolean; out: string } {
   const r = spawnSync(bin, args, {
     encoding: 'utf8',
-    ...(cwd ? { cwd } : {}),
-    env: { ...process.env, HYPERFRAMES_BROWSER_PATH: process.env.HYPERFRAMES_BROWSER_PATH ?? '/usr/bin/chromium' },
+    ...(input ? { input, maxBuffer: 1 << 28 } : {}),
   })
   return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
 }
 
 /**
- * 渲开场碎裂片段（HyperFrames）。
+ * 预渲染开场碎裂的坐标映射表。
  *
- * 为什么这一段不能也交给 ffmpeg：碎片必须**带着本条片子自己的图**。
- * 预渲染成固定素材行不通（每条片子的图都不同），用 ffmpeg 给 48 片各拉一条
- * crop→rotate→overlay 链理论可行但那是整个迁移里最不确定的一块，先不啃。
- * 它只占 2.16 秒，其余 90% 片长已经由 ffmpeg 承担。
+ * **按参数缓存**，理由同水波纹：碎片的几何运动与配图无关，同模板的每条片子完全一样，
+ * 只有贴图不同。算一次约 2.5 秒，之后每条片子零成本。
+ *
+ * 存成 ffv1 无损：原始 raw 三张共 223MB，ffv1 压到约 3MB，且实测解回来逐字节一致——
+ * 坐标表**一个 bit 都不能错**，错一位碎片就会从画面另一头取色，所以不能用有损编码。
  */
-async function renderOpening(hfDir: string, data: BodyData, durationMs: number): Promise<string> {
+async function ensureShatterMaps(
+  cacheRoot: string, width: number, height: number, durationMs: number,
+): Promise<{ xmapAbs: string; ymapAbs: string; bloomAbs: string }> {
+  const key = `${width}x${height}@${FPS}-${Math.round(durationMs)}`
+  const dir = path.join(cacheRoot, 'shatter', key)
+  const out = {
+    xmapAbs: path.join(dir, 'x.mkv'),
+    ymapAbs: path.join(dir, 'y.mkv'),
+    bloomAbs: path.join(dir, 'bloom.mkv'),
+  }
+  const done = path.join(dir, '.done')
+  try {
+    await fs.access(done)
+    return out
+  } catch {
+    /* 未生成过，往下算 */
+  }
+  await fs.mkdir(dir, { recursive: true })
+  const maps = buildShatterMaps({ width, height, fps: FPS, durationMs, ...DEFAULT_GEOM })
+  const enc = (buf: Buffer, pixFmt: string, dst: string) => {
+    const r = run('ffmpeg', [
+      '-v', 'error',
+      '-f', 'rawvideo', '-pix_fmt', pixFmt, '-s', `${width}x${height}`, '-r', String(FPS), '-i', 'pipe:0',
+      '-c:v', 'ffv1', '-level', '3', '-y', dst,
+    ], buf)
+    if (!r.ok) throw new Error(`碎裂映射表编码失败(${path.basename(dst)}): ${r.out.slice(-500)}`)
+  }
+  enc(maps.xmap, 'gray16le', out.xmapAbs)
+  enc(maps.ymap, 'gray16le', out.ymapAbs)
+  enc(maps.bloom, 'gray8', out.bloomAbs)
+  await fs.writeFile(done, key, 'utf8')
+  return out
+}
+
+/**
+ * 渲开场碎裂片段 —— 纯 ffmpeg，不再需要无头浏览器。
+ *
+ * 碎片必须带着**本条片子自己的图**，所以不能像水波纹那样把成片预渲染掉；
+ * 但可以把「每个输出像素去源图哪取色」预渲染成坐标表（见 shatterMaps.ts），
+ * 每条片子只做一次 remap 查表。这是 HyperFrames 在渲染链上的最后一处依赖。
+ */
+async function renderOpening(hfDir: string, data: BodyData, durationMs: number, cacheRoot: string): Promise<string> {
   const dir = path.join(hfDir, 'opening')
   await fs.mkdir(dir, { recursive: true })
-  // 开场用正片第 1 张图（与 HyperFrames 分支同一张，切换渲染器时开场画面不变）
-  const imgRel = data.images[0]?.src ?? 'media/01.png'
-  await fs.copyFile(path.join(hfDir, imgRel), path.join(dir, 'open.png'))
-  await fs.copyFile(path.join(hfDir, 'gsap.min.js'), path.join(dir, 'gsap.min.js'))
-  await fs.copyFile(path.join(hfDir, 'package.json'), path.join(dir, 'package.json'))
-  await fs.writeFile(
-    path.join(dir, 'index.html'),
-    openingIndexHtml({
-      imgSrc: 'open.png',
-      width: data.size.width,
-      height: data.size.height,
-      durationMs,
-      preset: selectPreset(data.style, data.seed ?? ''),
-    }),
-    'utf8',
-  )
-  const r = run('npx', ['--yes', 'hyperframes@0.7.33', 'render', '--quality', 'standard', '--output', 'renders/open.mp4'], dir)
-  const out = path.join(dir, 'renders', 'open.mp4')
-  if (!r.ok) throw new Error(`开场渲染失败 (hyperframes): ${r.out.slice(-800)}`)
-  await fs.access(out)
-  return out
+  const { width, height } = data.size
+  const maps = await ensureShatterMaps(cacheRoot, width, height, durationMs)
+  // 开场用正片第 1 张图（与切换前同一张，换渲染器时开场画面不变）
+  const imgAbs = path.join(hfDir, data.images[0]?.src ?? 'media/01.png')
+  const outAbs = path.join(dir, 'open.mp4')
+  const r = run('ffmpeg', buildShatterArgs({
+    imgAbs, width, height, fps: FPS, durationMs, ...maps, outAbs,
+  }))
+  if (!r.ok) throw new Error(`开场碎裂渲染失败: ${r.out.slice(-800)}`)
+  await fs.access(outAbs)
+  return outAbs
 }
 
 /**
@@ -105,7 +135,7 @@ export async function renderBodyWithFfmpeg(
   // 开场：只有模板要求碎裂开场时才渲。不要则整片从快闪开始，第 0 段窗口由快闪铺满。
   let openingClipAbs: string | undefined
   if (p?.open.shatter && t && t.openEndMs > 0) {
-    openingClipAbs = await renderOpening(hfDir, data, t.openEndMs)
+    openingClipAbs = await renderOpening(hfDir, data, t.openEndMs, cacheRoot)
   }
 
   // 水波纹：只有草稿里提取到才备素材

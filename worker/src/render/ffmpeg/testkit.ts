@@ -74,6 +74,19 @@ export function changedRatio(mp4: string, t1: number, t2: number): number {
 export const STILL_RATIO = 0.01
 
 /**
+ * 某时刻画面里「暗到接近全黑」的像素占比 0..1。
+ *
+ * 开场碎裂验收用：碎片没飞到的地方是 remap 的 fill 黑，
+ * 所以「开头一片黑、结尾几乎无黑」就是碎裂真的发生过的证据。
+ */
+export function darkRatio(mp4: string, atSec: number, threshold = 16): number {
+  const a = frameGray(mp4, atSec)
+  let c = 0
+  for (let i = 0; i < a.length; i++) if (a[i] <= threshold) c++
+  return c / a.length
+}
+
+/**
  * 相邻采样点之间变化像素占比的最小值。
  * 断言「全程都在动」用它——任何一段定格都会让某一对相邻采样跌到静止水平。
  *

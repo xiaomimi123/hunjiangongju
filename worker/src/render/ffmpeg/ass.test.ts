@@ -105,7 +105,9 @@ describe('buildAss', () => {
 
   it('常驻书名走 title 样式，且层级低于字幕（字幕压在上面）', () => {
     const a = buildAss({ ...base, bookTitles: [{ text: '《简爱》', startMs: 3984, endMs: 20000 }] })
-    expect(a).toContain('Dialogue: 0,0:00:03.98,0:00:20.00,title,,0,0,0,,《简爱》')
+    // 位置改由草稿的 titlePosY 驱动（\pos），字号按书名长度缩排（\fs），
+    // 所以不再是"裸文本"。之前贴死在顶边(an8/边距48px≈5%)，草稿实测是 21.8%。
+    expect(a).toMatch(/Dialogue: 0,0:00:03\.98,0:00:20\.00,title,,0,0,0,,\{\\pos\(\d+,\d+\)\\fs\d+\}《简爱》/)
   })
 
   // 零长/负长事件 libass 直接不显示；早点丢掉比产出一条永不生效的行清楚
@@ -120,6 +122,64 @@ describe('buildAss', () => {
     expect(a).not.toContain('零长')
     expect(a).not.toContain('倒挂')
     expect((a.match(/Dialogue:/g) ?? []).length).toBe(2) // 正常 + 水印
+  })
+})
+
+// ★ 开场标题「今天分享的是…」在 ffmpeg 迁移时整段丢了：fromBodyData 用 segs.slice(1)
+// 把第 0 段（开场+快闪那个时间窗）扔掉，而那行开场白正是第 0 段的字幕。
+// 成片开头一直是没有字的，直到对比原工程才发现。
+describe('buildAss —— 开场标题', () => {
+  const withOpen = (extra: Partial<AssOpts> = {}) => buildAss({
+    ...base,
+    openTitle: { text: '今天分享的是', startMs: 0, endMs: 2159 },
+    style: { ...base.style, openTitleSizePx: 61, openTitlePosY: 0.811 },
+    ...extra,
+  })
+
+  it('渲染出开场标题，且落在草稿实测的竖直位置上', () => {
+    const a = withOpen()
+    expect(a).toContain('Style: ot,')
+    // 0.811 × 960 = 779
+    expect(a).toMatch(/Dialogue: 0,0:00:00\.00,0:00:02\.15,ot,,0,0,0,,\{\\pos\(360,779\)\}今天分享的是/)
+  })
+
+  it('没给开场标题字号时不产出该层（老调用零回归）', () => {
+    const a = buildAss({ ...base, openTitle: { text: '今天分享的是', startMs: 0, endMs: 2159 } })
+    expect(a).not.toContain('Style: ot,')
+    expect(a).not.toContain('今天分享的是')
+  })
+})
+
+// ★ 位置之前是写死在渲染层的：常驻大标题贴顶边(≈5%)、快闪书名固定 50%。
+// 草稿实测是 21.8% / 16.9%，差得很远——这是"位置样式与原工程不一致"的根因。
+describe('buildAss —— 文字层位置由草稿驱动', () => {
+  it('常驻书名与快闪书名都按给定 posY 定位', () => {
+    const a = buildAss({
+      ...base,
+      bookTitles: [{ text: '《活着》', startMs: 4000, endMs: 20000 }],
+      flashCards: [{ title: '活着', author: '余华', startMs: 2159, endMs: 3000 }],
+      style: { ...base.style, titlePosY: 0.218, flashTitlePosY: 0.169, flashTitleSizePx: 106 },
+    })
+    expect(a).toMatch(/,title,,0,0,0,,\{\\pos\(360,209\)/) // 0.218×960
+    expect(a).toMatch(/,ft,,0,0,0,,\{\\pos\(360,162\)/) // 0.169×960
+  })
+
+  // 剪映按书名长短自动缩放（实测同一层 scale 从 1.407 缩到 0.698）。
+  // 不缩的话《我们生活在巨大的差距里》会溢出画面两侧。
+  it('长书名按可用宽度缩排，短的保持基准字号', () => {
+    const a = buildAss({
+      ...base,
+      flashCards: [
+        { title: '活着', startMs: 2159, endMs: 2500 },
+        { title: '我们生活在巨大的差距里', startMs: 2500, endMs: 3000 },
+      ],
+      style: { ...base.style, flashTitleSizePx: 106, flashTitlePosY: 0.169 },
+    })
+    const sizes = [...a.matchAll(/,ft,,0,0,0,,\{\\pos\([^)]+\)\\fs(\d+)\}/g)].map((m) => Number(m[1]))
+    expect(sizes[0], '短书名不该被缩').toBe(106)
+    expect(sizes[1], '长书名没缩，会溢出画面').toBeLessThan(106)
+    // 13 个全角字(含《》)在 720 宽、左右各 40 边距下最多 49px
+    expect(sizes[1]).toBeLessThanOrEqual(49)
   })
 })
 

@@ -50,6 +50,8 @@ export interface RenderFullOpts {
   flashBounceIn: boolean
   watermark?: string
   assStyle: AssStyleOpts
+  /** 开场标题「今天分享的是…」，铺在开场那一段。缺省则不渲染该层。 */
+  openTitle?: { text: string; startMs: number; endMs: number }
   decor: Omit<DecorOpts, 'width' | 'height'>
   /**
    * 水波纹素材（预渲染）。缺省则不叠。
@@ -187,6 +189,7 @@ export function buildRenderFullPlan(o: RenderFullOpts): RenderFullPlan {
     captions: captionCues(o.bodySegments),
     bookTitles: bookTitleRuns(o.bodySegments),
     flashCards: flashCues,
+    ...(o.openTitle ? { openTitle: o.openTitle } : {}),
     ...(o.watermark ? { watermark: o.watermark } : {}),
   })
   chains.push(`[${cur}]${subtitlesFilter(o.assAbs, o.fontsDir)}[vout]`)

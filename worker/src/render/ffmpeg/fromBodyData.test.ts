@@ -110,6 +110,53 @@ describe('fromBodyData —— 新旧渲染器的唯一接缝', () => {
   })
 })
 
+// ★ 开场标题在 ffmpeg 迁移时整段丢了：这里用 segs.slice(1) 把第 0 段（开场+快闪窗口）
+// 扔掉，而「今天分享的是…」正是第 0 段的字幕。成片开头一直没有这行字，
+// 单测和各模块自己的 e2e 都看不到——只有拿成片跟原工程逐帧比才发现。
+describe('fromBodyData —— 开场标题', () => {
+  it('开场标题取自 open.titleText，铺满开场窗口', () => {
+    const o = fromBodyData(data(), io)
+    expect(o.openTitle).toEqual({ text: '今天分享的是', startMs: 0, endMs: 2159 })
+  })
+
+  it('框架没写 titleText 时回退第 0 段的字幕', () => {
+    const o = fromBodyData(data({ templateParams: params({ open: { durationMs: 2159, shatter: true, titleText: '' } }) }), io)
+    expect(o.openTitle?.text).toBe('今天分享的是')
+  })
+})
+
+// ★ 字号只标定正文字幕一个锚点，其余按草稿实测的相对倍数派生。
+// 之前六个字号各拍一个绝对值，结果常驻大标题只有正文的 1.09 倍，
+// 而草稿实测是 1.85 倍 —— 成片里大标题明显偏小。
+describe('fromBodyData —— 文字层字号与位置', () => {
+  it('各层字号 = 正文字号 × 草稿实测倍数', () => {
+    const o = fromBodyData(data({ templateParams: params({
+      text: { openTitlePosY: 0.8, openTitleScale: 2, flashTitlePosY: 0.2, flashTitleScale: 3,
+        bookTitlePosY: 0.3, bookTitleScale: 4 },
+    }) }), io)
+    const cap = o.assStyle.captionSizePx
+    expect(o.assStyle.openTitleSizePx).toBe(cap * 2)
+    expect(o.assStyle.flashTitleSizePx).toBe(cap * 3)
+    expect(o.assStyle.titleSizePx).toBe(cap * 4)
+  })
+
+  it('各层竖直位置原样带过去（之前是写死在渲染层的）', () => {
+    const o = fromBodyData(data({ templateParams: params({
+      text: { openTitlePosY: 0.811, openTitleScale: 1.13, flashTitlePosY: 0.169, flashTitleScale: 1.96,
+        bookTitlePosY: 0.218, bookTitleScale: 1.85 },
+    }) }), io)
+    expect(o.assStyle.openTitlePosY).toBe(0.811)
+    expect(o.assStyle.flashTitlePosY).toBe(0.169)
+    expect(o.assStyle.titlePosY).toBe(0.218)
+  })
+
+  // 常驻大标题必须明显大于正文——这是"大标题偏小"那条反馈的守卫
+  it('常驻大标题显著大于正文字幕', () => {
+    const o = fromBodyData(data(), io)
+    expect(o.assStyle.titleSizePx / o.assStyle.captionSizePx).toBeGreaterThan(1.5)
+  })
+})
+
 // ★ 没有开场碎裂片段时必须给 openStillAbs 补住开场那一段。
 // 留空会让成片比音频短掉整个开场时长(实测 2.13 秒),音画从头就错位 ——
 // 这个 bug 是接线层的真渲验收抓出来的,单测和各模块自己的 e2e 都看不到。

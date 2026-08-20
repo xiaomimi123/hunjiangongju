@@ -39,6 +39,18 @@ export interface AssStyleOpts {
   flashTitleColor?: string
   flashAuthorSizePx?: number
   flashAuthorColor?: string
+  /**
+   * 各文字层的竖直位置（距画面顶端的归一化高度），来自草稿实测。
+   *
+   * 之前这三处是写死在渲染层的：常驻大标题贴在顶边(an8, 边距 48px ≈ 5%)、
+   * 快闪书名固定 50%、作者 62%。而草稿实测是 21.8% / 16.9%——差得很远。
+   */
+  titlePosY?: number
+  flashTitlePosY?: number
+  /** 开场标题「今天分享的是…」。缺省则不渲染该层（老调用零回归）。 */
+  openTitleSizePx?: number
+  openTitleColor?: string
+  openTitlePosY?: number
 }
 
 export interface AssOpts {
@@ -49,6 +61,8 @@ export interface AssOpts {
   bookTitles?: AssCue[]
   /** 快闪书封卡，时间用**全片绝对值** */
   flashCards?: AssFlashCue[]
+  /** 开场标题。ffmpeg 迁移时整段被 segs.slice(1) 丢掉了，成片开头一直没有这行字。 */
+  openTitle?: AssCue
   /** 全片水印文字；空则不渲染 */
   watermark?: string
   totalMs: number
@@ -101,6 +115,20 @@ export function escapeAssText(s: string): string {
     .trim()
 }
 
+/**
+ * 按可用宽度把字号缩下来，避免长标题溢出画面。
+ *
+ * 中日韩字符按「一字一个字号宽」估，ASCII 按半个——这是等宽近似，不精确，
+ * 但字幕层只需要"不溢出"，宁可略小。剪映自己也是这么处理的：
+ * 同一层的 clip.scale 随书名长度从 1.407 缩到 0.698。
+ */
+export function fitSizePx(text: string, basePx: number, widthPx: number, marginPx = 40): number {
+  const cells = [...text].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x2e80 ? 0.5 : 1), 0)
+  if (cells <= 0) return basePx
+  const max = Math.floor((widthPx - marginPx * 2) / cells)
+  return Math.max(18, Math.min(basePx, max))
+}
+
 export function buildAss(o: AssOpts): string {
   const st = o.style
   // 正文字幕：底部居中(an2)。posY 给的是「基线在画面高度的哪个位置」，
@@ -121,7 +149,11 @@ export function buildAss(o: AssOpts): string {
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     // 描边 + 阴影：配图明暗不可控，没有描边的字幕在浅色图上会糊掉
     `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},0,0,0,0,100,100,0,0,1,3,2,2,60,60,${capMarginV},1`,
-    `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,3,2,8,40,40,48,1`,
+    // an5(正中) + \pos：位置由草稿的 titlePosY 决定，不再贴死在顶边
+    `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,3,2,5,40,40,0,1`,
+    ...(st.openTitleSizePx
+      ? [`Style: ot,${st.fontName},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,3,2,5,40,40,0,1`]
+      : []),
     `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},0,0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
     // 快闪卡：an5(正中) + \pos 精确定位。只在给了尺寸时产出，老调用零回归。
     ...(st.flashTitleSizePx
@@ -144,17 +176,35 @@ export function buildAss(o: AssOpts): string {
   }
 
   // 快闪卡在最底层：它出现的时段里本来就没有正文字幕与常驻书名
-  const fcx = Math.round(o.width / 2)
-  const fty = Math.round(o.height * 0.5)
-  const fay = Math.round(o.height * 0.62)
+  const cx = Math.round(o.width / 2)
+  const fty = Math.round(o.height * (st.flashTitlePosY ?? 0.5))
+  // 作者名压在书名下方一行：间距按书名字号取比例，换字号时不用重新标定
+  const fay = Math.round(fty + (st.flashTitleSizePx ?? 58) * 0.95)
   for (const c of o.flashCards ?? []) {
     if (!(c.endMs > c.startMs)) continue
     const t = escapeAssText(`《${c.title}》`)
-    if (t) ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},ft,,0,0,0,,{\\pos(${fcx},${fty})}${t}`)
+    // 长书名按可用宽度缩排：剪映就是这么干的（实测同一层 scale 从 1.407 缩到 0.698）。
+    // 不缩的话《我们生活在巨大的差距里》会溢出画面两侧。
+    if (t) {
+      const fs = fitSizePx(`《${c.title}》`, st.flashTitleSizePx ?? 58, o.width)
+      ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},ft,,0,0,0,,{\\pos(${cx},${fty})\\fs${fs}}${t}`)
+    }
     const a = escapeAssText(c.author ?? '')
-    if (a) ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},fa,,0,0,0,,{\\pos(${fcx},${fay})}${a}`)
+    if (a) ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},fa,,0,0,0,,{\\pos(${cx},${fay})}${a}`)
   }
-  for (const c of o.bookTitles ?? []) line(0, c, 'title')
+  if (o.openTitle && st.openTitleSizePx && o.openTitle.endMs > o.openTitle.startMs) {
+    const t = escapeAssText(o.openTitle.text)
+    const oy = Math.round(o.height * (st.openTitlePosY ?? 0.81))
+    if (t) ev.push(`Dialogue: 0,${toAssTime(o.openTitle.startMs)},${toAssTime(o.openTitle.endMs)},ot,,0,0,0,,{\\pos(${cx},${oy})}${t}`)
+  }
+  const ty = Math.round(o.height * (st.titlePosY ?? 0.22))
+  for (const c of o.bookTitles ?? []) {
+    const t = escapeAssText(c.text)
+    if (!t || !(c.endMs > c.startMs)) continue
+    // 常驻大标题也要缩排：《我们生活在巨大的差距里》这种长书名同样会溢出
+    const fs = fitSizePx(c.text, st.titleSizePx, o.width)
+    ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,{\\pos(${cx},${ty})\\fs${fs}}${t}`)
+  }
   for (const c of o.captions) line(1, c, 'cap')
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {
     line(2, { text: o.watermark, startMs: 0, endMs: o.totalMs }, 'wm')

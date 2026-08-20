@@ -79,6 +79,8 @@ interface ParsedText {
   text: string
   fontBasename?: string
   colorHex?: string
+  /** 剪映内部字号单位。与渲染像素**没有可逆换算**，只能用来比各文字层的相对大小。 */
+  size?: number
 }
 
 interface StickerSeg {
@@ -86,6 +88,8 @@ interface StickerSeg {
   start: number
   durationUs: number
   y: number
+  /** clip.scale.x。剪映按文字长短自动缩放，所以有效字号 = size × scale */
+  scale: number
   extraRefs: string[]
 }
 
@@ -105,9 +109,12 @@ function parseTexts(materials: Record<string, unknown>): Map<string, ParsedText>
       const fill = obj(style0.fill)
       const fillContent = obj(fill.content)
       const solid = obj(fillContent.solid)
+      const rawSize = typeof style0.size === 'number' ? style0.size
+        : typeof t.font_size === 'number' ? t.font_size : undefined
       out.set(id, {
         materialId: id,
         text,
+        ...(rawSize ? { size: rawSize } : {}),
         fontBasename: fontBasename(font.path),
         colorHex: rgbToHex(solid.color),
       })
@@ -134,8 +141,10 @@ function collectStickerSegs(tracks: unknown[]): StickerSeg[] {
       const start = typeof tt.start === 'number' ? tt.start : 0
       const durationUs = typeof tt.duration === 'number' ? tt.duration : 0
       const y = typeof transform.y === 'number' ? transform.y : 0
+      const sc = obj(clip.scale)
+      const scale = typeof sc.x === 'number' && sc.x > 0 ? sc.x : 1
       const extraRefs = arr(seg.extra_material_refs).filter((r): r is string => typeof r === 'string')
-      out.push({ materialId, start, durationUs, y, extraRefs })
+      out.push({ materialId, start, durationUs, y, scale, extraRefs })
     }
   }
   return out
@@ -306,6 +315,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   }
 
   const isBookName = (text: string) => /《[^》]+》/.test(text)
+  const isWatermarkText = (text: string) => text.trim().startsWith('@') && text.trim().length > 1
 
   // ---- 开场标题 ----
   let openTitleText = DEFAULT_PARAMS.open.titleText
@@ -314,7 +324,6 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
   try {
     // 不用竖直位置(y)判定：不同模板的 y 号约定不一致(实测有正负两种"标题在上"约定，
     // 也有免责声明这类靠下的长文案)，唯一稳定信号是"最早出现、非书名、非水印"。
-    const isWatermarkText = (text: string) => text.trim().startsWith('@') && text.trim().length > 1
     const candidates = stickers
       .map((s) => ({ s, t: textsById.get(s.materialId) }))
       .filter((x) => x.t && !isBookName(x.t.text) && !isWatermarkText(x.t.text))
@@ -693,6 +702,69 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     note('body.subtitleEntrance', 'defaulted', '字幕入场动画解析失败')
   }
 
+  // ---- 文字层位置与相对字号 ----
+  //
+  // 之前只提取了正片字幕这一处；开场标题/快闪书名/常驻大标题的位置与字号全是渲染层
+  // 拍脑袋定的，实测与草稿差得很远（常驻大标题草稿在 21.8%、我们贴在 5%）。
+  //
+  // 字号取**相对正文字幕的倍数**：剪映的 size 单位与渲染像素没有可逆换算，
+  // 但同一份草稿内的相对大小是可靠的。有效字号 = size × clip.scale
+  // （剪映按文字长短自动缩放，所以必须带上 scale，否则长标题会被当成"字更小"）。
+  let textLayout: Record<string, number> | undefined
+  try {
+    const eff = (sg: StickerSeg) => {
+      const sz = textsById.get(sg.materialId)?.size
+      return typeof sz === 'number' && sz > 0 ? sz * sg.scale : undefined
+    }
+    // 正文字幕作为基准：取时长最长那条（口径与上面的字幕样式提取一致）
+    const capSegs = stickers
+      .filter((sg) => {
+        if (sg.materialId === openTitleMaterialId) return false
+        const t = textsById.get(sg.materialId)
+        return !!t && !isBookName(t.text) && !isWatermarkText(t.text)
+      })
+      .sort((a, b) => b.durationUs - a.durationUs)
+    const capEff = capSegs.length ? eff(capSegs[0]) : undefined
+
+    if (capEff) {
+      const out: Record<string, number> = {}
+      const openSeg = stickers.find((sg) => sg.materialId === openTitleMaterialId)
+      if (openSeg) {
+        out.openTitlePosY = transformYToNorm(openSeg.y)
+        const e = eff(openSeg)
+        if (e) out.openTitleScale = e / capEff
+      }
+      const bookSegs = stickers.filter((sg) => {
+        const t = textsById.get(sg.materialId)
+        return !!t && isBookName(t.text)
+      })
+      // 常驻大标题 = 书名类里时长最长那条（实测横跨整个正片 20.6 秒）；
+      // 快闪书名 = 其余那些短的。两者位置不同（21.8% vs 16.9%），不能混作一谈。
+      const byDur = [...bookSegs].sort((a, b) => b.durationUs - a.durationUs)
+      const resident = byDur[0]
+      const flashSegs = byDur.slice(1)
+      if (resident) {
+        out.bookTitlePosY = transformYToNorm(resident.y)
+        const e = eff(resident)
+        if (e) out.bookTitleScale = e / capEff
+      }
+      if (flashSegs.length) {
+        out.flashTitlePosY = transformYToNorm(flashSegs[0].y)
+        // 取**最大**的有效字号：剪映把长书名缩小以塞进画面，取平均会把基准拉低，
+        // 渲染层拿到的应该是"没被缩过"的基准值，再自己按长度缩。
+        const effs = flashSegs.map(eff).filter((v): v is number => typeof v === 'number')
+        if (effs.length) out.flashTitleScale = Math.max(...effs) / capEff
+      }
+      if (Object.keys(out).length > 0) {
+        textLayout = out
+        note('text', 'extracted')
+      }
+    }
+    if (!textLayout) note('text', 'defaulted', undefined, false)
+  } catch {
+    note('text', 'defaulted', undefined, false)
+  }
+
   const built: Record<string, unknown> = {
     mode: 'flash',
     open: { durationMs: openDurationMs, shatter, titleText: openTitleText, sfx: openGear },
@@ -723,6 +795,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
       ? { motion: { moves, ...(keyframes.length ? { keyframes } : {}) } }
       : {}),
     ...(ripple ? { effects: { ripple } } : {}),
+    ...(textLayout ? { text: textLayout } : {}),
   }
 
   // 最后合入 detectUnsupported：草稿里确实存在、但渲染器做不到的结构（如独立特效轨），

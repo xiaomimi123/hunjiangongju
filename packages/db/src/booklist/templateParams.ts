@@ -39,6 +39,26 @@ export interface TemplateParams {
   // ripple.offsetMs 是**相对快闪结束那一刀**的偏移，不是绝对时间——我们的分镜时长由 TTS
   // 决定、与草稿不等长，照搬绝对秒数必然落在别的画面上。理由详见 draftEffects.ts:deriveRipple。
   effects?: { ripple?: { offsetMs: number; durationMs: number } }
+  /**
+   * 文字层的位置与相对字号。
+   *
+   * **位置**是「距画面顶端的归一化高度」，与 body.subtitlePosY 同口径（transformYToNorm）。
+   * 之前只提取了正文字幕这一处，开场标题/快闪书名/常驻大标题全是渲染层拍脑袋定的，
+   * 实测与草稿差得很远：常驻大标题草稿在 21.8%、我们贴在 5%；快闪书名草稿在 16.9%、
+   * 我们放在 50%。
+   *
+   * **字号是相对正文字幕的倍数，不是绝对像素。** 剪映的 size 单位与渲染像素之间没有
+   * 可逆换算（这一条在迁移设计里就写明了），但同一份草稿内各文字层的相对大小是可靠的：
+   * 有效字号 = size × clip.scale。实测常驻大标题是正文的 1.85 倍，而我们是 1.09 倍。
+   */
+  text?: {
+    openTitlePosY: number
+    openTitleScale: number
+    flashTitlePosY: number
+    flashTitleScale: number
+    bookTitlePosY: number
+    bookTitleScale: number
+  }
 }
 
 /** 渲染器实际支持的转场类型白名单（与 worker/templates/booklist/motion.ts 的 TransId 对齐） */
@@ -51,6 +71,14 @@ export const DEFAULT_PARAMS: TemplateParams = {
   transition: { type: 'dissolve', durationMs: 400 },
   body: { subtitleFontFamily: 'subtitle', subtitleColor: '#ffffff', subtitlePosY: 0.78, kenBurns: 'subtle' },
   audio: { bgmVolume: 0.69, sfx: { openGear: true, transitionDrop: true } },
+  // 按客户样例草稿实测标定（今天分享的是/draft_content.json，720×960）。
+  // 给默认值而不是留空：库里已有的框架是在这个字段存在之前导入的，留空它们会继续用
+  // 旧的拍脑袋位置；而它们本来就是同一份模板导入的，用实测值只会更准。
+  text: {
+    openTitlePosY: 0.811, openTitleScale: 1.13,
+    flashTitlePosY: 0.169, flashTitleScale: 1.96,
+    bookTitlePosY: 0.218, bookTitleScale: 1.85,
+  },
 }
 
 function obj(x: unknown): Record<string, unknown> {
@@ -122,6 +150,20 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),
       sfx: { openGear: bool(sfx.openGear, D.audio.sfx.openGear), transitionDrop: bool(sfx.transitionDrop, D.audio.sfx.transitionDrop) },
     },
+    // 文字层位置/相对字号：逐字段回退，缺哪个补哪个。
+    // 整块回退是错的——老框架只会缺这一整块，而部分导入可能只取到其中几项。
+    text: (() => {
+      const t = obj(r.text)
+      const DT = D.text!
+      return {
+        openTitlePosY: num(t.openTitlePosY, DT.openTitlePosY),
+        openTitleScale: num(t.openTitleScale, DT.openTitleScale),
+        flashTitlePosY: num(t.flashTitlePosY, DT.flashTitlePosY),
+        flashTitleScale: num(t.flashTitleScale, DT.flashTitleScale),
+        bookTitlePosY: num(t.bookTitlePosY, DT.bookTitlePosY),
+        bookTitleScale: num(t.bookTitleScale, DT.bookTitleScale),
+      }
+    })(),
     ...(r.grade && typeof r.grade === 'object' && !Array.isArray(r.grade)
       ? { grade: {
           filterName: str((r.grade as Record<string, unknown>).filterName, ''),

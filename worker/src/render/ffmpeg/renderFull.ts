@@ -47,10 +47,11 @@ export interface RenderFullOpts {
   decor: Omit<DecorOpts, 'width' | 'height'>
   /**
    * 水波纹素材（预渲染）。缺省则不叠。
-   * - patternAbs: 高光环 RGBA 序列
-   * - xmapAbs/ymapAbs: 位移图序列；给了才会真的折射底图，只给高光环就退化成「画一圈白环」
+   * - xmapAbs/ymapAbs: 位移图序列。**这是水波纹的本体**——真的折射底图。
+   * - patternAbs: 高光环 RGBA 序列，**可选**。位移层做成正弦波场之后画面自身的扭曲
+   *   已经够明显，白环反而会让人觉得是「画上去的圈」。默认不用。
    */
-  ripple?: { patternAbs: string; xmapAbs?: string; ymapAbs?: string; atMs: number; durationMs: number }
+  ripple?: { patternAbs?: string; xmapAbs?: string; ymapAbs?: string; atMs: number; durationMs: number }
   assAbs: string
   outAbs: string
   fontsDir?: string
@@ -148,11 +149,13 @@ export function buildRenderFullPlan(o: RenderFullOpts): RenderFullPlan {
       cur = 'rpd'
       idx += 2
     }
-    // 高光层：让波峰有反光。单靠位移在低对比度画面上看不出来。
-    inputArgs.push('-framerate', String(o.fps), '-i', o.ripple.patternAbs)
-    chains.push(rippleOverlayChain(cur, 'rip', idx, o.ripple.atMs, o.ripple.durationMs))
-    cur = 'rip'
-    idx++
+    // 高光层：可选。给了才叠。
+    if (o.ripple.patternAbs) {
+      inputArgs.push('-framerate', String(o.fps), '-i', o.ripple.patternAbs)
+      chains.push(rippleOverlayChain(cur, 'rip', idx, o.ripple.atMs, o.ripple.durationMs))
+      cur = 'rip'
+      idx++
+    }
   }
 
   // ---- 文字层：一次烧完，全部用全片绝对时间 ----

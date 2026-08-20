@@ -34,13 +34,23 @@ export interface RippleAssetOpts {
  */
 const R0 = 24
 const RING_W = 15
-const PEAK_ALPHA = 190
+/**
+ * 高光环的峰值不透明度。位移层改成正弦波场之后，画面自身的扭曲已经足够明显，
+ * 白环退成很淡的辅助反光即可；再亮就会盖住底图的水面感，变回「画了一圈白圈」。
+ */
+const PEAK_ALPHA = 70
 
 /**
- * 位移峰值（像素）。水波纹的「浓」主要靠它，不是靠白环的亮度。
- * 22px 在 720×960 上是明显但不夸张的折射感；再大画面会开始「融化」。
+ * 位移峰值（像素）。水波纹的「浓」全靠它，不是靠白环的亮度。
+ * 波场是多圈叠加的，单圈振幅不必很大就有明显的水面感；再大画面会开始「融化」。
  */
-const DISPLACE_PX = 22
+const DISPLACE_PX = 16
+
+/** 波长（像素）。720×960 的对角线半径约 600，取 95 时同时能看到六七圈波。 */
+const WAVE_LEN = 95
+
+/** 整段时长里波向外跑过几个波长。越大波跑得越快。 */
+const WAVE_CYCLES = 2.2
 
 /**
  * 构造 alpha 通道表达式。
@@ -84,33 +94,33 @@ export function rippleAlphaExpr(o: RippleAssetOpts): string {
 /**
  * 位移图的表达式（x 或 y 轴）。
  *
- * 环上的位移用**高斯的导数** u·exp(-u²)：环的前沿把像素往外推、后沿往回拉，
- * 这一推一拉才是「水面隆起又落下」的观感。单纯用高斯只会得到均匀外推，像放大镜不像水波。
- * 乘 NORM 让 DISPLACE_PX 就是实际的峰值位移量，方便调。
+ * ── 形态：正弦波场，不是单个冲击环 ──
  *
- * 输出是 8 位图，128 表示零位移，所以最终值 = 128 + 位移。
+ * 第一版用「高斯环」——一圈鼓包向外扩，环外画面纹丝不动。那是「一滴水砸下去」的冲击环，
+ * 不是剪映的水波纹。剪映那个效果是**整幅画面像水面一样起伏**，同一时刻能看到好几圈波，
+ * 而且波是连续向外跑的。差别在这里，不在浓淡。
+ *
+ * 所以位移改成径向正弦波场：
+ *   相位 φ = 距离/波长 − 时间/周期     （相位随时间推移 ⇒ 波向外跑）
+ *   位移 dr = 振幅 × 衰减(t) × sin(2πφ)
+ * 波长取 WAVE_LEN，整幅 720×960 上同时能看到六七圈；衰减让它在 458ms 内自然平息。
+ *
+ * 输出是 8 位图，128 表示零位移，最终值 = 128 + 位移。
  */
 export function rippleDisplaceExpr(o: RippleAssetOpts, axis: 'x' | 'y'): string {
+  if (o.rings <= 0) return '128'
   const d = o.durationMs / 1000
   const cx = Math.round(o.width / 2)
   const cy = Math.round(o.height / 2)
-  const maxR = Math.ceil(Math.hypot(o.width, o.height) / 2) + R0
-  // u*exp(-u^2) 的极值在 u=1/√2 处约 0.4289；除以它，DISPLACE_PX 才是真正的峰值
-  const NORM = (1 / 0.4289).toFixed(3)
   const proj = axis === 'x' ? `(X-${cx})` : `(Y-${cy})`
-  const terms: string[] = []
-  for (let i = 0; i < Math.max(0, o.rings); i++) {
-    const st = Math.round(d * 0.18 * i * 1000) / 1000
-    const span = Math.max(0.05, Math.round((d - st) * 1000) / 1000)
-    const p = `st(1,clip((T-${st})/${span},0,1))`
-    const u = `st(2,(ld(0)-(${R0}+ld(1)*${maxR}))/${RING_W})`
-    const gate = `gt(ld(1),0)*lt(ld(1),1)`
-    terms.push(`(${p}*0+${u}*0+${gate}*(1-ld(1))*${DISPLACE_PX}*${NORM}*ld(2)*exp(-ld(2)*ld(2)))`)
-  }
-  if (terms.length === 0) return '128'
-  const sum = terms.join('+')
-  // 除以距离做径向投影；max(...,1) 防中心除零
-  return `st(0,hypot(X-${cx},Y-${cy}))*0+128+(${sum})*${proj}/max(ld(0),1)`
+  // 波从中心往外跑：整段时长里跑过 WAVE_CYCLES 个波长
+  const period = (d / WAVE_CYCLES).toFixed(4)
+  // 振幅随时间线性平息；再乘一个「离中心越远越弱」的软衰减，避免边角过度撕扯
+  const env = `(1-clip(T/${d.toFixed(4)},0,1))`
+  const fall = `exp(-ld(0)/${(Math.hypot(o.width, o.height) * 0.55).toFixed(1)})`
+  const phase = `(ld(0)/${WAVE_LEN}-T/${period})`
+  const dr = `${DISPLACE_PX}*${env}*${fall}*sin(2*PI*${phase})`
+  return `st(0,hypot(X-${cx},Y-${cy}))*0+128+(${dr})*${proj}/max(ld(0),1)`
 }
 
 /**

@@ -46,14 +46,17 @@ export const POST = handler(async (req) => {
   // 收到的客户端回传报告更可信。缺失/不是合法 JSON 时报告直接置空，不影响导入本身
   // （报告纯信息性展示，沿用本路由"缺省字段一律不写、不因此拒绝导入"的既有口径）。
   let fidelityReport: ReturnType<typeof buildFidelityReport> | null = null
+  let charBudget: { maxLines: number; maxTotalChars: number } | null = null
   const draftJsonRaw = form.get('draftJson')
   if (typeof draftJsonRaw === 'string' && draftJsonRaw.trim()) {
     try {
       const draft = JSON.parse(draftJsonRaw)
       const { meta } = parseJianyingDraft(draft)
       fidelityReport = buildFidelityReport(meta.provenance, new Date().toISOString())
+      charBudget = meta.charBudget ?? null
     } catch {
       fidelityReport = null
+      charBudget = null
     }
   }
 
@@ -142,6 +145,10 @@ export const POST = handler(async (req) => {
       overlayTemplate: overlayTemplate as unknown as Prisma.InputJsonValue,
       createdBy: s.userId,
       ...(bodyCount ? { suggestedSegmentCount: bodyCount } : {}),
+      // 文案字数预算：不写的话生成时走代码默认 220 字。客户样例正片仅 20.6 秒，
+      // 220 字等于 10.7 字/秒，是原片实测语速的两倍多——AI 按预算写满，文案长得离谱，
+      // 还被迫复述原著情节填字数。按草稿时长×实测语速推出的预算是 89 字。
+      ...(charBudget ? { maxLines: charBudget.maxLines, maxTotalChars: charBudget.maxTotalChars } : {}),
       ...(fidelityReport ? { draftFidelityReport: fidelityReport as unknown as Prisma.InputJsonValue } : {}),
     },
   })

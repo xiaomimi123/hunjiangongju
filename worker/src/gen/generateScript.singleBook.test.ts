@@ -201,3 +201,27 @@ describe('generateScript：单本模式接线', () => {
     expect(titles).toEqual(['甲书', '甲书', '乙书', '乙书', '丙书', '丙书'])
   })
 })
+
+// 实测问题：给 AI 的字数预算是默认 220 字(该有的 2.3 倍),AI 按预算写满,
+// 只能靠复述《活着》的情节(福贵、凤霞、老牛)来填字数。两处都要治。
+describe('buildSingleBookPrompt —— 字数与剧透约束', () => {
+  const framework = { frameworkText: '框架', segCount: 4, maxLines: 8, maxTotalChars: 89 }
+  const book = { title: '活着', author: '余华' }
+
+  it('给出每段平均字数,而非只给总数(只给总数会让模型把字堆在最后一段)', () => {
+    const p = buildSingleBookPrompt({ book, framework })
+    expect(p).toContain('89 字')
+    expect(p).toContain('每段约 22 字')
+  })
+
+  it('明确禁止复述情节/人物/结局', () => {
+    const p = buildSingleBookPrompt({ book, framework })
+    expect(p).toContain('不要复述')
+    expect(p).toContain('情节')
+    expect(p).toContain('结局')
+  })
+
+  it('强调宁可少写不可超', () => {
+    expect(buildSingleBookPrompt({ book, framework })).toContain('宁可少写')
+  })
+})

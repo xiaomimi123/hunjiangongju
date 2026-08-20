@@ -9,6 +9,7 @@ import { extractDraftGrade } from './draftGrade'
 import { extractDraftMoves } from './draftMotion'
 import { extractDraftKeyframes, type KeyframeScale } from './draftKeyframes'
 import { extractDraftTransitions } from './draftTransitions'
+import { deriveDraftCharBudget, deriveDraftSpeechRate } from './draftCharBudget'
 import { extractSubtitleEntrance } from './draftTextAnim'
 import { detectUnsupported, type ProvenanceEntry, type ProvenanceStatus } from './draftProvenance'
 
@@ -22,6 +23,8 @@ export interface DraftMeta {
   watermark?: string // 文字里以 @ 开头的一行（如「@欧子好读」）
   structure: DraftStructure // 主视频轨节奏切出的 开场/快闪/正片 三段结构（Task 8 页面报告用）
   provenance: ProvenanceEntry[] // 结构化保真度记录：extracted/defaulted 与 warnings 同源写入，unsupported 来自 detectUnsupported
+  /** 按正片时长 × 实测语速推出的文案预算；缺省表示推不出来，落库时不写、走通用默认 */
+  charBudget?: { maxLines: number; maxTotalChars: number }
 }
 
 // ---- 纯函数 helpers（导出以便单测/复用） ----
@@ -592,6 +595,24 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     note('motion.moves', 'defaulted', '运镜解析失败')
   }
 
+  // ---- 文案字数预算（按正片时长 × 实测语速）----
+  // 不推导的话生成时会走代码默认的 220 字。客户样例正片仅 20.6 秒，220 字等于 10.7 字/秒，
+  // 是原片实测语速(4.7)的两倍多——AI 按预算写满，文案长得离谱，还被迫复述原著情节填字数。
+  let charBudget: { maxLines: number; maxTotalChars: number } | null = null
+  try {
+    const bodyMs = structure.segments.filter((x) => x.role === 'body').reduce((a, x) => a + x.durationMs, 0)
+    // 语速样本取正文文字段（排除书名卡与开场标题：它们是标签不是口播，字数/时长比例不同）
+    const samples = stickers
+      .map((x) => ({ text: (textsById.get(x.materialId)?.text ?? '').trim(), durationMs: usToMs(x.durationUs) }))
+      .filter((x) => x.text && !isBookName(x.text) && !x.text.startsWith('@') && x.text !== openTitleText)
+    const rate = deriveDraftSpeechRate(samples) ?? undefined
+    charBudget = deriveDraftCharBudget(bodyMs, structure.bodyCount, rate)
+    if (charBudget) note('charBudget', 'extracted', undefined, false)
+    else note('charBudget', 'defaulted', '未能按草稿时长推导字数上限，走通用默认值', false)
+  } catch {
+    note('charBudget', 'defaulted', '字数上限推导失败', false)
+  }
+
   // ---- 快闪逐卡时长 ----
   let flashClipMs: number[] = []
   try {
@@ -691,6 +712,7 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     structure,
     provenance,
     ...(watermark ? { watermark } : {}),
+    ...(charBudget ? { charBudget } : {}),
   }
 
   return { params: parseTemplateParams(built), meta }

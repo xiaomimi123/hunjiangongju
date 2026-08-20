@@ -242,6 +242,72 @@ export default function FrameworksPage() {
               <span className="eyebrow">叠加模板（JSON）</span>
               <textarea className="field mt-1 font-mono text-xs" rows={4} value={form.overlayTemplate} onChange={(e) => setF({ overlayTemplate: e.target.value })} placeholder='{"title_card":"{{标题}} {{副标题}}","watermark":"{{账号}}"}' />
             </label>
+
+            {/* 图片槽位：直接编辑 overlayTemplate 里的 __imageSlots，改完写回同一个 JSON 字符串。
+                不另存一份 state——两处各存一份必然漂移，运营在 JSON 里改了这里不刷新、
+                或反过来，都会让人以为配置没生效。 */}
+            {(() => {
+              let ot: Record<string, unknown> = {}
+              try { ot = form.overlayTemplate.trim() ? JSON.parse(form.overlayTemplate) : {} } catch { return null }
+              const cfg = ot.__imageSlots as { count?: number; slots?: unknown[] } | undefined
+              const count = typeof cfg?.count === 'number' ? cfg.count : 0
+              if (count <= 0) return null
+              const slots = Array.isArray(cfg?.slots) ? (cfg!.slots as Record<string, unknown>[]) : []
+              const at = (i: number) => slots.find((x) => x.index === i) ?? { index: i, source: 'ai' as const }
+              const write = (i: number, patch: Record<string, unknown>) => {
+                const next = slots.filter((x) => x.index !== i)
+                const merged = { ...at(i), ...patch }
+                // 清掉空串,避免写出 {"prompt":""} 这种噪音
+                for (const k of ['prompt', 'folder']) {
+                  if (typeof merged[k] === 'string' && !(merged[k] as string).trim()) delete merged[k]
+                }
+                next.push(merged)
+                next.sort((a, b) => (a.index as number) - (b.index as number))
+                setF({ overlayTemplate: JSON.stringify({ ...ot, __imageSlots: { count, slots: next } }, null, 2) })
+              }
+              return (
+                <div className="block">
+                  <span className="eyebrow">图片槽位（{count} 张正片配图）</span>
+                  <p className="mt-1 text-xs text-ink3">
+                    提示词只写「画什么」；画风统一由上面的「图片风格提示词」决定，改一次全部槽位生效。
+                  </p>
+                  <div className="mt-2 space-y-2">
+                    {Array.from({ length: count }, (_, i) => {
+                      const sl = at(i) as { source?: string; prompt?: string; folder?: string }
+                      const isAi = sl.source !== 'library'
+                      return (
+                        <div key={i} className="flex flex-wrap items-center gap-2 rounded border border-line px-2 py-2">
+                          <span className="w-12 shrink-0 text-xs text-ink3">第 {i + 1} 张</span>
+                          <select
+                            className="field w-28 shrink-0 text-xs"
+                            value={isAi ? 'ai' : 'library'}
+                            onChange={(e) => write(i, { source: e.target.value })}
+                          >
+                            <option value="ai">AI 生图</option>
+                            <option value="library">素材库</option>
+                          </select>
+                          {isAi ? (
+                            <input
+                              className="field flex-1 text-xs"
+                              value={sl.prompt ?? ''}
+                              onChange={(e) => write(i, { prompt: e.target.value })}
+                              placeholder="画什么（留空则用内置场景池随机）"
+                            />
+                          ) : (
+                            <input
+                              className="field flex-1 text-xs"
+                              value={sl.folder ?? ''}
+                              onChange={(e) => write(i, { folder: e.target.value })}
+                              placeholder="素材文件夹（留空 = 全库随机）"
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
             <div className="grid gap-4 sm:grid-cols-3">
               <label className="block">
                 <span className="eyebrow">最大行数</span>

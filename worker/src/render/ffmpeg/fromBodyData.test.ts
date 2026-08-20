@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { fromBodyData } from './fromBodyData'
 import { parseTemplateParams } from '../../../templates/booklist/templateParams'
-import type { BodyData } from '../../../templates/booklist/indexHtml'
+import type { BodyData } from '../../../templates/booklist/bodyData'
 
 const params = (extra: Record<string, unknown> = {}) =>
   parseTemplateParams({ mode: 'flash', open: { durationMs: 2159, shatter: true }, ...extra })

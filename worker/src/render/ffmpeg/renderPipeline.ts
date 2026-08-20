@@ -7,7 +7,7 @@
 import { spawnSync } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
-import type { BodyData } from '../../../templates/booklist/indexHtml'
+import type { BodyData } from '../../../templates/booklist/bodyData'
 import { flashTimeline } from '../../../templates/booklist/templateParams'
 import { fromBodyData } from './fromBodyData'
 import { buildRenderFullPlan } from './renderFull'

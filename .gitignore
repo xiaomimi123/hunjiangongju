@@ -9,3 +9,6 @@ data/
 *.tar.gz
 .superpowers/
 next-env.d.ts
+
+# 客户样例剪映工程（原始素材，不入库）
+今天分享的是/

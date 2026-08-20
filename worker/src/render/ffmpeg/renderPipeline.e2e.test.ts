@@ -12,7 +12,7 @@ import os from 'os'
 import path from 'path'
 import { renderBodyWithFfmpeg } from './renderPipeline'
 import { parseTemplateParams } from '../../../templates/booklist/templateParams'
-import type { BodyData } from '../../../templates/booklist/indexHtml'
+import type { BodyData } from '../../../templates/booklist/bodyData'
 import { minAdjacentChangedRatio, darkRatio } from './testkit'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'

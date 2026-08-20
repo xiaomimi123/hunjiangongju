@@ -5,7 +5,7 @@
 //
 // 纯函数：不碰文件系统。IO（拷图、渲开场、跑 ffmpeg）留在 renderVisuals 里。
 
-import type { BodyData, BodySegment } from '../../../templates/booklist/indexHtml'
+import type { BodyData, BodySegment } from '../../../templates/booklist/bodyData'
 import { flashTimeline } from '../../../templates/booklist/templateParams'
 import { distributeCards } from './flash'
 import type { RenderFullOpts, FullFlashCard } from './renderFull'

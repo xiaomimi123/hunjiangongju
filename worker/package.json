@@ -15,7 +15,6 @@
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.8.0",
     "fluent-ffmpeg": "^2.1.3",
-    "hyperframes": "0.7.33",
     "tsx": "^4.16.0"
   },
   "devDependencies": {

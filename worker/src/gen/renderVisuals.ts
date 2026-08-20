@@ -3,9 +3,8 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
-import { renderIndexHtml, type BodyData, type BodyOverlay } from '../../templates/booklist/indexHtml'
+import type { BodyData, BodyOverlay } from '../../templates/booklist/bodyData'
 import { renderBodyWithFfmpeg } from '../render/ffmpeg/renderPipeline'
-import { readRenderer } from '@mixcut/db'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { resolveBooks } from './generateImage'
 
@@ -210,19 +209,11 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     await fs.mkdir(mediaDir, { recursive: true })
     await fs.mkdir(path.join(hfDir, 'covers'), { recursive: true })
 
-    // 拷模板 package.json
-    await fs.copyFile(path.join(TEMPLATE_DIR, 'package.json'), path.join(hfDir, 'package.json'))
-
-    // 拷本地化的 GSAP（index.html 以相对路径 gsap.min.js 引用），离线/CN 主机可用，
-    // 避免渲染时依赖外网 CDN 失败 → 静默产出无动画视频。
-    await fs.copyFile(path.join(TEMPLATE_DIR, 'gsap.min.js'), path.join(hfDir, 'gsap.min.js'))
-
-    // 拷字体目录（flash 模板 @font-face 引用 fonts/title.ttf、fonts/sub.otf）：best-effort，
-    // 模板 fonts/ 缺失或为空时不应中断渲染（classic 任务本就不需要）。
+    // 拷字体目录：best-effort，缺失时不应中断渲染
     try {
       await fs.cp(path.join(TEMPLATE_DIR, 'fonts'), path.join(hfDir, 'fonts'), { recursive: true })
     } catch {
-      // 忽略：目录不存在也不影响非 flash 渲染
+      // 忽略：字幕烧录用的是 worker 内置字体，这里只是给模板资源留位
     }
 
     // 拷各段图片到 media/<NN>.png
@@ -230,23 +221,12 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
       await fs.copyFile(img.abs, path.join(hfDir, img.rel))
     }
 
-    // ── 渲染器分叉 ──
-    //
-    // 两条路径产出**同一份契约**的 body.mp4（720×960、无声、全片长），后面的
-    // render-video（混音/BGM/音效/loudnorm）一行都不用改，所以随时可以切回去。
-    // 默认走 ffmpeg；框架显式写 __renderer='hyperframes' 才退回旧渲染器。
-    // 注意「退回旧渲染器」不等于「不用 HyperFrames」——开场碎裂那 2.16 秒
-    // 两条路径都靠它渲（碎片要带本条片子自己的图）。
-    const outRel = path.join('renders', 'body.mp4')
-    const outAbs = path.join(hfDir, outRel)
-    if (readRenderer(task.framework.overlayTemplate) === 'ffmpeg') {
-      // 模板级素材缓存（水波纹位移图等），跨任务复用，不要放进任务目录
-      const cacheRoot = path.join(DATA_DIR, 'render-cache')
-      await renderBodyWithFfmpeg(hfDir, data, cacheRoot)
-      console.log(`[gen] render-visuals ${genTaskId}: body.mp4 由 ffmpeg 渲染`)
-    } else {
-      await renderWithHyperFrames(hfDir, data, outRel)
-    }
+    // 渲染：全片由 ffmpeg 出（开场碎裂见 render/ffmpeg/shatterMaps.ts）。
+    // 产出 720×960、无声、全片长的 body.mp4，后面的 render-video
+    // （混音/BGM/音效/loudnorm）消费它。
+    const outAbs = path.join(hfDir, 'renders', 'body.mp4')
+    // 模板级素材缓存（碎裂坐标表、水波纹位移图），跨任务复用，不要放进任务目录
+    await renderBodyWithFfmpeg(hfDir, data, path.join(DATA_DIR, 'render-cache'))
     await verifyBody(outAbs, genTaskId)
 
     await transitionRender(renderTask.id, 'RENDERING')
@@ -258,34 +238,7 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
   }
 }
 
-/** HyperFrames 路径：写整页 index.html 再逐帧截图 */
-async function renderWithHyperFrames(
-  hfDir: string,
-  data: import('../../templates/booklist/indexHtml').BodyData,
-  outRel: string,
-): Promise<void> {
-  // 写 codegen index.html
-  await fs.writeFile(path.join(hfDir, 'index.html'), renderIndexHtml(data), 'utf8')
-
-  // 渲染（视频无音频，720×960）
-  // hyperframes 需要本机 Chromium：ARM64/离线环境无法自动装 headless shell，
-  // 依赖 worker 镜像预装的 chromium（默认 /usr/bin/chromium），可用 HYPERFRAMES_BROWSER_PATH 覆盖。
-  const r = spawnSync(
-    'npx',
-    ['--yes', 'hyperframes@0.7.33', 'render', '--quality', 'standard', '--output', outRel],
-    {
-      cwd: hfDir,
-      encoding: 'utf8',
-      stdio: 'pipe',
-      env: { ...process.env, HYPERFRAMES_BROWSER_PATH: process.env.HYPERFRAMES_BROWSER_PATH ?? '/usr/bin/chromium' },
-    },
-  )
-  if (r.status !== 0) {
-    throw new Error(`hyperframes render 失败 (code ${r.status}): ${(r.stderr ?? r.stdout ?? '').slice(-800)}`)
-  }
-}
-
-/** 两条渲染路径共用的产物校验：尺寸不对就不该往下走 */
+/** 产物校验：尺寸不对就不该往下走 */
 async function verifyBody(outAbs: string, genTaskId: string): Promise<void> {
   await fs.access(outAbs) // 不存在则抛
   const dims = probeDims(outAbs)

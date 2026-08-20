@@ -1,7 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "render": "npx --yes hyperframes@0.7.33 render"
-  }
-}

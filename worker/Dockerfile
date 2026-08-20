@@ -3,20 +3,23 @@ FROM node:20-bookworm-slim AS base
 # 本地/海外构建传 --build-arg CN=0 走上游源（mirrors.aliyun.com 在海外/本地不一定可达）。
 ARG CN=1
 RUN if [ "$CN" = "1" ]; then sed -i -e 's|deb.debian.org|mirrors.aliyun.com|g' -e 's|security.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; fi; \
-    apt-get update && apt-get install -y curl ca-certificates fonts-noto-cjk fontconfig chromium && rm -rf /var/lib/apt/lists/*
+    apt-get update && apt-get install -y curl ca-certificates fonts-noto-cjk fontconfig && rm -rf /var/lib/apt/lists/*
 # ---- ffmpeg：钉死版本，不用发行版自带的 ----
 # 原本走 `apt-get install ffmpeg`，装到的是 Debian 12 自带的 5.1.9-0+deb12u1。
 # 那个构建上出过一次全线事故：加了 zoompan 之后每条成片从约 2 秒起画面定格、字幕整条消失
 # （服务器实测：同机同输入，过 zoompan 冻、不过正常）。
 #
 # 注意结论的边界：**没有**证据表明这是「老版本的已知 bug」——用上游 5.1 与 7.1 的静态构建、
-# 喂同样的 HyperFrames 输出，两种滤镜写法都复现不出来。所以真正的问题是
+# 喂同样的输入，两种滤镜写法都复现不出来。所以真正的问题是
 # 「发行版打过补丁的那个二进制行为不可控」，而不是「版本旧」。
 #
 # 因此改成下载**固定版本**的静态二进制：
 #   1. 版本写死在 ARG 里，升级是一次显式改动，不会随基础镜像悄悄漂移
 #   2. 本地开发与服务器跑的是同一个二进制，滤镜行为差异这个变量被彻底消掉
-#   3. 静态构建自带 libass/freetype/fontconfig/x264，迁移所需滤镜齐全（构建期逐个自检）
+#   3. 静态构建自带 libass/freetype/fontconfig/x264，所需滤镜齐全（构建期逐个自检）
+#
+# ffv1 编码器也要自检：开场碎裂的坐标表用它无损存盘，坐标错一位碎片就会从画面
+# 另一头取色，不能退化到有损编码。
 #
 # **不从 Docker Hub 拉镜像**：服务器的镜像加速源只代理官方 library/* 镜像，
 # 用户镜像（mwader/static-ffmpeg 之类）一律 403。走 HTTPS 下二进制则与 npm 同一条通路。
@@ -35,15 +38,15 @@ RUN set -eux; \
     curl -fsSL -o /usr/local/bin/ffprobe "${FFMPEG_BASE_URL}/ffprobe-${A}"; \
     chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe; \
     ffmpeg -version | head -1; \
-    for f in zoompan xfade overlay subtitles ass concat displace geq eq crop scale; do \
+    for f in zoompan xfade overlay subtitles ass concat displace geq eq crop scale \
+             remap maskedmerge gblur rgbashift blend; do \
       ffmpeg -hide_banner -filters | awk '{print $2}' | grep -qx "$f" || { echo "缺滤镜: $f" >&2; exit 1; }; \
     done; \
-    ffmpeg -hide_banner -encoders | grep -q ' libx264 ' || { echo '缺 libx264' >&2; exit 1; }
+    for e in libx264 ffv1; do \
+      ffmpeg -hide_banner -encoders | awk '{print $2}' | grep -qx "$e" || { echo "缺编码器: $e" >&2; exit 1; }; \
+    done
 
-# HyperFrames(render-visuals) 用无头浏览器截帧渲染，需系统 Chromium；渲染代码默认读 /usr/bin/chromium
-ENV HYPERFRAMES_BROWSER_PATH=/usr/bin/chromium
-# hyperframes 依赖 onnxruntime-node，其安装脚本从 github 下载原生库（国内 302 失败）；跳过——本项目渲染不走 ONNX 推理
-ENV ONNXRUNTIME_NODE_INSTALL=skip
+# 渲染全程只用 ffmpeg，不再需要系统 Chromium（原先开场碎裂靠无头浏览器截帧）。
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY web/package.json web/

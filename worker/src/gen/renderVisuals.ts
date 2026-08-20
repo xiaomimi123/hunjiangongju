@@ -4,6 +4,8 @@ import path from 'path'
 import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { renderIndexHtml, type BodyData, type BodyOverlay } from '../../templates/booklist/indexHtml'
+import { renderBodyWithFfmpeg } from '../render/ffmpeg/renderPipeline'
+import { readRenderer } from '@mixcut/db'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { resolveBooks } from './generateImage'
 
@@ -228,34 +230,22 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
       await fs.copyFile(img.abs, path.join(hfDir, img.rel))
     }
 
-    // 写 codegen index.html
-    await fs.writeFile(path.join(hfDir, 'index.html'), renderIndexHtml(data), 'utf8')
-
-    // 渲染（视频无音频，720×960）
+    // ── 渲染器分叉 ──
+    //
+    // 两条路径产出**同一份契约**的 body.mp4（720×960、无声、全片长），后面的
+    // render-video（混音/BGM/音效/loudnorm）一行都不用改，所以随时可以切回去。
+    // 默认仍走 HyperFrames；框架显式声明 __renderer='ffmpeg' 才走新渲染器。
     const outRel = path.join('renders', 'body.mp4')
-    // hyperframes 需要本机 Chromium：ARM64/离线环境无法自动装 headless shell，
-    // 依赖 worker 镜像预装的 chromium（默认 /usr/bin/chromium），可用 HYPERFRAMES_BROWSER_PATH 覆盖。
-    const r = spawnSync(
-      'npx',
-      ['--yes', 'hyperframes@0.7.33', 'render', '--quality', 'standard', '--output', outRel],
-      {
-        cwd: hfDir,
-        encoding: 'utf8',
-        stdio: 'pipe',
-        env: { ...process.env, HYPERFRAMES_BROWSER_PATH: process.env.HYPERFRAMES_BROWSER_PATH ?? '/usr/bin/chromium' },
-      },
-    )
-    if (r.status !== 0) {
-      throw new Error(`hyperframes render 失败 (code ${r.status}): ${(r.stderr ?? r.stdout ?? '').slice(-800)}`)
-    }
-
     const outAbs = path.join(hfDir, outRel)
-    await fs.access(outAbs) // 不存在则抛
-    const dims = probeDims(outAbs)
-    if (dims.width !== WIDTH || dims.height !== HEIGHT) {
-      throw new Error(`body.mp4 尺寸异常: ${dims.width}x${dims.height}（期望 ${WIDTH}x${HEIGHT}）`)
+    if (readRenderer(task.framework.overlayTemplate) === 'ffmpeg') {
+      // 模板级素材缓存（水波纹位移图等），跨任务复用，不要放进任务目录
+      const cacheRoot = path.join(DATA_DIR, 'render-cache')
+      await renderBodyWithFfmpeg(hfDir, data, cacheRoot)
+      console.log(`[gen] render-visuals ${genTaskId}: body.mp4 由 ffmpeg 渲染`)
+    } else {
+      await renderWithHyperFrames(hfDir, data, outRel)
     }
-    console.log(`[gen] render-visuals ${genTaskId}: body.mp4 ${dims.width}x${dims.height} ok`)
+    await verifyBody(outAbs, genTaskId)
 
     await transitionRender(renderTask.id, 'RENDERING')
     await enqueueGen('render-video', { renderTaskId: renderTask.id })
@@ -264,4 +254,41 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     await transitionRender(renderTask.id, 'FAILED', err instanceof Error ? err.message : String(err)).catch(() => {})
     throw err
   }
+}
+
+/** HyperFrames 路径：写整页 index.html 再逐帧截图 */
+async function renderWithHyperFrames(
+  hfDir: string,
+  data: import('../../templates/booklist/indexHtml').BodyData,
+  outRel: string,
+): Promise<void> {
+  // 写 codegen index.html
+  await fs.writeFile(path.join(hfDir, 'index.html'), renderIndexHtml(data), 'utf8')
+
+  // 渲染（视频无音频，720×960）
+  // hyperframes 需要本机 Chromium：ARM64/离线环境无法自动装 headless shell，
+  // 依赖 worker 镜像预装的 chromium（默认 /usr/bin/chromium），可用 HYPERFRAMES_BROWSER_PATH 覆盖。
+  const r = spawnSync(
+    'npx',
+    ['--yes', 'hyperframes@0.7.33', 'render', '--quality', 'standard', '--output', outRel],
+    {
+      cwd: hfDir,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      env: { ...process.env, HYPERFRAMES_BROWSER_PATH: process.env.HYPERFRAMES_BROWSER_PATH ?? '/usr/bin/chromium' },
+    },
+  )
+  if (r.status !== 0) {
+    throw new Error(`hyperframes render 失败 (code ${r.status}): ${(r.stderr ?? r.stdout ?? '').slice(-800)}`)
+  }
+}
+
+/** 两条渲染路径共用的产物校验：尺寸不对就不该往下走 */
+async function verifyBody(outAbs: string, genTaskId: string): Promise<void> {
+  await fs.access(outAbs) // 不存在则抛
+  const dims = probeDims(outAbs)
+  if (dims.width !== WIDTH || dims.height !== HEIGHT) {
+    throw new Error(`body.mp4 尺寸异常: ${dims.width}x${dims.height}（期望 ${WIDTH}x${HEIGHT}）`)
+  }
+  console.log(`[gen] render-visuals ${genTaskId}: body.mp4 ${dims.width}x${dims.height} ok`)
 }

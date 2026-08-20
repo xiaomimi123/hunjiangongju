@@ -32,8 +32,14 @@ export interface FullFlashCard {
 }
 
 export interface RenderFullOpts {
-  /** HyperFrames 渲好的开场碎片片段（无声）。缺省则整片从快闪开始 */
+  /** HyperFrames 渲好的开场碎片片段（无声）。缺省时用 openStillAbs 补一段静止 */
   openingClipAbs?: string
+  /**
+   * 开场底图。模板不要碎裂开场（open.shatter=false）时，开场那段仍要有画面——
+   * HyperFrames 分支是把首图静止显示到快闪开始。**不能留空**：留空会让成片比音频
+   * 短掉整个开场时长，音画从头就错位。
+   */
+  openStillAbs?: string
   flashCards: FullFlashCard[]
   bodySegments: RenderBodySegment[]
   width: number
@@ -71,14 +77,28 @@ export function buildRenderFullPlan(o: RenderFullOpts): RenderFullPlan {
   let idx = 0
   let totalMs = 0
 
-  // ---- 开场碎片：HyperFrames 的产物，编码参数不由我们控制，必须先归一化 ----
+  // ---- 开场 ----
+  // 开场时长以快闪首卡的起点为准——快闪紧接开场，不留缝
+  const openMs = o.flashCards[0]?.startMs ?? 0
   if (o.openingClipAbs) {
+    // HyperFrames 的产物，编码参数不由我们控制，必须先归一化
     inputArgs.push('-i', o.openingClipAbs)
     chains.push(`[${idx}:v]scale=${o.width}:${o.height},${norm},setpts=PTS-STARTPTS[op]`)
     parts.push('op')
     idx++
-    // 开场时长以快闪首卡的起点为准——快闪紧接开场，不留缝
-    totalMs = o.flashCards[0]?.startMs ?? 0
+    totalMs = openMs
+  } else if (o.openStillAbs && openMs > 0) {
+    // 不要碎裂开场时，首图静止铺满这一段（与 HyperFrames 分支一致）。
+    // 复用 bodyGraph 的单段链，省得再写一套静图→定时长的拼装。
+    const g = buildBodyGraph({
+      segments: [{ imageAbs: o.openStillAbs, durationMs: openMs }],
+      width: o.width, height: o.height, fps: o.fps,
+    })
+    chains.push(shiftInputIndices(g.filter, idx, 'op'))
+    inputArgs.push(...g.inputArgs)
+    parts.push(`op_${g.outLabel}`)
+    idx += 1
+    totalMs = g.totalMs
   }
 
   // ---- 快闪书封：全硬切 + 可选弹入 ----

@@ -62,7 +62,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
         orderBy: { createdAt: 'asc' },
       })
     : []
-  const assignedAssets = pickAssetsForSegments(libraryAssets, segments.length)
+  // 传 genTaskId 作为随机种子：同任务可复现、不同任务不撞图。批量场景下这是必需的——
+  // 不传的话每条片子都取素材库前几张，一天几千条全长一个样。
+  const assignedAssets = pickAssetsForSegments(libraryAssets, segments.length, genTaskId)
 
   // 配图与文案完全脱钩：主体只来自 genTaskId 派生的场景方向，不再由 LLM 从口播提炼画面
   // （那样必然逐句配插画：说碗画碗、说台阶画台阶）。同任务重跑一致，不同任务必然不同。

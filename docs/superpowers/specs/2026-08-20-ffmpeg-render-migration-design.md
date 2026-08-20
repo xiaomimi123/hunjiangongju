@@ -103,21 +103,20 @@ docker compose run --rm worker npm run test:render -w worker
 3. **ASS 三件套**：颜色是 `&HAABBGGRR`（BGR 反序 + alpha 前置且是**透明度**）；
    时间码是**百分秒两位**；`PlayResX/Y` 不设的话 libass 按 384×288 换算、字号整体缩水且不报错。
 
-### ⚠️ 尚未验证：容器内的中文字体解析
+### 字体自带（原本的「尚未验证」项，已解决）
 
-墨迹断言只能证明「画出了东西」，**证明不了画对了**。本机实测：`Noto Sans CJK SC` 解析不到时
-libass 退成 Helvetica、中文逐字回退失败，**墨迹断言照样绿，但画出来很可能是豆腐块**。
+**曾经的问题**：ASS 的 Fontname 走系统 fontconfig 解析时，本机（macOS，无 Noto CJK）会退到
+Helvetica，中文逐字回退失败、画出来是豆腐块——**而墨迹断言照样绿**。也就是说字幕对不对
+取决于运行环境装了什么字体，本地根本无法验证，只能去服务器上做。
 
-因此另有一条查字体解析结果的断言（`ASS_FONT_STRICT=1` 开启），它只在字体确实装了的环境才判得准。
-本机因网络限制装不上 `fonts-noto-cjk`，**这条至今没有在真实环境跑过**。
+**解决**：把字体文件放进仓库（`worker/templates/booklist/fonts/NotoSansSC-Regular.otf`，
+SIL Open Font License 1.1，允许随产品分发），渲染时用 `fontsdir` 指过去。
+本地与服务器用同一个二进制字体，字体解析变成确定性的，**本地即可完整验收**。
 
-**必须在服务器上补验**（部署钉版 ffmpeg 的镜像之后）：
+实测 libass 日志：`fontselect: (Noto Sans SC, 400, 0) -> NotoSansSC-Regular` —— 解析到自带字体，
+无缺字回退。那条字体校验断言因此不再需要环境开关，任何环境都必须绿。
 
-```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm worker npm run test:render -w worker
-```
-
-在此之前，**不要认为中文字幕已经验证通过**。
+只带 Regular，粗体由 libass 合成（大字号下观感可接受）；再带一个 Bold 面会让仓库多 8MB。
 
 ### 阶段 2（已完成）——快闪书封
 

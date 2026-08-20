@@ -9,16 +9,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildAss, subtitlesFilter, type AssCue } from './ass'
+import { FONTS_DIR, DEFAULT_FONT_NAME } from './fonts'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
 
-// 本机（macOS）没有 Noto Sans CJK，libass 会退到 Helvetica 再逐字回退；
-// 容器里装了 fonts-noto-cjk，那里才是权威口径。
-const FONT = process.env.ASS_FONT ?? 'Noto Sans CJK SC'
-// 字体严格校验只在「请求的字体确实装了」的环境才有意义（容器）。
-// 本机开着会必然红，因为字体压根不存在——那是环境问题，不是代码问题。
-const STRICT = process.env.ASS_FONT_STRICT === '1'
+// 字体自带（见 fonts.ts）：本机与服务器用同一个文件，字体解析是确定性的。
+// 此前这里依赖系统 fontconfig，本机解析不到 Noto CJK 会退到 Helvetica，
+// 中文变豆腐块而墨迹断言照样绿——那条校验只能去服务器上做。现在本地就能验完。
+const FONT = process.env.ASS_FONT ?? DEFAULT_FONT_NAME
 
 const W = 720
 const H = 960
@@ -67,7 +66,7 @@ d('真渲验收 —— ASS 文字层', () => {
       watermark: '@读书号',
     }), 'utf8')
     const r = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
-      '-vf', subtitlesFilter(assPath), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-vf', subtitlesFilter(assPath, FONTS_DIR), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
       '-pix_fmt', 'yuv420p', out])
     if (!r.ok) throw new Error(`烧字幕失败: ${r.out.slice(-800)}`)
     renderLog = r.out
@@ -101,13 +100,12 @@ d('真渲验收 —— ASS 文字层', () => {
     expect(inkRatio(out, 3, CAP_BAND)).toBeGreaterThan(0.015)
   })
 
-  // ★ 墨迹断言只能证明「画出了东西」，**证明不了画对了**——
-  // 本机实测：Noto Sans CJK SC 解析不到时退成 Helvetica，中文逐字回退失败，
-  // 墨迹断言照样绿，但画出来的很可能是豆腐块。所以必须另有一条查字体解析结果的断言。
-  // 它只在字体确实装了的环境（容器）才判得准，故显式开关，不做隐式跳过。
-  const itStrict = STRICT ? it : it.skip
-  itStrict('请求的字体被真正解析到，且没有缺字回退（中文没变豆腐块）', () => {
-    const resolved = new RegExp(`fontselect: \\(${FONT},[^)]*\\) -> [^\\n]*${FONT}`)
+  // ★ 墨迹断言只能证明「画出了东西」，**证明不了画对了**：
+  // 字体解析不到时 libass 会静默回退，中文可能变豆腐块，而墨迹断言照样绿。
+  // 自带字体之后这条不再需要开关，任何环境都必须绿。
+  it('请求的字体被真正解析到，且没有缺字回退（中文没变豆腐块）', () => {
+    // 自带字体解析到的是**文件内的 PS 名** NotoSansSC-Regular
+    const resolved = /fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC/
     expect(renderLog, `字体被替换成了别的族: ${/fontselect:[^\n]*/.exec(renderLog)?.[0]}`).toMatch(resolved)
     expect(renderLog).not.toMatch(/Glyph .* not found/i)
   })

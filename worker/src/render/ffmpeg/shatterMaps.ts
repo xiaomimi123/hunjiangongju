@@ -23,12 +23,18 @@ export interface ShatterGeom {
   height: number
   fps: number
   durationMs: number
-  /** 碎片格网 */
-  cols: number
-  rows: number
+  /** 碎片块数。见 DEFAULT_GEOM 里为什么不用格网。 */
+  pieces: number
 }
 
-export const DEFAULT_GEOM = { cols: 6, rows: 8 } as const
+/**
+ * 默认切成 16 块。
+ *
+ * 第一版用 6×8=48 的抖动格网，裂纹又密又整齐——抖动再大，横平竖直的格子感也去不掉，
+ * 而且 48 块每块太小，观感是"马赛克"不是"碎玻璃"。真玻璃是几条长裂纹把整块切成
+ * 大小悬殊的几大块，所以改成递归切割（见 tessellate）。
+ */
+export const DEFAULT_GEOM = { pieces: 16 } as const
 
 /**
  * 映射表格式/内容的版本号，进缓存键。
@@ -37,7 +43,7 @@ export const DEFAULT_GEOM = { cols: 6, rows: 8 } as const
  * 表现是「部署完了画面却没变」，而且查不到任何报错。**改动本文件里任何影响
  * 映射表数值的常量或算法，都要把这个号 +1。**
  */
-export const SHATTER_MAPS_VERSION = 2
+export const SHATTER_MAPS_VERSION = 3
 
 /** 碎片在整段时长的这个比例处合拢；之后留一点静置，避免刚落位就切场景 */
 const ASSEMBLE_AT = 0.78
@@ -48,7 +54,7 @@ const BATCHES = 6
 const MIN_SQUASH = 0.12
 
 export interface Shard {
-  poly: { x: number; y: number }[]
+  poly: Pt[]
   cx: number
   cy: number
   dx: number
@@ -61,57 +67,122 @@ export interface Shard {
   flashAt: number
 }
 
+type Pt = { x: number; y: number }
+
+/** 多边形的有向面积×2。正负表示绕向，取绝对值即面积的两倍。 */
+function area2(poly: Pt[]): number {
+  let s = 0
+  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+    s += poly[j].x * poly[k].y - poly[k].x * poly[j].y
+  }
+  return s
+}
+
+/** 面积加权形心。不规则多边形不能用顶点平均——顶点密的那侧会把形心拽过去。 */
+function centroid(poly: Pt[]): Pt {
+  const a2 = area2(poly)
+  if (Math.abs(a2) < 1e-9) {
+    // 退化成一条线时按顶点平均兜底，避免除零
+    let sx = 0, sy = 0
+    for (const p of poly) { sx += p.x; sy += p.y }
+    return { x: sx / poly.length, y: sy / poly.length }
+  }
+  let cx = 0, cy = 0
+  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+    const cross = poly[j].x * poly[k].y - poly[k].x * poly[j].y
+    cx += (poly[j].x + poly[k].x) * cross
+    cy += (poly[j].y + poly[k].y) * cross
+  }
+  return { x: cx / (3 * a2), y: cy / (3 * a2) }
+}
+
 /**
- * 顶点格网 + 逐片参数。
+ * 用一条直线把多边形切成两半（Sutherland–Hodgman 半平面裁剪）。
+ * 直线：nx*x + ny*y = d。两半**共用切割线上的顶点**，所以拼回去严丝合缝。
+ */
+function cut(poly: Pt[], nx: number, ny: number, d: number): [Pt[], Pt[]] {
+  const pos: Pt[] = []
+  const neg: Pt[] = []
+  for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+    const a = poly[j]
+    const b = poly[k]
+    const sa = nx * a.x + ny * a.y - d
+    const sb = nx * b.x + ny * b.y - d
+    if (sa >= 0) pos.push(a)
+    if (sa <= 0) neg.push(a)
+    if ((sa > 0 && sb < 0) || (sa < 0 && sb > 0)) {
+      const t = sa / (sa - sb)
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+      pos.push(p)
+      neg.push(p)
+    }
+  }
+  return [pos, neg]
+}
+
+/**
+ * 递归切割：整块画面被一条条长直裂纹反复切开。
  *
- * 相邻单元**共用顶点**，所以碎片落位后能严丝合缝铺满画面（这是 CSS 版第一次做错的地方：
- * 每片各自向内裁，拼合后满屏黑缝）。所有随机量都由下标经三角函数派生——
- * 本仓禁用 Math.random，且随机会让同一模板每次渲染都不同、出问题无法复现。
+ * 每次挑**当前面积最大**的那块下刀，所以不会切出一堆碎渣；
+ * 刀口从形心偏移一段，两半面积不等 —— 这正是"大小悬殊的几大块"的来源。
+ * 角度按黄金角绕圈，裂纹方向不会扎堆。
+ *
+ * 所有量都由步数派生：本仓禁用 Math.random，且随机会让同一模板每次渲染都不同。
+ */
+function tessellate(W: number, H: number, pieces: number): Pt[][] {
+  let polys: Pt[][] = [[{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: H }, { x: 0, y: H }]]
+  for (let i = 0; polys.length < pieces; i++) {
+    // 在**面积前三**里轮着挑，不是每次都切最大的那块。
+    // 每次都切最大等于在做平均，切完 16 块个个差不多大；轮着挑才留得下几块明显大的。
+    const rank = [...polys.keys()].sort((a, b) => Math.abs(area2(polys[b])) - Math.abs(area2(polys[a])))
+    const bi = rank[i % Math.min(3, rank.length)]
+    const target = polys[bi]
+    const c = centroid(target)
+    const ang = ((i * 137.5) % 180) * (Math.PI / 180)
+    const nx = Math.cos(ang)
+    const ny = Math.sin(ang)
+    // 刀口**必定偏心**：偏移量至少占该块尺度的 20%，最多 50%。
+    // 允许接近正中会切出两块等大的，累积下来就是一堆同尺寸碎片。
+    let ext = 0
+    for (const p of target) ext = Math.max(ext, Math.abs((p.x - c.x) * nx + (p.y - c.y) * ny))
+    const mag = (0.20 + (((i * 29) % 100) / 100) * 0.30) * ext
+    const off = i % 2 === 0 ? mag : -mag
+    const d = nx * c.x + ny * c.y + off
+    const [a, b] = cut(target, nx, ny, d)
+    // 切歪了（有一半退化）就跳过这一刀，换下一个角度，避免死循环产出空多边形
+    if (a.length < 3 || b.length < 3) continue
+    polys = [...polys.slice(0, bi), a, b, ...polys.slice(bi + 1)]
+  }
+  return polys
+}
+
+/**
+ * 碎片几何 + 逐片飞入参数。
+ *
+ * 碎片来自递归切割，相邻块**共用切割线上的顶点**，所以落位后能严丝合缝铺满画面
+ * （这是最早那版做错的地方：每片各自向内裁，拼合后满屏黑缝）。
  */
 export function buildShards(g: ShatterGeom): Shard[] {
-  const cw = g.width / g.cols
-  const ch = g.height / g.rows
-  const pts: { x: number; y: number }[][] = []
-  for (let r = 0; r <= g.rows; r++) {
-    const row: { x: number; y: number }[] = []
-    for (let c = 0; c <= g.cols; c++) {
-      const edge = r === 0 || c === 0 || r === g.rows || c === g.cols
-      const jx = edge ? 0 : Math.sin(r * 3.1 + c * 1.7) * cw * 0.3
-      const jy = edge ? 0 : Math.cos(r * 2.3 + c * 2.9) * ch * 0.3
-      row.push({ x: c * cw + jx, y: r * ch + jy })
-    }
-    pts.push(row)
-  }
-
   // 飞入距离按**画布对角线**取比例，不能写死像素：写死的话换个画布尺寸，
   // 碎片可能全程都在画面外（小画布）或起手就贴着边（大画布），效果整个跑偏。
-  // 系数按 720×960（对角线 1200）标定，那个尺寸下与标定时的数值完全一致。
   const diag = Math.hypot(g.width, g.height)
-  const out: Shard[] = []
-  let i = 0
-  for (let r = 0; r < g.rows; r++) {
-    for (let c = 0; c < g.cols; c++) {
-      const poly = [pts[r][c], pts[r][c + 1], pts[r + 1][c + 1], pts[r + 1][c]]
-      const cx = (poly[0].x + poly[1].x + poly[2].x + poly[3].x) / 4
-      const cy = (poly[0].y + poly[1].y + poly[2].y + poly[3].y) / 4
-      // 飞入方向按黄金角绕圈，保证四面八方都有来路
-      const ang = (i * 137.5 * Math.PI) / 180
-      const dist = diag * (0.4333 + ((i * 53) % 320) / 1200)
-      out.push({
-        poly, cx, cy,
-        dx: Math.cos(ang) * dist,
-        dy: Math.sin(ang) * dist - diag * 0.075,
-        rot: (Math.sin(i * 1.31) * 120 * Math.PI) / 180,
-        rx: (Math.cos(i * 0.97) * 84 * Math.PI) / 180,
-        ry: (Math.sin(i * 1.63) * 84 * Math.PI) / 180,
-        startT: STAGGER * (i % BATCHES),
-        // 峰位逐片错开铺在 0.16~0.62，且都远离落位点，落位时反光必为 0
-        flashAt: 0.16 + ((i * 37) % 100) / 100 * 0.46,
-      })
-      i++
+  return tessellate(g.width, g.height, g.pieces).map((poly, i) => {
+    const c = centroid(poly)
+    // 飞入方向按黄金角绕圈，保证四面八方都有来路
+    const ang = (i * 137.5 * Math.PI) / 180
+    const dist = diag * (0.4333 + ((i * 53) % 320) / 1200)
+    return {
+      poly, cx: c.x, cy: c.y,
+      dx: Math.cos(ang) * dist,
+      dy: Math.sin(ang) * dist - diag * 0.075,
+      rot: (Math.sin(i * 1.31) * 120 * Math.PI) / 180,
+      rx: (Math.cos(i * 0.97) * 84 * Math.PI) / 180,
+      ry: (Math.sin(i * 1.63) * 84 * Math.PI) / 180,
+      startT: STAGGER * (i % BATCHES),
+      // 峰位逐片错开铺在 0.16~0.62，且都远离落位点，落位时反光必为 0
+      flashAt: 0.16 + ((i * 37) % 100) / 100 * 0.46,
     }
-  }
-  return out
+  })
 }
 
 /** 某片碎片在归一化时刻 t 的姿态。progress=1 表示已落位（此时是恒等变换）。 */
@@ -160,15 +231,15 @@ export function forwardPoint(
 }
 
 /**
- * 点是否在四边形内 —— 射线法。
+ * 点是否在多边形内 —— 射线法。
  *
- * 不能用「叉积同号」那种凸多边形判定：顶点抖动会让个别单元变成**凹**四边形
- * （实测 48 片里有 1 片），凹角那一侧会被判成外部，而相邻碎片也不认领它，
- * 于是落位后画面上留下一条黑线。射线法对任意简单多边形都成立。
+ * 不能用「叉积同号」那种凸多边形判定。递归切割出的块虽然都是凸的，但早先的抖动格网
+ * 会造出凹四边形，凹角那侧既不被本片认领、也不被邻片认领，落位后画面上留一条黑线。
+ * 射线法对任意简单多边形都成立，边数也不限，不必假设是四边形。
  */
-function inQuad(px: number, py: number, q: { x: number; y: number }[]): boolean {
+function inPoly(px: number, py: number, q: Pt[]): boolean {
   let inside = false
-  for (let k = 0, j = 3; k < 4; j = k++) {
+  for (let k = 0, j = q.length - 1; k < q.length; j = k++) {
     const a = q[k]
     const b = q[j]
     if ((a.y > py) !== (b.y > py) && px < ((b.x - a.x) * (py - a.y)) / (b.y - a.y) + a.x) {
@@ -186,7 +257,7 @@ function inQuad(px: number, py: number, q: { x: number; y: number }[]): boolean 
  * 肉眼不可见；而「没人认领」是可见的。宁可重叠，不可留缝。
  */
 const EXPAND_PX = 0.6
-function expandPoly(poly: { x: number; y: number }[], cx: number, cy: number) {
+function expandPoly(poly: Pt[], cx: number, cy: number) {
   return poly.map((p) => {
     const d = Math.hypot(p.x - cx, p.y - cy) || 1
     return { x: p.x + ((p.x - cx) / d) * EXPAND_PX, y: p.y + ((p.y - cy) / d) * EXPAND_PX }
@@ -205,12 +276,12 @@ function distSqToSeg(px: number, py: number, ax: number, ay: number, bx: number,
   return dx * dx + dy * dy
 }
 
-/** 点到四边形边界的最短距离 */
-function distToEdge(px: number, py: number, q: { x: number; y: number }[]): number {
+/** 点到多边形边界的最短距离 */
+function distToEdge(px: number, py: number, q: Pt[]): number {
   let m = Infinity
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < q.length; k++) {
     const a = q[k]
-    const b = q[(k + 1) % 4]
+    const b = q[(k + 1) % q.length]
     const d = distSqToSeg(px, py, a.x, a.y, b.x, b.y)
     if (d < m) m = d
   }
@@ -280,9 +351,10 @@ const BLOOM_PEAK = 236
 //   1. 断口棱边 —— 距碎片边界 RIM_PX 内的像素提亮，模拟断面折射的那道光
 //   2. 翻面反光 —— 碎片翻转到某个角度时整片一闪，就是"闪光特效"
 //   3. 星芒 —— 反光最强的瞬间在碎片中心炸一个四角星
-/** 棱边宽度（像素，按 720×960 标定，随画布缩放） */
-const RIM_PX = 7
-const RIM_PEAK = 250
+/** 棱边宽度（像素，按 720×960 标定，随画布缩放）。
+ * 硬边收窄、扩散光放宽 = 「淡淡的发光」；反过来会变成一条实心亮线，像描边不像玻璃。 */
+const RIM_PX = 9
+const RIM_PEAK = 205
 /** 棱光在飞行最后这一段淡出；必须在落位那一刻归零，否则成片上会留一张发光的网格 */
 const RIM_FADE = 0.18
 /**
@@ -382,7 +454,7 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
           const u = bx / sx + s.cx
           const v = by / sy + s.cy
           if (u < 0 || u >= g.width || v < 0 || v >= g.height) continue
-          if (!inQuad(u, v, quad)) continue
+          if (!inPoly(u, v, quad)) continue
           const idx = Y * g.width + X
           xmap.writeUInt16LE(Math.round(u), base + idx * 2)
           ymap.writeUInt16LE(Math.round(v), base + idx * 2)
@@ -410,9 +482,9 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
 const GLOW_SIGMA = 22
 const GLOW_OPACITY = 0.55
 /** 棱光的硬边强度，以及它那层扩散光的半径与强度 */
-const SPEC_OPACITY = 0.95
-const SPEC_GLOW_SIGMA = 6
-const SPEC_GLOW_OPACITY = 0.45
+const SPEC_OPACITY = 0.62
+const SPEC_GLOW_SIGMA = 11
+const SPEC_GLOW_OPACITY = 0.6
 
 export interface ShatterRenderOpts {
   /** 开场底图（本条片子自己的图） */
@@ -453,7 +525,7 @@ export function buildShatterArgs(o: ShatterRenderOpts): string[] {
     // 棱光：断口高光 + 翻面反光 + 星芒。
     // R/B 反向错开做色散镶边——参考视频里棱边一侧偏粉、另一侧偏蓝，
     // 那正是"玻璃"而非"撕纸"的判别特征。错开量比光晕小，棱边本身很细。
-    `[4:v]format=gbrp,rgbashift=rh=-3:bh=3:rv=-1:bv=1[spec]`,
+    `[4:v]format=gbrp,rgbashift=rh=-2:bh=2:rv=-1:bv=1[spec]`,
     // 棱光再糊一层很小的模糊后叠回去：断面折射的光是有一点扩散的，
     // 纯硬边看着像描线。两份都要，硬边给形、软边给光。
     `[spec]split[sp1][sp2]`,

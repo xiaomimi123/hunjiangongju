@@ -26,9 +26,9 @@ const coverage = (f: number) => {
 }
 
 describe('碎裂坐标表', () => {
-  // ★ 落位后必须严丝合缝。第一版用「叉积同号」判点在四边形内，那是**凸**多边形的判定；
-  // 顶点抖动会让个别单元变成凹四边形（48 片里实测有 1 片），凹角那侧既不被本片认领、
-  // 也不被邻片认领，成片上就是一条黑线。
+  // ★ 落位后必须严丝合缝。早先用「叉积同号」判点在多边形内，那是**凸**多边形的判定；
+  // 当时的抖动格网会造出凹四边形，凹角那侧既不被本片认领、也不被邻片认领，
+  // 成片上就是一条黑线。现在改用递归切割（块都是凸的）+ 射线法，两重保险。
   it('落位后没有一个像素无人认领', () => {
     const x = frameX(LAST)
     let holes = 0
@@ -59,9 +59,11 @@ describe('碎裂坐标表', () => {
     const f = Math.round(LAST * 0.45)
     const t = f / LAST
     const poses = shards.map((s) => shardPoseAt(s, t))
-    // 断言前先确认这一帧确实在"变形中"，否则测试是空转的
+    // 断言前先确认这一帧确实在"变形中"，否则测试是空转的。
+    // 门槛按块数取比例——写死成绝对条数的话，改了块数这条守卫就会误报。
     const deformed = poses.filter((p) => p.progress > 0 && (Math.abs(p.ang) > 0.15 || p.sx < 0.9))
-    expect(deformed.length, '选的帧没有碎片在变形，这条断言验不到东西').toBeGreaterThan(10)
+    expect(deformed.length, '选的帧没有碎片在变形，这条断言验不到东西')
+      .toBeGreaterThan(shards.length * 0.4)
 
     const x = frameX(f)
     const y = frameY(f)
@@ -123,7 +125,7 @@ describe('碎裂坐标表', () => {
 
   // ★ 这条抓的是一个真出过的 bug：反光原本算成翻转角的 cos^14，
   // 而翻转角在落位时收敛到 0 ⇒ cos(0)=1 ⇒ **每片落位那一刻都被打满反光**，
-  // 48 张脸同时提亮成一片灰，暗色原图整个被吃掉。
+  // 所有碎片的脸同时提亮成一片灰，暗色原图整个被吃掉。
   //
   // 「落位帧棱光为 0」那条抓不到它（那一帧 rimEnv 也是 0，正好掩盖）。
   // 要抓必须看**临落位**的帧：那时反光应该已经过去了，不该还在峰值。
@@ -151,6 +153,40 @@ describe('碎裂坐标表', () => {
 
   it('帧数 = 时长 × 帧率', () => {
     expect(maps.frames).toBe(65)
+  })
+
+  // ★ 碎片必须**恰好铺满**画面：切割用的是半平面裁剪，两半共用切割线上的顶点，
+  // 所以面积之和应严格等于画布面积。少了就是落位后有洞，多了就是有块重叠。
+  it('切出的块恰好铺满画布，不重不漏', () => {
+    const area = (poly: { x: number; y: number }[]) => {
+      let a = 0
+      for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+        a += poly[j].x * poly[k].y - poly[k].x * poly[j].y
+      }
+      return Math.abs(a) / 2
+    }
+    const sum = shards.reduce((acc, s) => acc + area(s.poly), 0)
+    expect(sum / (G.width * G.height)).toBeCloseTo(1, 5)
+  })
+
+  // 要的是「几个大块拼接」而不是一堆同尺寸碎片：
+  // 每次都切当前最大的那块等于在做平均，切完个个差不多大——所以改成在前三里轮着挑、
+  // 且刀口必定偏心。这条断言守住那个意图。
+  it('块的大小明显悬殊，不是一堆同尺寸碎片', () => {
+    const area = (poly: { x: number; y: number }[]) => {
+      let a = 0
+      for (let k = 0, j = poly.length - 1; k < poly.length; j = k++) {
+        a += poly[j].x * poly[k].y - poly[k].x * poly[j].y
+      }
+      return Math.abs(a) / 2
+    }
+    const sorted = shards.map((s) => area(s.poly)).sort((a, b) => b - a)
+    expect(sorted[0] / sorted[sorted.length - 1], '最大块与最小块差得太少，看着像马赛克')
+      .toBeGreaterThan(4)
+  })
+
+  it('块数就是配置的块数', () => {
+    expect(shards).toHaveLength(DEFAULT_GEOM.pieces)
   })
 
   // 飞入距离曾被写死成 720×960 下的像素值，换画布就整个跑偏（小画布上碎片全程在画面外）

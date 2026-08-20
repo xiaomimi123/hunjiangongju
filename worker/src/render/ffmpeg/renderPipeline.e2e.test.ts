@@ -109,21 +109,23 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
     expect(m, `正片有时段定格: ${m}`).toBeGreaterThan(0.02)
   })
 
-  // ★ 开场碎裂：碎片没飞到的地方是 remap 的 fill 黑，所以黑区占比随时间**单调收窄**
-  // 就是碎裂真的发生过的证据。
+  // ★ 开场碎裂：碎片没飞到的地方是 remap 的 fill 黑，所以「开头近乎满屏黑、
+  // 落位后回到素材自身的黑区水平」就是碎裂真的发生过的证据。
   //
-  // 不能断言「落位后几乎无黑」：实测落位后是 0.203，而那正是这套素材自身的黑区基线
-  // —— 关掉碎裂跑同一条链，全程恒为 0.203。把 0.203 当成"没拼合"是误判素材。
-  // 实测曲线：碎裂开 0.999→0.603→0.301→0.203；碎裂关 0.203→0.203→0.203→0.203。
-  // 用「开头几乎全黑 + 逐段收窄」才区分得开这两条曲线。
-  it('开场是碎裂拼合：黑区从近乎满屏逐段收窄', () => {
+  // 两个不能想当然的地方：
+  //
+  // 1. 不能断言「落位后几乎无黑」。实测落位后是 0.203，而那正是这套素材**自身**的
+  //    黑区基线——关掉碎裂跑同一条链，全程恒为 0.203。把 0.203 当成"没拼合"是误判素材。
+  // 2. 也不能断言「逐段单调收窄」。加了裂纹辉光之后实测 0.999→0.723→0.155→0.201：
+  //    中段比落位后还低，因为辉光把暗像素提亮了。单调是旧版本才成立的巧合，不是性质。
+  //
+  // 真正的判别特征只有一条：**开头近乎全黑**。碎裂关掉时那一点是 0.203，一验就红。
+  it('开场是碎裂拼合：黑区从近乎满屏收到素材基线', () => {
     const at = [0.1, 0.6, 1.2, 1.9].map((t) => darkRatio(outAbs, t))
     const shown = at.map((v) => v.toFixed(3)).join(' → ')
     expect(at[0], `开头不够黑(${shown})，碎片一上来就铺满了`).toBeGreaterThan(0.8)
-    for (let i = 1; i < at.length; i++) {
-      expect(at[i], `黑区没有继续收窄(${shown})`).toBeLessThan(at[i - 1])
-    }
-    expect(at[3], `落位后黑区没收干净(${shown})`).toBeLessThan(at[0] * 0.35)
+    expect(at[1], `画面迟迟没被填进来(${shown})`).toBeLessThan(at[0] * 0.85)
+    expect(at[3], `落位后黑区没收回基线(${shown})`).toBeLessThan(at[0] * 0.35)
   })
 
   // ★ 水波纹位移图按参数缓存：同模板的每条片子共用，不该逐条重渲 8 秒 geq
@@ -137,7 +139,7 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
 
   // 碎裂坐标表同理按模板缓存：算一次约 2.5 秒，不该每条片子重算
   it('碎裂坐标表落在模板级缓存里，三张表俱全', async () => {
-    const dir = path.join(cacheRoot, 'shatter', `v2-${W}x${H}@30-2159`)
+    const dir = path.join(cacheRoot, 'shatter', `v3-${W}x${H}@30-2159`)
     expect(existsSync(path.join(dir, '.done')), '缺完成标记，缓存下次会失效').toBe(true)
     for (const f of ['x.mkv', 'y.mkv', 'bloom.mkv']) {
       expect(existsSync(path.join(dir, f)), `缺 ${f}`).toBe(true)
@@ -147,7 +149,7 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
   it('缓存命中时不重渲（第二次调用不改动缓存目录的 mtime）', async () => {
     const marks = [
       path.join(cacheRoot, 'ripple', `${W}x${H}@30-458`, '.done'),
-      path.join(cacheRoot, 'shatter', `v2-${W}x${H}@30-2159`, '.done'),
+      path.join(cacheRoot, 'shatter', `v3-${W}x${H}@30-2159`, '.done'),
     ]
     const before = await Promise.all(marks.map(async (m) => (await fsp.stat(m)).mtimeMs))
     await renderBodyWithFfmpeg(hfDir, data(), cacheRoot)

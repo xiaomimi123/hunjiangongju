@@ -30,6 +30,15 @@ export interface ShatterGeom {
 
 export const DEFAULT_GEOM = { cols: 6, rows: 8 } as const
 
+/**
+ * 映射表格式/内容的版本号，进缓存键。
+ *
+ * 缓存键原先只含画布尺寸与时长。那样改了生成算法而键不变，服务器上会继续吃旧缓存——
+ * 表现是「部署完了画面却没变」，而且查不到任何报错。**改动本文件里任何影响
+ * 映射表数值的常量或算法，都要把这个号 +1。**
+ */
+export const SHATTER_MAPS_VERSION = 2
+
 /** 碎片在整段时长的这个比例处合拢；之后留一点静置，避免刚落位就切场景 */
 const ASSEMBLE_AT = 0.78
 /** 每批起飞的间隔（占总时长比例）与批数 —— 决定「前几帧几乎全黑、之后越来越密」 */
@@ -48,6 +57,8 @@ export interface Shard {
   rx: number
   ry: number
   startT: number
+  /** 本片反光闪光的时刻（自身飞行进度 0..1 上的位置） */
+  flashAt: number
 }
 
 /**
@@ -94,6 +105,8 @@ export function buildShards(g: ShatterGeom): Shard[] {
         rx: (Math.cos(i * 0.97) * 84 * Math.PI) / 180,
         ry: (Math.sin(i * 1.63) * 84 * Math.PI) / 180,
         startT: STAGGER * (i % BATCHES),
+        // 峰位逐片错开铺在 0.16~0.62，且都远离落位点，落位时反光必为 0
+        flashAt: 0.16 + ((i * 37) % 100) / 100 * 0.46,
       })
       i++
     }
@@ -180,12 +193,70 @@ function expandPoly(poly: { x: number; y: number }[], cx: number, cy: number) {
   })
 }
 
+/** 点到线段的距离平方。棱边宽度判定用得上，先比较平方值可以省掉大部分开方。 */
+function distSqToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const vx = bx - ax
+  const vy = by - ay
+  const len2 = vx * vx + vy * vy
+  let t = len2 > 0 ? ((px - ax) * vx + (py - ay) * vy) / len2 : 0
+  t = t < 0 ? 0 : t > 1 ? 1 : t
+  const dx = px - (ax + t * vx)
+  const dy = py - (ay + t * vy)
+  return dx * dx + dy * dy
+}
+
+/** 点到四边形边界的最短距离 */
+function distToEdge(px: number, py: number, q: { x: number; y: number }[]): number {
+  let m = Infinity
+  for (let k = 0; k < 4; k++) {
+    const a = q[k]
+    const b = q[(k + 1) % 4]
+    const d = distSqToSeg(px, py, a.x, a.y, b.x, b.y)
+    if (d < m) m = d
+  }
+  return Math.sqrt(m)
+}
+
+/**
+ * 在遮罩上画一个四角星芒（叠加，饱和到 255）。
+ *
+ * 画在**输出画面**坐标系上、不裁到碎片范围内 —— 星芒本来就该溢到碎片外的黑底上，
+ * 那正是镜头炫光的样子。
+ */
+function drawStar(
+  buf: Buffer, base: number, W: number, H: number,
+  cx: number, cy: number, radius: number, peak: number,
+): void {
+  const x0 = Math.max(0, Math.floor(cx - radius))
+  const x1 = Math.min(W - 1, Math.ceil(cx + radius))
+  const y0 = Math.max(0, Math.floor(cy - radius))
+  const y1 = Math.min(H - 1, Math.ceil(cy + radius))
+  const thin = Math.max(1, radius * 0.055) // 星芒的"细"——越小芒线越锐
+  const core = Math.max(1, radius * 0.09)
+  for (let Y = y0; Y <= y1; Y++) {
+    const dy = Math.abs(Y - cy)
+    for (let X = x0; X <= x1; X++) {
+      const dx = Math.abs(X - cx)
+      const horiz = Math.exp(-dy / thin) * Math.exp(-dx / radius)
+      const vert = Math.exp(-dx / thin) * Math.exp(-dy / radius)
+      const hot = Math.exp(-Math.hypot(dx, dy) / core)
+      const v = peak * Math.min(1, horiz + vert + hot)
+      if (v < 2) continue
+      const i = base + Y * W + X
+      const s = buf[i] + v
+      buf[i] = s > 255 ? 255 : s
+    }
+  }
+}
+
 export interface ShatterMaps {
   /** 每帧的 x 坐标表，gray16le，按帧顺序拼接 */
   xmap: Buffer
   ymap: Buffer
   /** 逐片过曝遮罩，gray8：255=全白，0=原色。见 BLOOM_SPAN */
   bloom: Buffer
+  /** 棱光遮罩，gray8：碎片断口的高光 + 翻面反光 + 星芒。见 RIM_PX */
+  spec: Buffer
   frames: number
 }
 
@@ -199,6 +270,35 @@ export interface ShatterMaps {
 const BLOOM_SPAN = 0.72
 /** 峰值不给满 255：留一点原图，碎片才有形状而不是一团白 */
 const BLOOM_PEAK = 236
+
+// ── 玻璃感从哪来 ──
+//
+// 放大参考视频看，玻璃的辨识特征**不在碎片本身，在断口**：每条裂缝两侧各有一条
+// 明亮的白色棱边，还带粉/蓝的色散镶边。只把缝隙留黑（第一版）像撕纸，不像碎玻璃。
+//
+// 所以再烘一张「棱光」遮罩，三样东西叠在一起：
+//   1. 断口棱边 —— 距碎片边界 RIM_PX 内的像素提亮，模拟断面折射的那道光
+//   2. 翻面反光 —— 碎片翻转到某个角度时整片一闪，就是"闪光特效"
+//   3. 星芒 —— 反光最强的瞬间在碎片中心炸一个四角星
+/** 棱边宽度（像素，按 720×960 标定，随画布缩放） */
+const RIM_PX = 7
+const RIM_PEAK = 250
+/** 棱光在飞行最后这一段淡出；必须在落位那一刻归零，否则成片上会留一张发光的网格 */
+const RIM_FADE = 0.18
+/**
+ * 翻面反光：每片碎片在**自己的时刻**闪一次。
+ *
+ * 第一版把反光算成翻转角的 `cos^14`，结果是错的：翻转角在落位时收敛到 0，
+ * `cos(0)=1` ⇒ **每片落位那一刻都被打满反光**，48 张脸同时提亮成一片灰，
+ * 暗色原图整个被吃掉。反光是"转过某个角度时一闪而过"，不是"停下来最亮"。
+ *
+ * 改成按各自飞行进度上的一个窄峰：峰位逐片错开，落位时必然为 0。
+ */
+const FLASH_WIDTH = 0.11
+const FLASH_PEAK = 205
+/** 星芒：反光超过这个强度才炸，避免满屏都是星 */
+const STAR_TRIGGER = 0.62
+const STAR_PEAK = 235
 
 /** 超出画面的坐标：remap 会用 fill 色填它，也就是碎片之间的黑缝 */
 const OUT_OF_RANGE = 65535
@@ -222,6 +322,11 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
   const xmap = Buffer.alloc(px * 2 * frames)
   const ymap = Buffer.alloc(px * 2 * frames)
   const bloom = Buffer.alloc(px * frames) // gray8，0 初始 = 不过曝
+  const spec = Buffer.alloc(px * frames) // gray8，0 初始 = 无棱光
+  // 棱边宽度与星芒半径按画布缩放，理由同飞入距离：写死像素换尺寸就跑偏
+  const scale = Math.hypot(g.width, g.height) / 1200
+  const rimPx = RIM_PX * scale
+  const starR = 130 * scale
 
   for (let f = 0; f < frames; f++) {
     const base = f * px * 2
@@ -243,6 +348,14 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
       const sa = Math.sin(-ang)
       // 指数 <1：过曝先稳在高位、临落位才快速收干净，与参考视频的节奏一致
       const bl = p >= BLOOM_SPAN ? 0 : Math.round(BLOOM_PEAK * Math.pow(1 - p / BLOOM_SPAN, 0.55))
+
+      // 棱光：飞行全程都在，只在最后 RIM_FADE 那一段淡出。
+      // 参考视频里碎片快拼合时断口仍然很亮，是它撑住了"玻璃"这个观感。
+      const rimEnv = Math.min(1, (1 - p) / RIM_FADE)
+      // 翻面反光：以本片的 flashAt 为中心的窄峰，落位（p=1）时必然衰减到 0
+      const fd = (p - s.flashAt) / FLASH_WIDTH
+      const flash = Math.exp(-fd * fd * 6)
+      const faceLit = FLASH_PEAK * flash
 
       // 变换后包围盒：把四个顶点正变换过去取极值
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
@@ -274,16 +387,32 @@ export function buildShatterMaps(g: ShatterGeom): ShatterMaps {
           xmap.writeUInt16LE(Math.round(u), base + idx * 2)
           ymap.writeUInt16LE(Math.round(v), base + idx * 2)
           bloom[bbase + idx] = bl
+          // 棱光：距断口越近越亮。距离在**源图坐标系**上量，
+          // 这样碎片被压扁时棱边也跟着压扁，不会看出是后期贴上去的
+          const d = distToEdge(u, v, quad)
+          let lit = faceLit
+          if (d < rimPx) lit += RIM_PEAK * Math.pow(1 - d / rimPx, 1.7) * rimEnv
+          if (lit > 2) spec[bbase + idx] = lit > 255 ? 255 : lit
         }
+      }
+
+      // 星芒：反光最强的那一瞬间在碎片当前位置炸一个
+      if (flash > STAR_TRIGGER) {
+        const c = forwardPoint(s, pose, s.cx, s.cy)
+        drawStar(spec, bbase, g.width, g.height, c.x, c.y, starR, STAR_PEAK * flash)
       }
     }
   }
-  return { xmap, ymap, bloom, frames }
+  return { xmap, ymap, bloom, spec, frames }
 }
 
 /** 光晕的扩散半径与叠加强度 */
 const GLOW_SIGMA = 22
 const GLOW_OPACITY = 0.55
+/** 棱光的硬边强度，以及它那层扩散光的半径与强度 */
+const SPEC_OPACITY = 0.95
+const SPEC_GLOW_SIGMA = 6
+const SPEC_GLOW_OPACITY = 0.45
 
 export interface ShatterRenderOpts {
   /** 开场底图（本条片子自己的图） */
@@ -292,10 +421,11 @@ export interface ShatterRenderOpts {
   height: number
   fps: number
   durationMs: number
-  /** 三张预渲染映射表（ffv1 无损，见 renderPipeline.ensureShatterMaps） */
+  /** 四张预渲染映射表（ffv1 无损，见 renderPipeline.ensureShatterMaps） */
   xmapAbs: string
   ymapAbs: string
   bloomAbs: string
+  specAbs: string
   outAbs: string
 }
 
@@ -320,9 +450,19 @@ export function buildShatterArgs(o: ShatterRenderOpts): string[] {
     // 不需要用时间开关去卡窗口（卡窗口一定会在切换那一帧闪一下）。
     // 顺带把 R/B 反向错开几像素，遮罩的渐变边缘就成了参考视频里那种彩色镶边。
     `[mk2]gblur=sigma=${GLOW_SIGMA}:steps=2,rgbashift=rh=-5:bh=5:rv=-3:bv=3[glow]`,
+    // 棱光：断口高光 + 翻面反光 + 星芒。
+    // R/B 反向错开做色散镶边——参考视频里棱边一侧偏粉、另一侧偏蓝，
+    // 那正是"玻璃"而非"撕纸"的判别特征。错开量比光晕小，棱边本身很细。
+    `[4:v]format=gbrp,rgbashift=rh=-3:bh=3:rv=-1:bv=1[spec]`,
+    // 棱光再糊一层很小的模糊后叠回去：断面折射的光是有一点扩散的，
+    // 纯硬边看着像描线。两份都要，硬边给形、软边给光。
+    `[spec]split[sp1][sp2]`,
+    `[sp2]gblur=sigma=${SPEC_GLOW_SIGMA}:steps=1[spglow]`,
     // 遮罩 0 → 取原碎片色，255 → 取白，中间线性混合 = 逐片过曝
     `[sh][wh][mk]maskedmerge[merged]`,
-    `[merged][glow]blend=all_mode=screen:all_opacity=${GLOW_OPACITY},format=yuv420p[v]`,
+    `[merged][glow]blend=all_mode=screen:all_opacity=${GLOW_OPACITY}[g1]`,
+    `[g1][sp1]blend=all_mode=screen:all_opacity=${SPEC_OPACITY}[g2]`,
+    `[g2][spglow]blend=all_mode=screen:all_opacity=${SPEC_GLOW_OPACITY},format=yuv420p[v]`,
   ].join(';')
   return [
     '-v', 'error',
@@ -330,6 +470,7 @@ export function buildShatterArgs(o: ShatterRenderOpts): string[] {
     '-i', o.xmapAbs,
     '-i', o.ymapAbs,
     '-i', o.bloomAbs,
+    '-i', o.specAbs,
     '-filter_complex', filter,
     '-map', '[v]',
     '-frames:v', String(frames),

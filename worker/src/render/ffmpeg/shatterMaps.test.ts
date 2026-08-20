@@ -15,6 +15,7 @@ const PX = G.width * G.height
 const frameX = (f: number) => maps.xmap.subarray(f * PX * 2, (f + 1) * PX * 2)
 const frameY = (f: number) => maps.ymap.subarray(f * PX * 2, (f + 1) * PX * 2)
 const frameB = (f: number) => maps.bloom.subarray(f * PX, (f + 1) * PX)
+const frameS = (f: number) => maps.spec.subarray(f * PX, (f + 1) * PX)
 const LAST = maps.frames - 1
 
 const coverage = (f: number) => {
@@ -112,11 +113,40 @@ describe('碎裂坐标表', () => {
     expect(mx).toBe(0)
   })
 
+  // ★ 棱光落位后必须归零，否则成片第一张图上会永远留着一张发光的裂纹网
+  it('落位后棱光完全收干净', () => {
+    let mx = 0
+    const s = frameS(LAST)
+    for (let i = 0; i < PX; i++) if (s[i] > mx) mx = s[i]
+    expect(mx, '落位帧仍有棱光，画面会留下发光裂纹').toBe(0)
+  })
+
+  // ★ 这条抓的是一个真出过的 bug：反光原本算成翻转角的 cos^14，
+  // 而翻转角在落位时收敛到 0 ⇒ cos(0)=1 ⇒ **每片落位那一刻都被打满反光**，
+  // 48 张脸同时提亮成一片灰，暗色原图整个被吃掉。
+  //
+  // 「落位帧棱光为 0」那条抓不到它（那一帧 rimEnv 也是 0，正好掩盖）。
+  // 要抓必须看**临落位**的帧：那时反光应该已经过去了，不该还在峰值。
+  it('反光在临落位时已经过去，不是落位那一刻最亮', () => {
+    const lit = (f: number) => {
+      const s = frameS(f)
+      let sum = 0
+      for (let i = 0; i < PX; i++) sum += s[i]
+      return sum / PX
+    }
+    // 各片 flashAt 铺在 0.16~0.62，换算到时间轴大致在前 60%
+    const early = Math.round(LAST * 0.3)
+    const nearLanding = Math.round(LAST * 0.72) // 绝大多数碎片 p>0.9，尚未落位
+    expect(lit(nearLanding), '临落位反而最亮，说明反光峰位跟着落位走了')
+      .toBeLessThan(lit(early) * 0.6)
+  })
+
   // 本仓禁用 Math.random：随机会让同一模板每次渲染都不同，出问题无法复现
   it('确定性：同参数两次生成逐字节一致', () => {
     const again = buildShatterMaps(G)
     expect(again.xmap.equals(maps.xmap)).toBe(true)
     expect(again.bloom.equals(maps.bloom)).toBe(true)
+    expect(again.spec.equals(maps.spec)).toBe(true)
   })
 
   it('帧数 = 时长 × 帧率', () => {
@@ -134,12 +164,12 @@ describe('碎裂坐标表', () => {
 describe('碎裂渲染参数', () => {
   const args = buildShatterArgs({
     imgAbs: '/a/img.png', width: 720, height: 960, fps: 30, durationMs: 2159,
-    xmapAbs: '/m/x.mkv', ymapAbs: '/m/y.mkv', bloomAbs: '/m/b.mkv', outAbs: '/o/open.mp4',
+    xmapAbs: '/m/x.mkv', ymapAbs: '/m/y.mkv', bloomAbs: '/m/b.mkv', specAbs: '/m/s.mkv', outAbs: '/o/open.mp4',
   })
   const filter = args[args.indexOf('-filter_complex') + 1]
 
-  it('四路输入按 remap 的约定排列：源图、xmap、ymap、过曝遮罩', () => {
-    expect(args.filter((a) => a === '-i')).toHaveLength(4)
+  it('五路输入按 remap 的约定排列：源图、xmap、ymap、过曝遮罩、棱光遮罩', () => {
+    expect(args.filter((a) => a === '-i')).toHaveLength(5)
     expect(filter).toContain('[img][1:v][2:v]remap=fill=black')
   })
 
@@ -163,5 +193,11 @@ describe('碎裂渲染参数', () => {
   it('光晕源自过曝遮罩而不是时间开关', () => {
     expect(filter).toContain('gblur')
     expect(filter).not.toContain('enable=')
+  })
+
+  // 玻璃感的判别特征是棱边一侧偏粉、另一侧偏蓝的色散镶边，靠 R/B 反向错开做
+  it('棱光带色散镶边', () => {
+    expect(filter).toContain('[4:v]')
+    expect(filter).toMatch(/\[4:v\][^;]*rgbashift/)
   })
 })

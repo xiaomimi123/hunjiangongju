@@ -12,7 +12,7 @@ import { flashTimeline } from '../../../templates/booklist/templateParams'
 import { fromBodyData } from './fromBodyData'
 import { buildRenderFullPlan } from './renderFull'
 import { buildRippleDisplaceArgs } from './ripple'
-import { buildShatterMaps, buildShatterArgs, DEFAULT_GEOM } from './shatterMaps'
+import { buildShatterMaps, buildShatterArgs, DEFAULT_GEOM, SHATTER_MAPS_VERSION } from './shatterMaps'
 
 const FPS = 30
 
@@ -35,13 +35,16 @@ function run(bin: string, args: string[], input?: Buffer): { ok: boolean; out: s
  */
 async function ensureShatterMaps(
   cacheRoot: string, width: number, height: number, durationMs: number,
-): Promise<{ xmapAbs: string; ymapAbs: string; bloomAbs: string }> {
-  const key = `${width}x${height}@${FPS}-${Math.round(durationMs)}`
+): Promise<{ xmapAbs: string; ymapAbs: string; bloomAbs: string; specAbs: string }> {
+  // 键里带版本号：改了映射表的算法而键不变，服务器会继续吃旧缓存，
+  // 表现是「部署完画面却没变」且没有任何报错
+  const key = `v${SHATTER_MAPS_VERSION}-${width}x${height}@${FPS}-${Math.round(durationMs)}`
   const dir = path.join(cacheRoot, 'shatter', key)
   const out = {
     xmapAbs: path.join(dir, 'x.mkv'),
     ymapAbs: path.join(dir, 'y.mkv'),
     bloomAbs: path.join(dir, 'bloom.mkv'),
+    specAbs: path.join(dir, 'spec.mkv'),
   }
   const done = path.join(dir, '.done')
   try {
@@ -63,6 +66,7 @@ async function ensureShatterMaps(
   enc(maps.xmap, 'gray16le', out.xmapAbs)
   enc(maps.ymap, 'gray16le', out.ymapAbs)
   enc(maps.bloom, 'gray8', out.bloomAbs)
+  enc(maps.spec, 'gray8', out.specAbs)
   await fs.writeFile(done, key, 'utf8')
   return out
 }

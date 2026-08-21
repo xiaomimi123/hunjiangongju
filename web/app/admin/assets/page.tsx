@@ -5,7 +5,7 @@ import PageHeader from '@/components/admin/PageHeader'
 import { thumbUrl } from '@/lib/thumbUrl'
 
 type Asset = { id: string; kind: string; name: string; folder: string | null; fileUrl: string; createdAt: string }
-type ListResp = { assets: Asset[]; folders: string[] }
+type ListResp = { assets: Asset[]; folders: string[]; nextCursor?: string }
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[] | null>(null)
@@ -20,15 +20,30 @@ export default function AssetsPage() {
   const [editName, setEditName] = useState('')
   const [editFolder, setEditFolder] = useState('')
 
-  const load = useCallback(async (folder: string) => {
+  const [cursor, setCursor] = useState<string | undefined>(undefined)
+  const [more, setMore] = useState(false)
+
+  /**
+   * @param append true=翻下一页（追加），false=重新载入第一页（换文件夹/增删后）
+   *
+   * 分页而不是一次性全量：素材上千张时全量会连带触发上千个缩略图请求，
+   * 页面与整个后台都会卡（web 是单进程 Node）。
+   */
+  const load = useCallback(async (folder: string, append = false, from?: string) => {
     try {
-      const q = folder ? `?folder=${encodeURIComponent(folder)}` : ''
-      const r = await api<ListResp>(`/api/admin/assets${q}`)
-      setAssets(r.assets)
+      const p = new URLSearchParams()
+      if (folder) p.set('folder', folder)
+      if (append && from) p.set('cursor', from)
+      const qs = p.toString()
+      const r = await api<ListResp>(`/api/admin/assets${qs ? `?${qs}` : ''}`)
+      setAssets((prev) => (append && prev ? [...prev, ...r.assets] : r.assets))
       setFolders(r.folders)
+      setCursor(r.nextCursor)
+      setMore(!!r.nextCursor)
     } catch (e) { setErr((e as Error).message) }
   }, [])
-  useEffect(() => { load(filterFolder) }, [load, filterFolder])
+  // 换文件夹时必须回到第一页：沿用旧游标会翻到另一个文件夹的中间去
+  useEffect(() => { setCursor(undefined); setMore(false); load(filterFolder) }, [load, filterFolder])
 
   async function upload(files: FileList) {
     setErr(''); setBusy(true)
@@ -150,6 +165,18 @@ export default function AssetsPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {more && (
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <button
+              className="btn-ghost"
+              disabled={busy}
+              onClick={async () => { setBusy(true); await load(filterFolder, true, cursor); setBusy(false) }}
+            >
+              加载更多
+            </button>
+            <span className="text-xs text-ink3">已显示 {assets?.length ?? 0} 个</span>
           </div>
         )}
       </section>

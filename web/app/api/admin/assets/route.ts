@@ -17,14 +17,34 @@ function kindForExt(ext: string): 'image' | 'video' | null {
   return null
 }
 
-// 素材库列表：?folder= 过滤该文件夹下的素材；始终返回全量去重 folders 清单（供筛选器/生成页下拉使用）。
+/**
+ * 每页条数。
+ *
+ * 原先是无分页全量 findMany：素材上千张时一次性查完、传完整 JSON、渲染上千个 <img>，
+ * 页面本身就卡，还会连带触发上千个缩略图请求。
+ */
+const PAGE_SIZE = 60
+
+// 素材库列表：?folder= 过滤该文件夹下的素材；?cursor= 游标翻页。
+// folders 清单始终全量返回（distinct 查询，很便宜；筛选器与生成页下拉都要用）。
 export const GET = handler(async (req) => {
   await requireRole('operator')
-  const folder = new URL(req.url).searchParams.get('folder')?.trim() || undefined
-  const [assets, folderRows] = await Promise.all([
+  const url = new URL(req.url)
+  const folder = url.searchParams.get('folder')?.trim() || undefined
+  const cursor = url.searchParams.get('cursor')?.trim() || undefined
+
+  const [rows, folderRows] = await Promise.all([
     prisma.stockAsset.findMany({
       where: folder ? { folder } : {},
-      orderBy: { createdAt: 'desc' },
+      // id 兜底定序：createdAt 会撞（剪映一次导入十几张是同一个循环里写的）。
+      // 实测 Prisma 的游标分页即使只按 createdAt 排也不重不漏（它内部把游标字段纳入了比较），
+      // 所以这不是必需的——留着是为了**行序稳定**：同毫秒的几张图在多次查询间顺序一致，
+      // 翻页时不会看到它们莫名换位。
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      // 多取一条用来判断"还有没有下一页"，比额外跑一次 count 便宜
+      take: PAGE_SIZE + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true, kind: true, name: true, folder: true, fileUrl: true, createdAt: true },
     }),
     prisma.stockAsset.findMany({
       where: { folder: { not: null } },
@@ -32,8 +52,16 @@ export const GET = handler(async (req) => {
       distinct: ['folder'],
     }),
   ])
+
+  const hasMore = rows.length > PAGE_SIZE
+  const assets = hasMore ? rows.slice(0, PAGE_SIZE) : rows
   const folders = folderRows.map((r) => r.folder as string).sort()
-  return NextResponse.json({ assets, folders })
+  return NextResponse.json({
+    assets,
+    folders,
+    // 下一页的游标；没有下一页时不返回，前端据此隐藏「加载更多」
+    ...(hasMore ? { nextCursor: assets[assets.length - 1]?.id } : {}),
+  })
 })
 
 // 批量上传素材：multipart files[](多文件)+ folder?。

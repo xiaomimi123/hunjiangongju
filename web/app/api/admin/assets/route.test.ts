@@ -136,4 +136,68 @@ describe('GET /api/admin/assets', () => {
     // folders 清单不受 ?folder= 过滤影响：仍应包含 folderB
     expect(filtered.folders).toContain(folderB)
   })
+
+  // ★ 原先无分页:素材上千张时一次性查完、传完整 JSON、渲染上千个 <img>,
+  // 还会连带触发上千个缩略图请求 —— 页面与整个后台都会卡(web 是单进程 Node)。
+  it('游标翻页:逐页取完且不重不漏', async () => {
+    const folder = `${RUN}-分页`
+    // 造 5 张;每页取 2 张来验游标(PAGE_SIZE 是 60,测试里用小文件夹逐页拿)
+    for (let i = 0; i < 5; i++) {
+      const fd = new FormData()
+      fd.append('files', new File([Buffer.from('img')], `${randomUUID()}.jpg`, { type: 'image/jpeg' }))
+      fd.append('folder', folder)
+      await upload(fd)
+    }
+    const q = (cursor?: string) =>
+      `http://localhost/api/admin/assets?folder=${encodeURIComponent(folder)}${cursor ? `&cursor=${cursor}` : ''}`
+
+    // 一页装得下 5 张(PAGE_SIZE=60),所以不该给出 nextCursor
+    const first = await (await GET(getReq(q()), { params: {} })).json()
+    expect(first.assets).toHaveLength(5)
+    expect(first.nextCursor, '一页装得下时不该给游标').toBeUndefined()
+
+    // 用第一条当游标往后翻:应恰好拿到剩下 4 条,且不含游标那条本身(skip:1)
+    const second = await (await GET(getReq(q(first.assets[0].id)), { params: {} })).json()
+    const ids = second.assets.map((a: { id: string }) => a.id)
+    expect(ids).toHaveLength(4)
+    expect(ids, '游标那条不该重复出现').not.toContain(first.assets[0].id)
+    // 两页合起来正好是全部 5 条,不重不漏
+    expect(new Set([first.assets[0].id, ...ids]).size).toBe(5)
+  })
+
+  // 剪映一次导入十几张素材是在同一个循环里写的,createdAt 撞到同一毫秒很常见。
+  // 这条验的是这种数据下逐条翻页依然不重不漏。
+  //
+  // 注:本以为它能守住 orderBy 里的 id 兜底定序,实测**守不住** —— 去掉 id 后仍然全绿,
+  // 因为 Prisma 的游标分页内部已把游标字段纳入比较。id 兜底留着只是为了行序稳定,
+  // 不是正确性必需。写在这里免得后人以为这条断言在保护它。
+  it('createdAt 完全相同的一批素材,游标翻页仍不重不漏', async () => {
+    const folder = `${RUN}-同秒`
+    const at = new Date('2026-08-21T12:00:00.000Z')
+    const ids: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const row = await prisma.stockAsset.create({
+        data: { kind: 'image', name: `同秒${i}`, folder, fileUrl: `/api/files/assets/${randomUUID()}.png`, createdAt: at },
+      })
+      ids.push(row.id)
+      createdIds.push(row.id)
+    }
+
+    // 逐页翻(每次拿第一条当游标),把所有条目收集起来
+    const seen: string[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < 10; page++) {
+      const url = `http://localhost/api/admin/assets?folder=${encodeURIComponent(folder)}${cursor ? `&cursor=${cursor}` : ''}`
+      const r = await (await GET(getReq(url), { params: {} })).json()
+      const pageIds: string[] = r.assets.map((a: { id: string }) => a.id)
+      if (pageIds.length === 0) break
+      // 每页只取第一条推进游标,模拟"逐条翻"这种最容易暴露定序不稳的走法
+      seen.push(pageIds[0])
+      cursor = pageIds[0]
+      if (pageIds.length === 1) break
+    }
+    expect(new Set(seen).size, `逐条翻页出现重复: ${seen.join(',')}`).toBe(seen.length)
+    expect(seen).toHaveLength(6)
+    expect(new Set(seen)).toEqual(new Set(ids))
+  })
 })

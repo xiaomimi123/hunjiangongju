@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { runCmd } from '../runCmd'
 
 export interface RetimeSegment {
   seqNo: number
@@ -54,23 +54,20 @@ export function buildRetimeFilterComplex(
  * 拼接写出到 outAbs。仅在「确实应用了源节奏」时由调用方触发；
  * 无 pace 的 mock/旧任务路径不应调用本函数（保持 fullAudioUrl 原样不变）。
  */
-export function retimeAudio(opts: {
+export async function retimeAudio(opts: {
   audioAbs: string
   outAbs: string
   origTimings: RetimeSegment[]
   pads: number[]
-}): void {
+}): Promise<void> {
   const { audioAbs, outAbs, origTimings, pads } = opts
   // origTimings[0].startMs（即 alignCaptions 里 SKIP_LEADING=1 跳过的开头标题段时长 T0）
   // 若 >0，须原样保留为 re-timed 音频的开头，否则会被 atrim 丢弃，导致音画偏移+尾部截断。
   const leadingMs = origTimings.length > 0 ? origTimings[0].startMs : 0
   const filter = buildRetimeFilterComplex(origTimings, pads, leadingMs)
-  const r = spawnSync(
-    'ffmpeg',
-    ['-y', '-hide_banner', '-i', audioAbs, '-filter_complex', filter, '-map', '[out]', outAbs],
-    { encoding: 'utf8' },
-  )
-  if (r.status !== 0) {
-    throw new Error(`ffmpeg 音频 re-timing 失败 (code ${r.status}): ${(r.stderr ?? r.stdout ?? '').slice(-800)}`)
+  const r = await runCmd('ffmpeg',
+    ['-y', '-hide_banner', '-i', audioAbs, '-filter_complex', filter, '-map', '[out]', outAbs])
+  if (!r.ok) {
+    throw new Error(`ffmpeg 音频 re-timing 失败 (code ${r.status}): ${r.out.slice(-800)}`)
   }
 }

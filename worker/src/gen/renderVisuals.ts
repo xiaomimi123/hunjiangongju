@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { probeText } from '../runCmd'
 import { promises as fs, existsSync } from 'fs'
 import path from 'path'
 import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults } from '@mixcut/db'
@@ -155,13 +155,10 @@ export function buildBodyData(
   return { data, images }
 }
 
-function probeDims(mp4Abs: string): { width: number; height: number } {
-  const r = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', mp4Abs],
-    { encoding: 'utf8' },
-  )
-  const [w, h] = (r.stdout ?? '').trim().split('x').map((n) => parseInt(n, 10))
+async function probeDims(mp4Abs: string): Promise<{ width: number; height: number }> {
+  const out = await probeText('ffprobe',
+    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', mp4Abs])
+  const [w, h] = out.split('x').map((n) => parseInt(n, 10))
   return { width: w, height: h }
 }
 
@@ -249,7 +246,7 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
 /** 产物校验：尺寸不对就不该往下走 */
 async function verifyBody(outAbs: string, genTaskId: string): Promise<void> {
   await fs.access(outAbs) // 不存在则抛
-  const dims = probeDims(outAbs)
+  const dims = await probeDims(outAbs)
   if (dims.width !== WIDTH || dims.height !== HEIGHT) {
     throw new Error(`body.mp4 尺寸异常: ${dims.width}x${dims.height}（期望 ${WIDTH}x${HEIGHT}）`)
   }

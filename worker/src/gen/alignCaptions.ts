@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { runCmd } from '../runCmd'
 import path from 'path'
 import {
   prisma,
@@ -29,27 +29,21 @@ export function canonicalFullAudioPath(genTaskId: string): string {
   return path.join(DATA_DIR, 'gen', genTaskId, 'full_audio.wav')
 }
 
-function probeDurationMs(audioAbs: string): number {
-  const r = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioAbs],
-    { encoding: 'utf8' },
-  )
-  const durSec = parseFloat((r.stdout ?? '').trim())
+async function probeDurationMs(audioAbs: string): Promise<number> {
+  const r = await runCmd('ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioAbs])
+  const durSec = parseFloat(r.out.trim())
   if (!Number.isFinite(durSec) || durSec <= 0) {
-    throw new Error(`ffprobe 无法取得时长: ${audioAbs} (${r.stderr ?? ''})`)
+    throw new Error(`ffprobe 无法取得时长: ${audioAbs} (${r.out.slice(-200)})`)
   }
   return durSec * 1000
 }
 
-function runSilenceDetect(audioAbs: string): string {
-  // 参考 §3：silencedetect=noise=-35dB:d=0.18，输出走 stderr，合并 stdout+stderr 抓取
-  const r = spawnSync(
-    'ffmpeg',
-    ['-hide_banner', '-i', audioAbs, '-af', 'silencedetect=noise=-35dB:d=0.18', '-f', 'null', '-'],
-    { encoding: 'utf8' },
-  )
-  return `${r.stdout ?? ''}\n${r.stderr ?? ''}`
+async function runSilenceDetect(audioAbs: string): Promise<string> {
+  // 参考 §3：silencedetect=noise=-35dB:d=0.18，输出走 stderr，runCmd 已合并 stdout+stderr
+  const r = await runCmd('ffmpeg',
+    ['-hide_banner', '-i', audioAbs, '-af', 'silencedetect=noise=-35dB:d=0.18', '-f', 'null', '-'])
+  return r.out
 }
 
 // 逐段配音已产出精确时长（generateTts）：bodyTimings 已写、captionBeats 带 startMs →
@@ -89,11 +83,11 @@ export async function alignCaptions(genTaskId: string): Promise<void> {
   }
 
   const audioAbs = canonicalFullAudioPath(genTaskId)
-  const durationMs = probeDurationMs(audioAbs)
+  const durationMs = await probeDurationMs(audioAbs)
 
   // 主路径：silencedetect → speech → coalesce(N+skipLeading) → buildTimings(N)
   // 兜底：mock 全静音（无 speech 段）或段数不符 → 按总时长均分 N 段
-  const speech = buildSpeech(durationMs, parseSilence(runSilenceDetect(audioAbs)))
+  const speech = buildSpeech(durationMs, parseSilence(await runSilenceDetect(audioAbs)))
   let timings: Timing[]
   let timingSource: 'silencedetect' | 'even-split'
   if (speech.length < N) {
@@ -126,7 +120,7 @@ export async function alignCaptions(genTaskId: string): Promise<void> {
     // 末尾补 pad_i 毫秒静音再拼接，使新音频总时长 == paced 视觉总时长，从源头保证同步。
     const pads = computeSegmentPads(origTimings, timings)
     const pacedAudioAbs = path.join(path.dirname(audioAbs), 'full_audio_paced.wav')
-    retimeAudio({ audioAbs, outAbs: pacedAudioAbs, origTimings, pads })
+    await retimeAudio({ audioAbs, outAbs: pacedAudioAbs, origTimings, pads })
     const pacedAudioUrl = `/api/files/gen/${genTaskId}/full_audio_paced.wav`
     await prisma.generationTask.update({ where: { id: genTaskId }, data: { fullAudioUrl: pacedAudioUrl } })
     console.log(`[gen] align-captions ${genTaskId}: 音频感知 re-timing → ${pacedAudioUrl} (padSumMs=${pads.reduce((a, b) => a + b, 0)})`)

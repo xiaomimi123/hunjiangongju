@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { runCmd, probeText } from '../runCmd'
 import { promises as fs, existsSync } from 'fs'
 import path from 'path'
 import { prisma, transitionRender, buildSrt, enqueueGen } from '@mixcut/db'
@@ -17,32 +17,21 @@ interface Timing {
   endMs: number
 }
 
-function probeDurationSec(mediaAbs: string): number {
-  const r = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', mediaAbs],
-    { encoding: 'utf8' },
-  )
-  const sec = parseFloat((r.stdout ?? '').trim())
+async function probeDurationSec(mediaAbs: string): Promise<number> {
+  const out = await probeText('ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', mediaAbs])
+  const sec = parseFloat(out)
   return Number.isFinite(sec) && sec > 0 ? sec : 0
 }
 
-function probeVideo(mp4Abs: string): { width: number; height: number; hasAudio: boolean } {
-  const r = spawnSync(
-    'ffprobe',
-    [
-      '-v', 'error',
-      '-show_entries', 'stream=codec_type,width,height',
-      '-of', 'json',
-      mp4Abs,
-    ],
-    { encoding: 'utf8' },
-  )
+async function probeVideo(mp4Abs: string): Promise<{ width: number; height: number; hasAudio: boolean }> {
+  const out = await probeText('ffprobe',
+    ['-v', 'error', '-show_entries', 'stream=codec_type,width,height', '-of', 'json', mp4Abs])
   let width = 0
   let height = 0
   let hasAudio = false
   try {
-    const parsed = JSON.parse(r.stdout ?? '{}') as {
+    const parsed = JSON.parse(out || '{}') as {
       streams?: { codec_type?: string; width?: number; height?: number }[]
     }
     for (const s of parsed.streams ?? []) {
@@ -173,7 +162,7 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
   const bgmAbs = renderTask.bgm?.fileUrl ? urlToAbs(renderTask.bgm.fileUrl) : null
 
   // BGM atrim 上界取 body / 配音 里较长者，保证覆盖整片
-  const durSec = Math.max(probeDurationSec(bodyAbs), probeDurationSec(audioAbs), 1)
+  const durSec = Math.max(await probeDurationSec(bodyAbs), await probeDurationSec(audioAbs), 1)
 
   // bodyTimings（先于 SRT 生成算出，flash 模式的 SFX 节拍也依赖它）
   const timings = Array.isArray(genTask.bodyTimings) ? (genTask.bodyTimings as unknown as Timing[]) : []
@@ -204,14 +193,14 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
 
   const outAbs = path.join(genDir, 'final.mp4')
   const args = buildFfmpegArgs({ bodyAbs, audioAbs, bgmAbs, durSec, outAbs, bgmVolume, sfx })
-  const r = spawnSync('ffmpeg', args, { encoding: 'utf8', stdio: 'pipe' })
-  if (r.status !== 0) {
-    throw new Error(`ffmpeg 混音失败 (code ${r.status}): ${(r.stderr ?? r.stdout ?? '').slice(-800)}`)
+  const r = await runCmd('ffmpeg', args)
+  if (!r.ok) {
+    throw new Error(`ffmpeg 混音失败 (code ${r.status}): ${r.out.slice(-800)}`)
   }
 
   // ffprobe 校验：720×960 且有音轨
   await fs.access(outAbs)
-  const probed = probeVideo(outAbs)
+  const probed = await probeVideo(outAbs)
   if (probed.width !== WIDTH || probed.height !== HEIGHT) {
     throw new Error(`final.mp4 尺寸异常: ${probed.width}x${probed.height}（期望 ${WIDTH}x${HEIGHT}）`)
   }

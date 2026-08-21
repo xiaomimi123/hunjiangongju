@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process'
+import { runCmd } from './runCmd'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { prisma } from '@mixcut/db'
@@ -12,19 +12,15 @@ const PADS: { id: string; tag: string; freqs: [number, number, number] }[] = [
   { id: 'bgm-calm', tag: '沉思', freqs: [293.7, 349.2, 440] },
 ]
 
-function genPad(freqs: [number, number, number], outAbs: string): boolean {
+async function genPad(freqs: [number, number, number], outAbs: string): Promise<boolean> {
   const inputs = freqs.flatMap((f) => ['-f', 'lavfi', '-i', `sine=frequency=${f}:duration=90`])
-  const r = spawnSync(
-    'ffmpeg',
-    [
-      '-y', ...inputs,
-      '-filter_complex',
-      '[0][1][2]amix=inputs=3:normalize=1,tremolo=f=0.12:d=0.35,lowpass=f=1400,aecho=0.8:0.7:60:0.3,afade=t=in:d=2,afade=t=out:st=87:d=3,volume=0.9',
-      '-c:a', 'libmp3lame', '-q:a', '5', '-t', '90', outAbs,
-    ],
-    { encoding: 'utf8' },
-  )
-  return r.status === 0
+  const r = await runCmd('ffmpeg', [
+    '-y', ...inputs,
+    '-filter_complex',
+    '[0][1][2]amix=inputs=3:normalize=1,tremolo=f=0.12:d=0.35,lowpass=f=1400,aecho=0.8:0.7:60:0.3,afade=t=in:d=2,afade=t=out:st=87:d=3,volume=0.9',
+    '-c:a', 'libmp3lame', '-q:a', '5', '-t', '90', outAbs,
+  ])
+  return r.ok
 }
 
 export async function ensureBgm(): Promise<void> {
@@ -46,7 +42,7 @@ export async function ensureBgm(): Promise<void> {
   let n = 0
   for (const p of PADS) {
     const abs = path.join(dir, `${p.id}.mp3`)
-    if (!genPad(p.freqs, abs)) {
+    if (!(await genPad(p.freqs, abs))) {
       console.warn(`[bootstrap] 生成 BGM ${p.id} 失败（缺 ffmpeg?），跳过`)
       continue
     }

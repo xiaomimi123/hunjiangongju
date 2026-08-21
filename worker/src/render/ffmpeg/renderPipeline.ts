@@ -4,7 +4,7 @@
 // 放在这里而不是塞进 renderVisuals：renderVisuals 已经背着建 RenderTask、选 BGM、
 // 拷素材一堆职责，再塞进来就没法读了。这里只做渲染，不碰数据库。
 
-import { spawnSync } from 'child_process'
+import { runCmd } from '../../runCmd'
 import { promises as fs } from 'fs'
 import path from 'path'
 import type { BodyData } from '../../../templates/booklist/bodyData'
@@ -16,12 +16,8 @@ import { buildShatterMaps, buildShatterArgs, DEFAULT_GEOM, SHATTER_MAPS_VERSION 
 
 const FPS = 30
 
-function run(bin: string, args: string[], input?: Buffer): { ok: boolean; out: string } {
-  const r = spawnSync(bin, args, {
-    encoding: 'utf8',
-    ...(input ? { input, maxBuffer: 1 << 28 } : {}),
-  })
-  return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
+async function run(bin: string, args: string[], input?: Buffer): Promise<{ ok: boolean; out: string }> {
+  return runCmd(bin, args, { ...(input ? { input } : {}) })
 }
 
 /**
@@ -55,18 +51,18 @@ async function ensureShatterMaps(
   }
   await fs.mkdir(dir, { recursive: true })
   const maps = buildShatterMaps({ width, height, fps: FPS, durationMs, ...DEFAULT_GEOM })
-  const enc = (buf: Buffer, pixFmt: string, dst: string) => {
-    const r = run('ffmpeg', [
+  const enc = async (buf: Buffer, pixFmt: string, dst: string) => {
+    const r = await run('ffmpeg', [
       '-v', 'error',
       '-f', 'rawvideo', '-pix_fmt', pixFmt, '-s', `${width}x${height}`, '-r', String(FPS), '-i', 'pipe:0',
       '-c:v', 'ffv1', '-level', '3', '-y', dst,
     ], buf)
     if (!r.ok) throw new Error(`碎裂映射表编码失败(${path.basename(dst)}): ${r.out.slice(-500)}`)
   }
-  enc(maps.xmap, 'gray16le', out.xmapAbs)
-  enc(maps.ymap, 'gray16le', out.ymapAbs)
-  enc(maps.bloom, 'gray8', out.bloomAbs)
-  enc(maps.spec, 'gray8', out.specAbs)
+  await enc(maps.xmap, 'gray16le', out.xmapAbs)
+  await enc(maps.ymap, 'gray16le', out.ymapAbs)
+  await enc(maps.bloom, 'gray8', out.bloomAbs)
+  await enc(maps.spec, 'gray8', out.specAbs)
   await fs.writeFile(done, key, 'utf8')
   return out
 }
@@ -87,7 +83,7 @@ async function renderOpening(hfDir: string, data: BodyData, durationMs: number, 
   // 缺省回退正片第 1 张——那是加独立开场槽位之前的行为，老框架零回归。
   const imgAbs = path.join(hfDir, data.openImage?.src ?? data.images[0]?.src ?? 'media/01.png')
   const outAbs = path.join(dir, 'open.mp4')
-  const r = run('ffmpeg', buildShatterArgs({
+  const r = await run('ffmpeg', buildShatterArgs({
     imgAbs, width, height, fps: FPS, durationMs, ...maps, outAbs,
   }))
   if (!r.ok) throw new Error(`开场碎裂渲染失败: ${r.out.slice(-800)}`)
@@ -119,7 +115,7 @@ async function ensureRippleMaps(
   await fs.mkdir(dir, { recursive: true })
   const opts = { width, height, fps: FPS, durationMs, rings: 3, outPattern: '' }
   for (const [axis, pattern] of [['x', xmapAbs], ['y', ymapAbs]] as const) {
-    const r = run('ffmpeg', buildRippleDisplaceArgs(opts, axis, pattern))
+    const r = await run('ffmpeg', buildRippleDisplaceArgs(opts, axis, pattern))
     if (!r.ok) throw new Error(`水波纹位移图渲染失败(${axis}): ${r.out.slice(-500)}`)
   }
   await fs.writeFile(done, key, 'utf8')
@@ -160,7 +156,7 @@ export async function renderBodyWithFfmpeg(
   }))
   await fs.writeFile(path.join(hfDir, 'subs.ass'), plan.assContent, 'utf8')
 
-  const r = run('ffmpeg', plan.args)
+  const r = await run('ffmpeg', plan.args)
   if (!r.ok) throw new Error(`ffmpeg 总装失败: ${r.out.slice(-1000)}`)
   await fs.access(outAbs)
   return outAbs

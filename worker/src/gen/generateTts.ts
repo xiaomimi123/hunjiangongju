@@ -1,5 +1,5 @@
-import { spawnSync } from 'child_process'
-import { promises as fs, renameSync } from 'fs'
+import { promises as fs } from 'fs'
+import { runCmd, probeText } from '../runCmd'
 import path from 'path'
 import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
@@ -21,13 +21,10 @@ export function readVoice(variables: unknown): string | undefined {
   return isValidVoice(voice) || isPlausibleVoiceId(voice) ? (voice as string) : undefined
 }
 
-function probeDurationMs(audioAbs: string): number {
-  const r = spawnSync(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioAbs],
-    { encoding: 'utf8' },
-  )
-  const durSec = parseFloat((r.stdout ?? '').trim())
+async function probeDurationMs(audioAbs: string): Promise<number> {
+  const out = await probeText('ffprobe',
+    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audioAbs])
+  const durSec = parseFloat(out)
   return Number.isFinite(durSec) && durSec > 0 ? durSec * 1000 : 0
 }
 
@@ -38,27 +35,21 @@ function probeDurationMs(audioAbs: string): number {
  * 省得先探测再算差值——少一步就少一处四舍五入。
  * 原地替换：先写临时文件再改名，避免 ffmpeg 读写同一个文件产出空文件。
  */
-function padSilenceTo(audioAbs: string, targetMs: number): void {
+async function padSilenceTo(audioAbs: string, targetMs: number): Promise<void> {
   const tmp = `${audioAbs}.pad.wav`
-  const r = spawnSync(
-    'ffmpeg',
-    ['-y', '-i', audioAbs, '-af', `apad=whole_dur=${(targetMs / 1000).toFixed(3)}`, '-ar', '48000', '-ac', '1', tmp],
-    { encoding: 'utf8', stdio: 'pipe' },
-  )
-  if (r.status !== 0) throw new Error(`补静音失败: ${(r.stderr ?? '').slice(-400)}`)
-  renameSync(tmp, audioAbs)
+  const r = await runCmd('ffmpeg',
+    ['-y', '-i', audioAbs, '-af', `apad=whole_dur=${(targetMs / 1000).toFixed(3)}`, '-ar', '48000', '-ac', '1', tmp])
+  if (!r.ok) throw new Error(`补静音失败: ${r.out.slice(-400)}`)
+  await fs.rename(tmp, audioAbs)
 }
 
 // 把多个音频切片按顺序无缝拼成一条 wav（concat filter 会重采样统一格式，容忍各片格式不一）。
-function concatClips(clipPaths: string[], outAbs: string): void {
+async function concatClips(clipPaths: string[], outAbs: string): Promise<void> {
   const inputs = clipPaths.flatMap((p) => ['-i', p])
   const filter = clipPaths.map((_p, i) => `[${i}:a]`).join('') + `concat=n=${clipPaths.length}:v=0:a=1[a]`
-  const r = spawnSync(
-    'ffmpeg',
-    ['-y', ...inputs, '-filter_complex', filter, '-map', '[a]', '-ar', '48000', '-ac', '1', outAbs],
-    { encoding: 'utf8', stdio: 'pipe' },
-  )
-  if (r.status !== 0) throw new Error(`拼接配音失败: ${(r.stderr ?? '').slice(-400)}`)
+  const r = await runCmd('ffmpeg',
+    ['-y', ...inputs, '-filter_complex', filter, '-map', '[a]', '-ar', '48000', '-ac', '1', outAbs])
+  if (!r.ok) throw new Error(`拼接配音失败: ${r.out.slice(-400)}`)
 }
 
 type Beat = { zh: string; en?: string }
@@ -151,19 +142,19 @@ export async function generateTts(genTaskId: string): Promise<void> {
     )
     const clipPath = path.join(clipsDir, `c${i}.wav`)
     await fs.writeFile(clipPath, audio)
-    const speechMs = probeDurationMs(clipPath) || 2000 // 探测失败给个兜底时长
+    const speechMs = (await probeDurationMs(clipPath)) || 2000 // 探测失败给个兜底时长
     // 第 0 段补静音到草稿的开场+快闪长度（只补不截：旁白比草稿还长时按旁白走，
     // 截断会把话说到一半切掉）
     let durMs = speechMs
     if (i === 0 && openFlashMs > speechMs) {
-      padSilenceTo(clipPath, openFlashMs)
-      durMs = probeDurationMs(clipPath) || openFlashMs
+      await padSilenceTo(clipPath, openFlashMs)
+      durMs = (await probeDurationMs(clipPath)) || openFlashMs
       console.log(`[gen] generate-tts ${genTaskId}: 第 0 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿开场+快闪）`)
     }
     const slotMs = slotFor(i)
     if (slotMs && slotMs > speechMs) {
-      padSilenceTo(clipPath, slotMs)
-      durMs = probeDurationMs(clipPath) || slotMs
+      await padSilenceTo(clipPath, slotMs)
+      durMs = (await probeDurationMs(clipPath)) || slotMs
       console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿分镜 ${slotMs}ms）`)
     } else if (slotMs && speechMs > slotMs * 1.06) {
       // 只记不改：见上面「只补不压」。持续出现说明字数配额偏松，要回头调 deriveSlotCharBudgets
@@ -182,7 +173,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
   }
 
   const fullAbs = path.join(dir, 'full_audio.wav')
-  concatClips(clipPaths, fullAbs)
+  await concatClips(clipPaths, fullAbs)
   await fs.rm(clipsDir, { recursive: true, force: true }).catch(() => {})
 
   const fullAudioUrl = `/api/files/gen/${genTaskId}/full_audio.wav`

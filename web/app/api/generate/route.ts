@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
-import { prisma, enqueueGen } from '@mixcut/db'
+import { prisma, enqueueGen, readFrameworkVoices } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
-import { normalizeVariables, stripVoiceForNonOperator } from './normalize'
+import { normalizeVariables, restrictVoiceForNonOperator } from './normalize'
 
 export const POST = handler(async (req) => {
   const s = await requireRole()
@@ -24,9 +24,13 @@ export const POST = handler(async (req) => {
     if (!fw.published) throw new HttpError(403, '该框架未发布')
     autoRender = true
   }
-  // 非运营（学员等）不得携带 voice/voiceId：即使传了合法克隆音色 id 也一律剥离，
-  // 防止盗用运营的私有/付费克隆音色；始终改用默认音色。
-  const normalizedVariables = stripVoiceForNonOperator(s.role, normalizeVariables(variables))
+  // 非运营（学员等）只能用**这个框架**开放的音色：不在名单里的一律剥离，
+  // 防止盗用运营的私有/付费克隆音色。名单为空即维持"一律用默认音色"的老行为。
+  const normalizedVariables = restrictVoiceForNonOperator(
+    s.role,
+    normalizeVariables(variables),
+    readFrameworkVoices(fw.overlayTemplate).allowed,
+  )
   const mode = normalizedVariables?.scriptMode
   let finalSubject = typeof subject === 'string' ? subject.trim() : ''
   if (mode === 'manual' || mode === 'imitate') {

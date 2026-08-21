@@ -106,6 +106,14 @@ export default function FrameworksPage() {
   const [err, setErr] = useState('')
 
   const [editId, setEditId] = useState<string | null>(null)
+  // 音色清单：内置 + tts.extra.customVoices，与生成页/试听读的是同一份
+  const [ttsVoices, setTtsVoices] = useState<{ id: string; label: string }[]>([])
+  useEffect(() => {
+    fetch('/api/tts/voices')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (Array.isArray(j?.voices)) setTtsVoices(j.voices) })
+      .catch(() => { /* 拉不到就不显示勾选项，不影响其余编辑 */ })
+  }, [])
   const [form, setForm] = useState<Form | null>(null)
   const [modalErr, setModalErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -334,9 +342,41 @@ export default function FrameworksPage() {
                 else delete next.__openImage
                 setF({ overlayTemplate: JSON.stringify(next, null, 2) })
               }
+              const vRaw = ot.__voices
+              const vCfg = (vRaw && typeof vRaw === 'object' && !Array.isArray(vRaw) ? vRaw : {}) as { allowed?: unknown; default?: unknown }
+              const allowed: string[] = Array.isArray(vCfg.allowed)
+                ? (vCfg.allowed as unknown[]).filter((x): x is string => typeof x === 'string')
+                : []
+              const toggleVoice = (id: string) => {
+                const next = allowed.includes(id) ? allowed.filter((x) => x !== id) : [...allowed, id]
+                const nx = { ...ot }
+                if (next.length) nx.__voices = { allowed: next, ...(typeof vCfg.default === 'string' && next.includes(vCfg.default) ? { default: vCfg.default } : {}) }
+                else delete nx.__voices
+                setF({ overlayTemplate: JSON.stringify(nx, null, 2) })
+              }
               return (
                 <div className="block">
-                  <span className="eyebrow">开场图（碎裂那一张）</span>
+                  <span className="eyebrow">学员可选配音</span>
+                  <p className="mt-1 text-xs text-ink3">
+                    勾中的音色会出现在学员端的「配音」下拉里。**一个都不勾 = 学员不能选**，
+                    一律用默认音色（这是加这个开关之前的行为）。
+                    服务端只认这里勾的名单，学员改请求也用不到名单外的音色。
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {ttsVoices.length === 0 && <span className="text-xs text-ink3">音色清单加载中…</span>}
+                    {ttsVoices.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className={allowed.includes(v.id) ? 'btn-primary text-xs' : 'btn-ghost text-xs'}
+                        onClick={() => toggleVoice(v.id)}
+                      >
+                        {allowed.includes(v.id) ? '✓ ' : ''}{v.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <span className="eyebrow mt-4 block">开场图（碎裂那一张）</span>
                   <p className="mt-1 text-xs text-ink3">
                     留空则沿用正片第 1 张。填了就单独生成一张，正片第 1 张不受影响
                     —— 「开场卡通人物头像 + 正片艺术画风」要同时成立，就得填这里。

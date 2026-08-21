@@ -64,15 +64,29 @@ export function normalizeVariables(variables: unknown): Record<string, unknown> 
   return v
 }
 
-// 非运营角色（学员等）一律使用默认音色：剥离 voice（火山克隆音色 id）与 voiceId（CosyVoice 克隆音色 id），
-// 防止学员盗用运营的私有/付费克隆音色。运营角色原样保留；其余字段不受影响。
-export function stripVoiceForNonOperator(
+/**
+ * 非运营角色（学员等）的音色限制。
+ *
+ * 原先是**一律剥离** voice/voiceId，理由是防止盗用运营的私有/付费克隆音色。
+ * 但学员端的正常流程就是「填书名 + 选配音」，一刀切等于把这个流程堵死。
+ * 改成由**框架**声明哪些音色对学员开放：在名单里的放行，不在的照样剥离。
+ *
+ * **校验只认服务端读到的框架配置**，绝不信客户端传了什么。
+ * voiceId（CosyVoice 克隆音色）仍然一律剥离——那条路径没有对应的框架级白名单，
+ * 放开等于绕过这里的限制。
+ *
+ * @param allowedVoices 框架允许的音色 id；空数组即不开放，行为与改动前一致
+ */
+export function restrictVoiceForNonOperator(
   role: string,
   variables: Record<string, unknown> | undefined,
+  allowedVoices: string[] = [],
 ): Record<string, unknown> | undefined {
   if (role === 'operator' || variables === undefined) return variables
   const v = { ...variables }
-  delete v.voice
   delete v.voiceId
+  const want = typeof v.voice === 'string' ? v.voice.trim() : ''
+  if (!want || !allowedVoices.includes(want)) delete v.voice
+  else v.voice = want
   return v
 }

@@ -10,6 +10,9 @@ type Framework = {
   industryCategory: string | null
   suggestedSegmentCount: number | null
   imageStylePrompt: string | null
+  /** 该框架开放给学员的配音音色。空数组表示不开放，此时不显示选择项 */
+  voices?: { id: string; label: string }[]
+  defaultVoice?: string
 }
 
 export default function FrameworkLibraryPage() {
@@ -22,6 +25,7 @@ export default function FrameworkLibraryPage() {
   const [title, setTitle] = useState('')
   const [subtitle, setSubtitle] = useState('')
   const [account, setAccount] = useState('')
+  const [voice, setVoice] = useState('')
   const [sheetErr, setSheetErr] = useState('')
   const [creating, setCreating] = useState(false)
 
@@ -30,7 +34,11 @@ export default function FrameworkLibraryPage() {
   }, [])
 
   function open(f: Framework) {
-    setSheetErr(''); setSubject(''); setTitle(''); setSubtitle(''); setAccount(''); setPicked(f)
+    setSheetErr(''); setSubject(''); setTitle(''); setSubtitle(''); setAccount('')
+    // 缺省选中框架指定的默认音色；没指定就用第一个（下拉里始终有选中项，
+    // 不留一个空选项让人以为"没选就没配音"）
+    setVoice(f.defaultVoice ?? f.voices?.[0]?.id ?? '')
+    setPicked(f)
   }
 
   async function create() {
@@ -42,6 +50,8 @@ export default function FrameworkLibraryPage() {
       if (title.trim()) variables['标题'] = title.trim()
       if (subtitle.trim()) variables['副标题'] = subtitle.trim()
       if (account.trim()) variables['账号'] = account.trim()
+      // 服务端只认框架名单里的音色，这里传了也不代表能用（见 restrictVoiceForNonOperator）
+      if (voice.trim()) variables.voice = voice.trim()
       const task = await api<{ id: string }>('/api/generate', {
         body: { frameworkId: picked.id, subject: subject.trim(), variables },
       })
@@ -94,6 +104,15 @@ export default function FrameworkLibraryPage() {
             <p className="eyebrow mb-1.5">账号（可选）</p>
             <input className="field" value={account} onChange={(e) => setAccount(e.target.value)} placeholder="@你的账号" />
           </div>
+          {/* 只有框架开放了音色才显示。没开放时不留一个空下拉——那会让人以为功能坏了 */}
+          {picked?.voices && picked.voices.length > 0 && (
+            <div>
+              <p className="eyebrow mb-1.5">配音</p>
+              <select className="field" value={voice} onChange={(e) => setVoice(e.target.value)}>
+                {picked.voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+              </select>
+            </div>
+          )}
           {sheetErr && <p className="pill pill-bad">{sheetErr}</p>}
           <button onClick={create} disabled={creating} className="btn-primary w-full">
             {creating ? '生成中…' : '⚡ 生成'}

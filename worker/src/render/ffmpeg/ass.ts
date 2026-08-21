@@ -122,8 +122,18 @@ export function escapeAssText(s: string): string {
  * 但字幕层只需要"不溢出"，宁可略小。剪映自己也是这么处理的：
  * 同一层的 clip.scale 随书名长度从 1.407 缩到 0.698。
  */
+/** 常驻大标题里作者行相对书名的字号比例（与快闪卡的作者行同一口径） */
+const TITLE_SUB_RATIO = 0.42
+
 export function fitSizePx(text: string, basePx: number, widthPx: number, marginPx = 40): number {
-  const cells = [...text].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x2e80 ? 0.5 : 1), 0)
+  // ★ 按**最长的那一行**量，不是整串。
+  // 第一版把整串当一行：常驻大标题的文本是「《书名》\N作者」，连 ASS 的换行转义一起算进去，
+  // 于是 9 字的书名被当成 18 字，缩到 35px —— 比 54px 的正文字幕还小（线上实测）。
+  // 真换行与 ASS 的 \N 都要切：调用点传的是**未转义**的原文（含真换行），
+  // 只认 \N 的话换行符会被当成一个字算进宽度。
+  const cells = text
+    .split(/\r?\n|\\N/)
+    .reduce((m, line) => Math.max(m, [...line].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x2e80 ? 0.5 : 1), 0)), 0)
   if (cells <= 0) return basePx
   const max = Math.floor((widthPx - marginPx * 2) / cells)
   return Math.max(18, Math.min(basePx, max))
@@ -199,11 +209,19 @@ export function buildAss(o: AssOpts): string {
   }
   const ty = Math.round(o.height * (st.titlePosY ?? 0.22))
   for (const c of o.bookTitles ?? []) {
-    const t = escapeAssText(c.text)
-    if (!t || !(c.endMs > c.startMs)) continue
-    // 常驻大标题也要缩排：《我们生活在巨大的差距里》这种长书名同样会溢出
-    const fs = fitSizePx(c.text, st.titleSizePx, o.width)
-    ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,{\\pos(${cx},${ty})\\fs${fs}}${t}`)
+    if (!(c.endMs > c.startMs)) continue
+    // 书名与作者**各取各的字号**：合在一起量宽度时，长作者名会把书名一起拖小
+    // （线上实测「《被讨厌的勇气》/岸见一郎、古贺史健」把 100px 拖到 35px，比正文还小）。
+    // 草稿里的常驻大标题本来就只有书名、没有作者。
+    const [head = '', ...rest] = c.text.split(/\r?\n/)
+    const headFs = fitSizePx(head, st.titleSizePx, o.width)
+    const subFs = Math.round(st.titleSizePx * TITLE_SUB_RATIO)
+    const parts = [`{\\fs${headFs}}${escapeAssText(head)}`]
+    for (const line of rest) {
+      if (line.trim()) parts.push(`{\\fs${fitSizePx(line, subFs, o.width)}}${escapeAssText(line)}`)
+    }
+    if (!escapeAssText(head)) continue
+    ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,{\\pos(${cx},${ty})}${parts.join('\\N')}`)
   }
   for (const c of o.captions) line(1, c, 'cap')
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {

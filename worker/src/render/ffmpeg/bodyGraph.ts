@@ -79,6 +79,24 @@ function segFrames(s: FfBodySegment, fps: number): number {
 }
 
 /**
+ * 叠化的引入帧数：该段要在自己的槽位**之前**多渲染这么多帧，供 xfade 消耗。
+ *
+ * 不加这些帧的话，每处叠化都会让总时长少掉一个转场的长度（xfade 是重叠混合）。
+ * 而音频是各段配音直接拼接、字幕用的是未压缩的绝对时间——于是视频比音频短，
+ * 最后 `-shortest` 把尾巴上的旁白直接砍掉（线上实测砍掉约 1 秒，
+ * 表现为「文案没读完就结束了」），字幕也会逐段累积落后于画面。
+ *
+ * 依据：剪映的转场**不吃时长**——客户样例各段时长之和 24603ms，
+ * 草稿声明的总时长 24592ms，差 11ms（取整误差）。
+ */
+function leadFrames(s: FfBodySegment, fps: number, prevAccMs: number): number {
+  if (s.transitionIn == null) return 0
+  const maxMs = Math.min(prevAccMs, s.durationMs)
+  const dMs = Math.max(1, Math.min(s.transitionMs ?? 400, maxMs))
+  return Math.max(1, Math.round((dMs / 1000) * fps))
+}
+
+/**
  * 单段：静图 → 预放大 → 运镜 → 定时长。产出标签 [vN]
  *
  * 时长用 `trim=end_frame=N` 而不是 `trim=duration=秒`。
@@ -87,8 +105,10 @@ function segFrames(s: FfBodySegment, fps: number): number {
  * 30fps 网格**，末端的 `fps=30` 只好靠复制帧来补——实测表现为连续 4 帧完全不动、
  * 然后猛跳一下，也就是肉眼看到的卡顿。用帧号截断就没有半帧可言。
  */
-function segmentChain(s: FfBodySegment, i: number, o: BodyGraphOpts): string {
-  const frames = segFrames(s, o.fps)
+function segmentChain(s: FfBodySegment, i: number, o: BodyGraphOpts, lead = 0): string {
+  // 多渲 lead 帧供入场叠化消耗；运镜也摊到这段加长后的长度上，
+  // 于是推近在叠化期间就已起步——真实的叠化本来就是这样，画面不是"blend 完才开始动"。
+  const frames = segFrames(s, o.fps) + lead
   const from = s.motion?.scaleFrom ?? 1
   const to = s.motion?.scaleTo ?? 1
   const pre = `[${i}:v]scale=${o.width * PRESCALE}:${o.height * PRESCALE}:force_original_aspect_ratio=increase,` +
@@ -133,10 +153,19 @@ export function buildBodyGraph(o: BodyGraphOpts): BodyGraph {
   // 帧对齐后的每段时长（ms）。后面所有累计、转场 offset 都以它为准——
   // 与滤镜里的 trim=end_frame 保持同一套算法，避免「算出来的时间」和「渲出来的时间」不一致。
   const durMs = segs.map((s) => (segFrames(s, o.fps) / o.fps) * 1000)
+  // 逐段的入场叠化引入帧。要先知道前面累计了多久才能钳制转场窗口，
+  // 所以在这里先跑一遍累计，再据此建输入与滤镜链。
+  const leads: number[] = [0]
+  let scanMs = durMs[0]
+  for (let i = 1; i < segs.length; i++) {
+    leads.push(leadFrames(segs[i], o.fps, scanMs))
+    scanMs += durMs[i]
+  }
   for (const [i, s] of segs.entries()) {
+    const total = segFrames(s, o.fps) + leads[i]
     // -loop 1 把静图变成无限帧流，-t 给足（多给一帧，实际长度由 trim=end_frame 决定）
-    inputArgs.push('-loop', '1', '-framerate', String(o.fps), '-t', r3((segFrames(s, o.fps) + 1) / o.fps).toString(), '-i', s.imageAbs)
-    chains.push(segmentChain(s, i, o))
+    inputArgs.push('-loop', '1', '-framerate', String(o.fps), '-t', r3((total + 1) / o.fps).toString(), '-i', s.imageAbs)
+    chains.push(segmentChain(s, i, o, leads[i]))
   }
 
   let acc = 'v0'
@@ -147,15 +176,14 @@ export function buildBodyGraph(o: BodyGraphOpts): BodyGraph {
     const hard = s.transitionIn == null
     if (hard) {
       chains.push(`[${acc}][v${i}]concat=n=2:v=1:a=0,${norm(o.fps)}[${next}]`)
-      accMs += durMs[i]
     } else {
-      // 转场窗口不得超过相邻两段中较短者，否则 xfade 会吃掉整段甚至报错
-      const maxMs = Math.min(accMs, durMs[i])
-      const dMs = Math.max(1, Math.min(s.transitionMs ?? 400, maxMs))
+      // 叠化压在**前一段的尾巴**上：offset = 本段槽位起点 − 转场长度。
+      // 本段多渲了 lead 帧正好填满这个重叠，所以总时长仍是各段之和（见 leadFrames）。
+      const dMs = (leads[i] / o.fps) * 1000
       const offset = r3((accMs - dMs) / 1000)
       chains.push(`[${acc}][v${i}]xfade=transition=fade:duration=${r3(dMs / 1000)}:offset=${offset}[${next}]`)
-      accMs += durMs[i] - dMs
     }
+    accMs += durMs[i]
     acc = next
   }
 

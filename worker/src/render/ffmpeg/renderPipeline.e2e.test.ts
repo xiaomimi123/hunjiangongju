@@ -92,11 +92,16 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
     expect(p.stdout).not.toContain('audio')
   })
 
-  // 快闪 4s + 正片 8s，两次叠化各吃 500ms（只有正片内部那一处边界）
-  it('总时长 = 快闪窗口 + 正片，扣掉叠化', () => {
+  // ★ 快闪 4s + 正片 8s = 12s，叠化**不再扣时长**。
+  //
+  // 原先每处 xfade 让总时长少掉一个转场的长度，而音频是各段配音直接拼接、
+  // 字幕用的是未压缩的绝对时间 —— 视频比音频短，最后 -shortest 把尾巴上的旁白砍掉
+  // （线上实测砍掉约 1 秒 = 两处 500ms 叠化，表现为「文案没读完就结束了」）。
+  // 依据是剪映的转场本来就不吃时长：客户样例各段之和 24603ms、草稿声明 24592ms。
+  it('总时长 = 快闪窗口 + 正片，叠化不扣时长', () => {
     const p = spawnSync(process.env.FFPROBE_BIN ?? 'ffprobe',
       ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', outAbs], { encoding: 'utf8' })
-    expect(Math.abs(parseFloat(p.stdout) - 11.5)).toBeLessThan(0.2)
+    expect(Math.abs(parseFloat(p.stdout) - 12.0)).toBeLessThan(0.2)
   })
 
   it('ASS 与 body.mp4 都落在 hf 目录里（后续步骤按约定路径取）', () => {

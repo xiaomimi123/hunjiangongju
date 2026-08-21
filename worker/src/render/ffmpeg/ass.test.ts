@@ -107,7 +107,8 @@ describe('buildAss', () => {
     const a = buildAss({ ...base, bookTitles: [{ text: '《简爱》', startMs: 3984, endMs: 20000 }] })
     // 位置改由草稿的 titlePosY 驱动（\pos），字号按书名长度缩排（\fs），
     // 所以不再是"裸文本"。之前贴死在顶边(an8/边距48px≈5%)，草稿实测是 21.8%。
-    expect(a).toMatch(/Dialogue: 0,0:00:03\.98,0:00:20\.00,title,,0,0,0,,\{\\pos\(\d+,\d+\)\\fs\d+\}《简爱》/)
+    // \pos 定位 + 逐行 \fs（书名与作者各取各的字号，见「常驻大标题的字号」一组）
+    expect(a).toMatch(/Dialogue: 0,0:00:03\.98,0:00:20\.00,title,,0,0,0,,\{\\pos\(\d+,\d+\)\}\{\\fs\d+\}《简爱》/)
   })
 
   // 零长/负长事件 libass 直接不显示；早点丢掉比产出一条永不生效的行清楚
@@ -180,6 +181,41 @@ describe('buildAss —— 文字层位置由草稿驱动', () => {
     expect(sizes[1], '长书名没缩，会溢出画面').toBeLessThan(106)
     // 13 个全角字(含《》)在 720 宽、左右各 40 边距下最多 49px
     expect(sizes[1]).toBeLessThanOrEqual(49)
+  })
+})
+
+// ★ 线上实测：常驻大标题《被讨厌的勇气》比正文字幕还小。
+// 原因是量宽度时把整串当一行——文本是「《书名》\n作者」，换行符与作者名一起算进去，
+// 9 字的书名被当成 18 字，100px 缩到 35px。两处都要修：切行要认真换行符，
+// 书名与作者各取各的字号。
+describe('buildAss —— 常驻大标题的字号', () => {
+  const titled = (text: string, titleSizePx = 100) => buildAss({
+    ...base,
+    bookTitles: [{ text, startMs: 4000, endMs: 20000 }],
+    style: { ...base.style, titleSizePx, titlePosY: 0.218, captionSizePx: 54 },
+  })
+  const fsOf = (a: string) => [...a.matchAll(/\\fs(\d+)/g)].map((m) => Number(m[1]))
+
+  it('作者行不再把书名拖小：书名按自己那行量宽度', () => {
+    const one = fsOf(titled('《被讨厌的勇气》'))[0]
+    const two = fsOf(titled('《被讨厌的勇气》\n岸见一郎、古贺史健'))[0]
+    expect(two, '带作者时书名被拖小了').toBe(one)
+  })
+
+  it('常驻大标题明显大于正文字幕', () => {
+    const fs = fsOf(titled('《被讨厌的勇气》\n岸见一郎、古贺史健'))
+    expect(fs[0] / base.style.captionSizePx, `书名 ${fs[0]}px vs 正文 ${base.style.captionSizePx}px`)
+      .toBeGreaterThan(1.3)
+  })
+
+  it('作者行明显小于书名', () => {
+    const fs = fsOf(titled('《被讨厌的勇气》\n岸见一郎、古贺史健'))
+    expect(fs[1]).toBeLessThan(fs[0] * 0.7)
+  })
+
+  it('超长书名仍按可用宽度缩排，不溢出画面', () => {
+    const fs = fsOf(titled('《我们生活在巨大的差距里》'))[0]
+    expect(fs * 13).toBeLessThanOrEqual(720 - 80)
   })
 })
 

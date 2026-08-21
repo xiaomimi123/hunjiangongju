@@ -74,12 +74,34 @@ describe('buildBodyGraph —— 边界混排', () => {
 
   // ★ xfade 会让两段重叠播放，**总时长少掉一个转场时长**。
   // 这里算错的话，后面每个边界的时间点都会漂移，且越往后越离谱。
-  it('叠化用 xfade，总时长扣掉转场窗口', () => {
+  // ★ 叠化**不吃时长**。原先 xfade 每处让总时长少掉一个转场的长度，
+  // 而音频是各段配音直接拼接、字幕用的是未压缩的绝对时间 —— 视频比音频短，
+  // 最后 -shortest 把尾巴上的旁白砍掉（线上实测砍掉约 1 秒 = 两处 500ms 叠化，
+  // 表现为「文案没读完就结束了」），字幕也会逐段累积落后于画面。
+  //
+  // 依据：剪映的转场不吃时长 —— 客户样例各段时长之和 24603ms，
+  // 草稿声明总时长 24592ms，差 11ms（取整误差）。
+  it('叠化不吃总时长：总时长 = 各段之和', () => {
     const g = buildBodyGraph({ ...base, segments: [
       seg({ durationMs: 4000 }), seg({ durationMs: 3000, transitionIn: 'crossfade', transitionMs: 500 }),
     ] })
+    // 叠化压在前一段的尾巴上：3.5s→4.0s 混合，第二段的槽位仍从 4.0s 起
     expect(g.filter).toContain('xfade=transition=fade:duration=0.5:offset=3.5')
-    expect(g.totalMs).toBe(6500)
+    expect(g.totalMs).toBe(7000)
+  })
+
+  // 叠化要消耗的那几帧必须真渲出来，否则 xfade 会拿不到帧、时长又缩回去
+  it('有入场叠化的段多渲转场那几帧', () => {
+    const g = buildBodyGraph({ ...base, segments: [
+      seg({ durationMs: 4000 }), seg({ durationMs: 3000, transitionIn: 'crossfade', transitionMs: 500 }),
+    ] })
+    // 3000ms=90 帧，加 500ms=15 帧的引入 → 105
+    expect(g.filter).toContain('trim=end_frame=105')
+    // 硬切段不多渲
+    const hard = buildBodyGraph({ ...base, segments: [
+      seg({ durationMs: 4000 }), seg({ durationMs: 3000, transitionIn: null }),
+    ] })
+    expect(hard.filter).toContain('trim=end_frame=90')
   })
 
   it('硬切与叠化混排时 offset 逐段累计正确', () => {
@@ -87,12 +109,12 @@ describe('buildBodyGraph —— 边界混排', () => {
     const g = buildBodyGraph({ ...base, segments: [
       seg({ durationMs: 4000 }),
       seg({ durationMs: 3000, transitionIn: null }),                                   // 累计 7000
-      seg({ durationMs: 2000, transitionIn: 'crossfade', transitionMs: 500 }),         // offset=6.5, 累计 8500
-      seg({ durationMs: 2000, transitionIn: 'crossfade', transitionMs: 300 }),         // offset=8.2, 累计 10200
+      seg({ durationMs: 2000, transitionIn: 'crossfade', transitionMs: 500 }),         // 槽位 7000→9000, offset=6.5
+      seg({ durationMs: 2000, transitionIn: 'crossfade', transitionMs: 300 }),         // 槽位 9000→11000, offset=8.7
     ] })
     expect(g.filter).toContain('duration=0.5:offset=6.5')
-    expect(g.filter).toContain('duration=0.3:offset=8.2')
-    expect(g.totalMs).toBe(10200)
+    expect(g.filter).toContain('duration=0.3:offset=8.7')
+    expect(g.totalMs).toBe(11000)
   })
 
   it('转场窗口不得超过相邻两段中较短者（否则 xfade 吃掉整段）', () => {
@@ -100,7 +122,7 @@ describe('buildBodyGraph —— 边界混排', () => {
       seg({ durationMs: 4000 }), seg({ durationMs: 600, transitionIn: 'crossfade', transitionMs: 5000 }),
     ] })
     expect(g.filter).toContain('duration=0.6:')
-    expect(g.totalMs).toBe(4000)
+    expect(g.totalMs).toBe(4600)
   })
 
   it('末段标签即输出标签', () => {

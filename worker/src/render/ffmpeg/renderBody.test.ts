@@ -80,12 +80,14 @@ describe('buildRenderBodyPlan', () => {
     expect(p.totalMs).toBe(15000)
   })
 
-  it('bodyCycle 非空 → 按序循环套用，总时长扣掉转场窗口', () => {
+  // 叠化**不扣时长**（见 bodyGraph 的 leadFrames）：原先每处 xfade 让总时长少掉一个
+  // 转场的长度，而音频与字幕都在未压缩的时间轴上，结果尾巴上的旁白被 -shortest 砍掉。
+  it('bodyCycle 非空 → 按序循环套用，总时长仍是各段之和', () => {
     const p = buildRenderBodyPlan(baseOpts(segs, {
       bodyCycle: [{ renderType: 'crossfade', durationMs: 500 }],
     }))
     expect(p.args.join(' ')).toContain('xfade=transition=fade:duration=0.5')
-    expect(p.totalMs).toBe(15000 - 500 * 2)
+    expect(p.totalMs).toBe(15000)
   })
 
   it('运镜按序循环套用到各段', () => {
@@ -118,7 +120,8 @@ describe('buildRenderBodyPlan', () => {
     const a = buildRenderBodyPlan(baseOpts([
       seg({ startMs: 0, endMs: 5000, bookTitle: '简爱', bookAuthor: '夏洛蒂·勃朗特' }),
     ])).assContent
-    expect(a).toContain('《简爱》\\N夏洛蒂·勃朗特')   // ASS 里就该是 \N
+    // 书名与作者各带自己的 \fs（见 ass.ts「常驻大标题的字号」），中间仍是 ASS 换行 \N
+    expect(a).toMatch(/《简爱》\\N\{\\fs\d+\}夏洛蒂·勃朗特/)
     expect(a).not.toContain('《简爱》\\\\N')          // 但不能是被转义过的 \\N
   })
 

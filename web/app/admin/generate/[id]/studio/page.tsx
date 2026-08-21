@@ -4,6 +4,10 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
+import {
+  SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, fmtSec,
+  type Cycle, type Keyframe, type AudioParams,
+} from '@/components/admin/paramControls'
 
 // 剪辑工作台：调这一条片子的节奏、字幕样式、配乐，然后重渲。
 //
@@ -13,13 +17,11 @@ import PageHeader from '@/components/admin/PageHeader'
 // 做成控件就是让人调空气——界面改了、保存成功了、成片一点变化没有。所以一个都不放。
 
 type Timing = { seqNo: number; startMs: number; endMs: number }
-type Cycle = { renderType: string; durationMs: number }
-type Keyframe = { scaleFrom: number; scaleTo: number }
 type Effective = {
   mode: string
   transition: { durationMs: number; bodyCycle?: Cycle[] }
   body: { slotDurationsMs?: number[]; subtitleColor: string; subtitlePosY: number }
-  audio: { bgmVolume: number; bgmStartMs: number; bgmFadeInMs: number; bgmFadeOutMs: number }
+  audio: AudioParams
   motion?: { keyframes?: Keyframe[] }
   text?: Record<string, number>
 }
@@ -32,27 +34,6 @@ type Info = {
   blockReason: string | null
 }
 type Bgm = { id: string; fileUrl: string; name: string | null; styleTag: string | null }
-
-const ms = (n: number) => `${(n / 1000).toFixed(2)}s`
-
-/** 一行「标签 + 数字输入 + 单位」。后台没有共用表单组件，沿用 field/eyebrow 这套 class。 */
-function NumRow(props: {
-  label: string; value: number; onChange: (v: number) => void
-  min?: number; max?: number; step?: number; unit?: string; hint?: string; disabled?: boolean
-}) {
-  return (
-    <label className="flex items-center gap-3 py-1">
-      <span className="w-40 shrink-0 text-xs text-ink3">{props.label}</span>
-      <input
-        type="number" className="field w-32 text-sm" value={props.value} disabled={props.disabled}
-        min={props.min} max={props.max} step={props.step ?? 1}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-      />
-      {props.unit && <span className="text-xs text-ink3">{props.unit}</span>}
-      {props.hint && <span className="text-xs text-ink3">{props.hint}</span>}
-    </label>
-  )
-}
 
 export default function StudioPage() {
   const { id } = useParams<{ id: string }>()
@@ -68,7 +49,7 @@ export default function StudioPage() {
   const [slots, setSlots] = useState<number[]>([])
   const [cycle, setCycle] = useState<Cycle[]>([])
   const [kfs, setKfs] = useState<Keyframe[]>([])
-  const [audio, setAudio] = useState<Effective['audio'] | null>(null)
+  const [audio, setAudio] = useState<AudioParams | null>(null)
   const [capColor, setCapColor] = useState('#ffffff')
   const [capPosY, setCapPosY] = useState(0.78)
 
@@ -189,11 +170,7 @@ export default function StudioPage() {
           改时长要**重新配音**才生效：画面各段的起止来自配音对齐的结果，不是直接来自这里的数值。
           只点「应用并重渲」的话画面不会变。
         </p>
-        {slots.map((v, i) => (
-          <NumRow key={i} label={`第 ${i + 1} 段`} value={v} disabled={locked} min={1000} max={60000} step={100}
-            unit="ms" hint={ms(v)} onChange={(n) => setSlots((s) => s.map((x, j) => (j === i ? n : x)))} />
-        ))}
-        {segCount === 0 && <p className="text-xs text-ink3">这条任务还没有分段时间轴（需先完成配音对齐）。</p>}
+        <SlotRows slots={slots} onChange={setSlots} disabled={locked} />
       </section>
 
       {/* ── 转场 ── */}
@@ -205,32 +182,7 @@ export default function StudioPage() {
             {busy === '转场' ? '保存中…' : '保存转场'}
           </button>
         </div>
-        <p className="text-xs text-ink3">
-          渲染层目前只实现了**叠化**，所以这里只有「叠化 / 硬切」两种。
-          原工程里的擦除、碎片等类型在成片里一律呈现为叠化，做成下拉框会误导。
-        </p>
-        {cycle.map((c, i) => (
-          <div key={i} className="flex items-center gap-3 py-1">
-            <span className="w-40 shrink-0 text-xs text-ink3">边界 {i + 1}</span>
-            <select className="field w-28 text-sm" disabled={locked}
-              value={c.durationMs > 0 ? 'fade' : 'cut'}
-              onChange={(e) => setCycle((cs) => cs.map((x, j) => j === i
-                ? { ...x, durationMs: e.target.value === 'cut' ? 0 : (x.durationMs || 400) } : x))}>
-              <option value="fade">叠化</option>
-              <option value="cut">硬切</option>
-            </select>
-            {c.durationMs > 0 && (
-              <input type="number" className="field w-28 text-sm" disabled={locked} min={1} max={2000} step={50}
-                value={c.durationMs}
-                onChange={(e) => setCycle((cs) => cs.map((x, j) => j === i ? { ...x, durationMs: Number(e.target.value) } : x))} />
-            )}
-            {c.durationMs > 0 && <span className="text-xs text-ink3">ms</span>}
-          </div>
-        ))}
-        <button className="btn-ghost text-xs" disabled={locked}
-          onClick={() => setCycle((cs) => [...cs, { renderType: 'crossfade', durationMs: 400 }])}>
-          + 增加一条边界（按序循环套用到正片各边界）
-        </button>
+        <TransitionRows cycle={cycle} onChange={setCycle} disabled={locked} />
       </section>
 
       {/* ── 运镜 ── */}
@@ -242,23 +194,7 @@ export default function StudioPage() {
             {busy === '运镜' ? '保存中…' : '保存运镜'}
           </button>
         </div>
-        <p className="text-xs text-ink3">从 1.0 推到 1.10 即缓慢推近 10%。留空（没有任何一条）时画面静止。</p>
-        {kfs.map((k, i) => (
-          <div key={i} className="flex items-center gap-3 py-1">
-            <span className="w-40 shrink-0 text-xs text-ink3">第 {i + 1} 段</span>
-            <input type="number" className="field w-24 text-sm" disabled={locked} min={1} max={2} step={0.01}
-              value={k.scaleFrom}
-              onChange={(e) => setKfs((a) => a.map((x, j) => j === i ? { ...x, scaleFrom: Number(e.target.value) } : x))} />
-            <span className="text-xs text-ink3">→</span>
-            <input type="number" className="field w-24 text-sm" disabled={locked} min={1} max={2} step={0.01}
-              value={k.scaleTo}
-              onChange={(e) => setKfs((a) => a.map((x, j) => j === i ? { ...x, scaleTo: Number(e.target.value) } : x))} />
-          </div>
-        ))}
-        <button className="btn-ghost text-xs" disabled={locked}
-          onClick={() => setKfs((a) => [...a, { scaleFrom: 1, scaleTo: 1.1 }])}>
-          + 增加一段（按序循环套用）
-        </button>
+        <MotionRows kfs={kfs} onChange={setKfs} disabled={locked} />
       </section>
 
       {/* ── 字幕样式 ── */}
@@ -270,17 +206,7 @@ export default function StudioPage() {
             {busy === '字幕样式' ? '保存中…' : '保存字幕样式'}
           </button>
         </div>
-        <label className="flex items-center gap-3 py-1">
-          <span className="w-40 shrink-0 text-xs text-ink3">正文字幕颜色</span>
-          <input type="color" className="h-8 w-14 rounded border border-line" disabled={locked}
-            value={capColor} onChange={(e) => setCapColor(e.target.value)} />
-          <span className="num text-xs text-ink3">{capColor}</span>
-        </label>
-        <NumRow label="正文字幕竖直位置" value={capPosY} disabled={locked} min={0} max={1} step={0.01}
-          hint="0 = 顶端，1 = 底端" onChange={setCapPosY} />
-        <p className="text-xs text-ink3">
-          字号与字体暂不可调：正文字号是渲染层的锚点常量，字体固定用自带的 Noto Sans SC。
-        </p>
+        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} disabled={locked} />
       </section>
 
       {/* ── 配乐 ── */}
@@ -310,14 +236,7 @@ export default function StudioPage() {
             )}
             <Link href="/admin/bgm" className="text-xs text-flame">管理曲库 →</Link>
           </div>
-          <NumRow label="音量" value={audio.bgmVolume} disabled={locked} min={0} max={1} step={0.01}
-            hint="相对人声" onChange={(v) => setAudio({ ...audio, bgmVolume: v })} />
-          <NumRow label="从第几秒开始" value={audio.bgmStartMs} disabled={locked} min={0} step={500}
-            unit="ms" hint={`${ms(audio.bgmStartMs)}（用来卡副歌）`} onChange={(v) => setAudio({ ...audio, bgmStartMs: v })} />
-          <NumRow label="淡入" value={audio.bgmFadeInMs} disabled={locked} min={0} max={30000} step={100}
-            unit="ms" onChange={(v) => setAudio({ ...audio, bgmFadeInMs: v })} />
-          <NumRow label="淡出" value={audio.bgmFadeOutMs} disabled={locked} min={0} max={30000} step={100}
-            unit="ms" onChange={(v) => setAudio({ ...audio, bgmFadeOutMs: v })} />
+          <AudioRows audio={audio} onChange={setAudio} disabled={locked} />
         </section>
       )}
 

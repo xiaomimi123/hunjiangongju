@@ -1,4 +1,5 @@
 'use client'
+import Link from 'next/link'
 import { useCallback, useEffect, useId, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
@@ -250,6 +251,11 @@ export default function FrameworksPage() {
                 <td className="num px-4 py-3 text-ink3">{new Date(f.createdAt).toLocaleString('zh-CN')}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <span className="btn-ghost text-xs">编辑</span>
+                  {/* 剪辑参数（节奏/转场/运镜/字幕/配乐）另开一页：这些是数值型参数，
+                      塞进已经很满的编辑弹窗里既挤又容易误改。stopPropagation 是必需的——
+                      整行有 onClick 打开编辑弹窗，不拦住会同时触发。 */}
+                  <Link href={`/admin/frameworks/${f.id}/studio`} onClick={(e) => e.stopPropagation()}
+                    className="btn-ghost ml-3 text-xs">剪辑参数</Link>
                   <button onClick={(e) => { e.stopPropagation(); del(f.id, f.name ?? f.id.slice(0, 8)) }}
                     disabled={deleting === f.id}
                     className="ml-3 text-xs text-ink3 hover:text-flame disabled:opacity-50">

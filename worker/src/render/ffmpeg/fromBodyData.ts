@@ -47,6 +47,17 @@ function abs(hfDir: string, rel: string): string {
  * 要整体调大调小，只动这一个数，各层比例自动跟着走。
  */
 const CAPTION_PX = 54
+
+/**
+ * 常驻大标题在草稿实测比例之上再放大的系数。
+ *
+ * 草稿实测是正文的 1.85 倍，但客户要求成片里的书名标题「再大一些」——
+ * 这是**有意偏离原工程**的产品选择，不是提取错了。
+ * 单独一个系数而不是改 text.bookTitleScale：那个值来自草稿解析，
+ * 重新导入工程时会被覆盖回 1.85，改在那里等于白改。
+ */
+const TITLE_BOOST = 1.3
+
 const FS = { watermark: 22, flashAuthorRatio: 0.48 }
 
 export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts {
@@ -118,7 +129,7 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
       captionColor: p?.body.subtitleColor ?? '#ffffff',
       captionPosY: p?.body.subtitlePosY ?? 0.78,
       captionSizePx: CAPTION_PX,
-      titleSizePx: px(tx?.bookTitleScale ?? 1.85),
+      titleSizePx: Math.round(px(tx?.bookTitleScale ?? 1.85) * TITLE_BOOST),
       titleColor: '#ffe9c0',
       ...(tx?.bookTitlePosY !== undefined ? { titlePosY: tx.bookTitlePosY } : {}),
       watermarkSizePx: FS.watermark,

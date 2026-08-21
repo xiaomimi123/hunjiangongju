@@ -21,6 +21,8 @@ const FONT = process.env.ASS_FONT ?? DEFAULT_FONT_NAME
 
 const W = 720
 const H = 960
+/** 常驻书名所在的横条：STYLE 没给 titlePosY，走默认 0.22 → y≈211，56px 字上下各留些余量 */
+const TITLE_BAND = `${W}:160:0:${Math.round(H * 0.22) - 80}`
 const STYLE = {
   fontName: FONT, captionColor: '#ffffff', captionPosY: 0.78,
   captionSizePx: 48, titleSizePx: 56, titleColor: '#ffe9c0', watermarkSizePx: 22,
@@ -87,8 +89,11 @@ d('真渲验收 —— ASS 文字层', () => {
     expect(inkRatio(out, 5.2, CAP_BAND)).toBeLessThan(0.0005)
   })
 
+  // band 要跟着 titlePosY 走：常驻书名画在 height*titlePosY（本例 ≈211）附近，
+  // 不是贴着画面顶边。此前这里写死 20~180，标题位置调过之后就整条量空了——
+  // 表现为一条**假红**（字明明在画面上，断言却说没有）。
   it('常驻书名在顶部全程可见', () => {
-    const band = `${W}:160:0:20`
+    const band = TITLE_BAND
     expect(inkRatio(out, 1, band)).toBeGreaterThan(0.003)
     expect(inkRatio(out, 5, band)).toBeGreaterThan(0.003)
   })
@@ -98,6 +103,43 @@ d('真渲验收 —— ASS 文字层', () => {
   it('字号没有被 PlayRes 缩水', () => {
     // 48px 高、约 11 个汉字，在 720×200 的带里占比经验值 > 1.5%
     expect(inkRatio(out, 3, CAP_BAND)).toBeGreaterThan(0.015)
+  })
+
+  // ★ 常驻书名的「加粗」是真的加粗，不是样式行上那个没人执行的 Bold=1。
+  //
+  // 自带字体只有 Regular 字面，libass 不会给它合成假粗体——实测同一段文字
+  // Bold=0 与 Bold=1 渲染出来**完全一致**，那个标志位一直是摆设。真加粗靠
+  // ass.ts 里额外叠的那层同色描边（TITLE_BOLD_BORD）。
+  //
+  // 所以这条要在**像素上**比：把加粗层从 ASS 里删掉重渲一遍，同一条带的墨迹
+  // 占比必须明显低于带加粗层的版本。只验字符串里有没有那行 Dialogue 是验不出
+  // 「描边真的把笔画撑粗了」的——颜色写错、\bord 被后面的标签覆盖，字符串照样对。
+  it('常驻书名有加粗层：去掉它之后同区域墨迹明显变少', () => {
+    const plainAss = path.join(dir, 'plain.ass')
+    const full = buildAss({
+      width: W, height: H, totalMs: 6000, style: STYLE, captions: CUES,
+      bookTitles: [{ text: '《简爱》', startMs: 0, endMs: 6000 }],
+      watermark: '@读书号',
+    })
+    // 阈值 1.5 的来历：实测真加粗 = 1.96，而把 \bord 调成 0（等于没加粗、只是把
+    // 同一个字形原地叠画一遍）仍有 1.14——叠画会把抗锯齿边缘变实，本身就抬一点墨迹。
+    // 阈值必须落在这两者中间，贴着 1.14 设会让这条断言在退化实现下照样绿。
+    // 只删 title 的加粗层。不能光按 `Dialogue: 1,` 过滤——**字幕层也在 Layer 1**，
+    // 那样会把正文字幕一起删掉，对照组就不只差一个加粗层了。
+    const stripped = full.split('\n').filter((l) => !/^Dialogue: 1,[^,]*,[^,]*,title,/.test(l)).join('\n')
+    expect(stripped.split('\n').length, '没找到加粗层，过滤条件失效了').toBeLessThan(full.split('\n').length)
+    writeFileSync(plainAss, stripped, 'utf8')
+
+    const plainOut = path.join(dir, 'plain.mp4')
+    const r = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(plainAss, FONTS_DIR), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', plainOut])
+    if (!r.ok) throw new Error(`烧对照字幕失败: ${r.out.slice(-800)}`)
+
+    const bold = inkRatio(out, 1, TITLE_BAND)
+    const plain = inkRatio(plainOut, 1, TITLE_BAND)
+    expect(bold / plain, `加粗层没把笔画撑粗: 带=${bold.toFixed(4)} 不带=${plain.toFixed(4)}`)
+      .toBeGreaterThan(1.5)
   })
 
   // ★ 墨迹断言只能证明「画出了东西」，**证明不了画对了**：

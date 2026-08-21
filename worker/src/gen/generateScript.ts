@@ -70,12 +70,20 @@ function formatBookLine(b: BookInput, i: number): string {
 // 书单号爆款文案风格准则（对齐优质书单号：口语化、情绪优先、无营销腔）。
 // hasOpenTitle=true 时首条必须让步：模板已有「今天分享的是」这类开场标题，
 // 此时要求写开场白与原文「不要先介绍书」正面冲突，两条打架会让 LLM 输出不稳定。
-function styleRules(hasOpenTitle: boolean): string {
+/**
+ * @param titleFirst 第二段是否要以书名开头。
+ *   单本模式的成片结构是：碎裂开场念「今天分享的是…」→ 书封快闪（无旁白）→
+ *   正片第一句才报出书名。所以那种情况下「不要先介绍书」这条要让路，
+ *   否则两条指令互相打架，模型只能二选一。
+ */
+function styleRules(hasOpenTitle: boolean, titleFirst = false): string {
   return [
     '文案风格准则（务必遵守）：',
-    hasOpenTitle
-      ? '- 开场白之后的第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。'
-      : '- 开篇第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。',
+    titleFirst
+      ? '- 报出书名之后立刻直击情绪、给一个具体场景或画面，不要泛泛介绍这本书讲什么。'
+      : hasOpenTitle
+        ? '- 开场白之后的第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。'
+        : '- 开篇第一句直击情绪、给一个具体场景或画面，不要先介绍书或说"今天推荐"。',
     '- 短句、口语化、像跟朋友说话；多用具体细节，少用抽象大词。',
     '- 严禁"你是不是……"式营销开头、"不是……而是……"的对仗论证、机械排比。',
     '- 结尾留余味、给一句能被记住的话；严禁任何 CTA（买它/点购物车/关注/链接）。',
@@ -361,7 +369,14 @@ export function buildSingleBookPrompt(args: {
   if (book.points) bookLine.push(`要点：${book.points}`)
 
   const items = [
-    ...(openTitle ? [`第一段必须是开场白，以「${openTitle}《${book.title}》」开头。`] : []),
+    // 成片结构：碎裂开场念开场白 → 书封快闪（无旁白）→ 正片第一句才报书名。
+    // 书名塞进开场白的话，画面还在碎裂时书名就念出来了，与快闪揭晓的节奏对不上。
+    ...(openTitle
+      ? [
+          `第一段是开场白：以「${openTitle}」开头，用一句话点出这条视频要解决的问题，**整段不得出现书名**。`,
+          `第二段必须以「《${book.title}》」这个书名开头，报出书名后再展开。`,
+        ]
+      : []),
     `分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
     // 核心约束：模型写书评时天然爱旁征博引，不明说必犯。
     `全篇只讲《${book.title}》这一本书，不得提及、引用或对比任何其他书籍，也不得出现其他书名。`,
@@ -385,7 +400,8 @@ export function buildSingleBookPrompt(args: {
     '要求：',
     ...items.map((s, i) => `${i + 1}. ${s}`),
     '',
-    styleRules(Boolean(openTitle)),
+    // 单本模式：第二段以书名开头，styleRules 的「不要先介绍书」要让路
+    styleRules(Boolean(openTitle), Boolean(openTitle)),
   ].join('\n')
 }
 

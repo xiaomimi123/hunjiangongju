@@ -36,11 +36,22 @@ describe('buildSingleBookPrompt', () => {
     expect(p).toContain('不得提及')
   })
 
-  it('传 openTitleText 时要求首段以「今天分享的是《书名》」开场', () => {
+  // ★ 开场白里**不能**出现书名。
+  //
+  // 原先要求首段写成「今天分享的是《书名》」，于是书名在开场碎裂动画还没放完时
+  // 就被念出去了。成片要的节奏是：碎裂时只说「今天分享的是…」，等书封快闪结束、
+  // 常驻大标题落位那一刻才报出《书名》——所以书名归第二段开头。
+  it('传 openTitleText 时：开场白不得含书名，书名留到第二段开头', () => {
     const p = buildSingleBookPrompt({ book, framework, openTitleText: '今天分享的是' })
-    expect(p).toContain('今天分享的是《被讨厌的勇气》')
+    expect(p).toContain('以「今天分享的是」开头')
+    expect(p).toContain('整段不得出现书名')
+    expect(p).toContain('第二段必须以「《被讨厌的勇气》」这个书名开头')
+    // 「今天分享的是《书名》」这个旧写法必须彻底消失，否则模型照旧在开场就报书名
+    expect(p).not.toContain('今天分享的是《被讨厌的勇气》')
     expect(p).toContain('开场白')
-    expect(p).toContain('开场白之后的第一句直击情绪')
+    // 风格准则也要跟着改口径：书名已经在第二段开头了，
+    // 再说「开场白之后的第一句…不要先介绍书」会和上面那条互相打架。
+    expect(p).toContain('报出书名之后立刻直击情绪')
     expect(p).not.toContain('开篇第一句直击情绪')
   })
 

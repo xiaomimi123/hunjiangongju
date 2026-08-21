@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { seedFrom, pickSubset, pickAngle, ANGLES, parseBookList, dedupeBooks, resolveBookCount, isSameBook } from './bookPick'
+import { seedFrom, pickSubset, pickAngle, ANGLES, parseBookList, dedupeBooks, resolveBookCount, isSameBook , looksChineseTitle } from './bookPick'
 
 describe('稳定随机', () => {
   it('同 seed 结果一致，异 seed 结果不同', () => {
@@ -193,5 +193,45 @@ describe('resolveBookCount', () => {
   it('越界 clamp 到 1..20', () => {
     expect(resolveBookCount({ __bookCount: 0 })).toBe(1)
     expect(resolveBookCount({ __bookCount: 999 })).toBe(20)
+  })
+})
+
+// ★ 线上成片的快闪卡上出现了整屏英文书名。选书提示词早就要求「书名必须是中文」，
+// 但候选池是**先从书库召回、不足才联网**——那几本是在约束加上去之前沉淀进书库的，
+// 于是每次都被原样召回。提示词修好了，脏数据还在。
+describe('looksChineseTitle', () => {
+  it('中文书名通过', () => {
+    for (const t of ['简爱', '《活着》', '云边有个小卖部', '人间失格']) {
+      expect(looksChineseTitle(t), t).toBe(true)
+    }
+  })
+
+  // 这四本就是线上成片里实际出现的
+  it('外文原名一律拒绝', () => {
+    for (const t of [
+      'The Brontë Myth',
+      '《Jane Eyre: New Casebooks》',
+      'The Madwoman in the Attic: The Woman Writer and the Nineteenth-Century Literary Imagination',
+      'Wuthering Heights',
+    ]) {
+      expect(looksChineseTitle(t), t).toBe(false)
+    }
+  })
+
+  // 中文市场就叫这个名字的数字/符号书名不该误伤
+  it('无字母的数字或符号书名放行', () => {
+    expect(looksChineseTitle('1984')).toBe(true)
+    expect(looksChineseTitle('《1Q84》'), '含字母 Q，按规则拒绝——宁可漏放也不放英文书').toBe(false)
+  })
+
+  it('中英混排只要有中文就算中文书', () => {
+    expect(looksChineseTitle('简爱 Jane Eyre')).toBe(true)
+  })
+
+  it('空值与非字符串拒绝', () => {
+    expect(looksChineseTitle('')).toBe(false)
+    expect(looksChineseTitle('《》')).toBe(false)
+    expect(looksChineseTitle(null)).toBe(false)
+    expect(looksChineseTitle(42)).toBe(false)
   })
 })

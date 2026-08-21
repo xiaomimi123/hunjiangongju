@@ -125,6 +125,22 @@ export function escapeAssText(s: string): string {
 /** 常驻大标题里作者行相对书名的字号比例（与快闪卡的作者行同一口径） */
 const TITLE_SUB_RATIO = 0.42
 
+/**
+ * 常驻大标题的「加粗层」描边宽度。
+ *
+ * 自带字体只有 NotoSansSC-Regular，**没有粗体字面**，而 libass 不会为它合成假粗体
+ * ——实测同一段文字 Bold=0 与 Bold=1 渲染出来完全一致，那个标志位一直是摆设。
+ * 所以真加粗只能自己做：在原字上再叠一层「与文字同色」的细描边，把笔画撑粗。
+ * 底层保留深色粗描边（浅色配图上的可读性靠它），加粗层压在上面。
+ */
+const TITLE_BOLD_BORD = 1.6
+
+/** 内联覆盖标签用的颜色格式：&HBBGGRR&（与样式行的 &HAABBGGRR 不同，少一个 alpha） */
+function inlineColor(hex: string): string {
+  const full = toAssColor(hex) // &HAABBGGRR
+  return `&H${full.slice(4)}&`
+}
+
 export function fitSizePx(text: string, basePx: number, widthPx: number, marginPx = 40): number {
   // ★ 按**最长的那一行**量，不是整串。
   // 第一版把整串当一行：常驻大标题的文本是「《书名》\N作者」，连 ASS 的换行转义一起算进去，
@@ -221,7 +237,14 @@ export function buildAss(o: AssOpts): string {
       if (line.trim()) parts.push(`{\\fs${fitSizePx(line, subFs, o.width)}}${escapeAssText(line)}`)
     }
     if (!escapeAssText(head)) continue
-    ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,{\\pos(${cx},${ty})}${parts.join('\\N')}`)
+    const body = parts.join('\\N')
+    ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,{\\pos(${cx},${ty})}${body}`)
+    // 加粗层：同色细描边把笔画撑粗（见 TITLE_BOLD_BORD）。
+    // 关掉阴影，否则阴影会被画两遍、显得脏。
+    ev.push(
+      `Dialogue: 1,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,` +
+      `{\\pos(${cx},${ty})\\bord${TITLE_BOLD_BORD}\\shad0\\3c${inlineColor(st.titleColor)}}${body}`,
+    )
   }
   for (const c of o.captions) line(1, c, 'cap')
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {

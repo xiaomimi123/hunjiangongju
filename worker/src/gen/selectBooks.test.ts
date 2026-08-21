@@ -442,6 +442,64 @@ describe('selectBooks：学员书作者三级兜底', () => {
     expect(savedRow?.theme).toBe(theme)
   })
 
+  // ★ 外文书名必须在**两侧**都拦住。
+  //
+  // 线上成片里出现过《The Brontë Myth》《Jane Eyre: New Casebooks》这类快闪卡。
+  // 根因不在提示词：这些书是在「中文书名」约束加进提示词**之前**就沉淀进书库的，
+  // collectCandidates 先从书库召回，所以提示词怎么改都清不掉它们。
+  // 因此召回侧要过滤存量，写入侧要拦住新的——只做一侧都会漏。
+  it('书库召回：主题下的外文书名被剔除，不会进快闪卡', async () => {
+    const subject = '外文召回测试书'
+    const theme = '外文召回主题'
+    trackTheme(theme)
+    await upsertBook({ title: 'The Brontë Myth', author: 'Lucasta Miller', theme })
+    await upsertBook({ title: 'Jane Eyre: New Casebooks', author: 'Heather Glen', theme })
+    await upsertBook({ title: '中文候选甲', author: '候选作者甲', theme })
+    await upsertBook({ title: '中文候选乙', author: '候选作者乙', theme })
+
+    const fw = await makeFramework(3)
+    const task = await makeTask(subject, fw.id)
+    mockLlmComplete.mockResolvedValueOnce(`查证作者|${theme}`)
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const titles = (fresh.variables as { books: { title: string }[] }).books.map((b) => b.title)
+    expect(titles).not.toContain('The Brontë Myth')
+    expect(titles).not.toContain('Jane Eyre: New Casebooks')
+    expect(titles).toContain('中文候选甲')
+    expect(titles).toContain('中文候选乙')
+  })
+
+  it('联网推荐：返回的外文书名既不入选也不沉淀进书库', async () => {
+    const subject = '外文推荐测试书'
+    const theme = '外文推荐主题'
+    trackTheme(theme)
+    const fw = await makeFramework(2)
+    const task = await makeTask(subject, fw.id)
+    // 第 1 次：查证学员书；第 2 次：推荐补位（书库此时是空的，必然要联网补）；
+    // 之后每本候选还要过一次二次校验——**这个兜底不能省**：不给它值的话
+    // mockResolvedValueOnce 用尽后返回 undefined，parseYesNo 判否，两本书都被剔掉，
+    // 这条断言就会在「过滤器根本没生效」时照样绿（我第一版就是这么假绿的）。
+    mockLlmComplete.mockResolvedValueOnce(`查证作者|${theme}`)
+    mockLlmComplete.mockResolvedValueOnce(JSON.stringify([
+      { title: 'The Madwoman in the Attic', author: 'Sandra Gilbert' },
+      { title: '中文推荐书', author: '中文作者' },
+    ]))
+    mockLlmComplete.mockResolvedValue('YES')
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const titles = (fresh.variables as { books: { title: string }[] }).books.map((b) => b.title)
+    expect(titles).not.toContain('The Madwoman in the Attic')
+    // 沉淀侧同样要干净，否则这本书下次会从书库被召回，等于绕过了本次拦截
+    expect(await prisma.bookLibrary.count({ where: { title: 'The Madwoman in the Attic' } })).toBe(0)
+    // 正对照：中文那本走完了推荐→校验→沉淀的完整链路，证明这条路径真的跑到了
+    expect(titles).toContain('中文推荐书')
+    expect(await prisma.bookLibrary.count({ where: { title: '中文推荐书' } })).toBe(1)
+  })
+
   it('查证只返回作者（无主题词）→ theme 回退为 subject，不硬失败', async () => {
     const subject = '仅作者回退测试书'
     trackTheme(subject)

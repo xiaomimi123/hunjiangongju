@@ -146,3 +146,25 @@ export function resolveBookCount(overlayTemplate: unknown): number {
   }
   return 5
 }
+
+/**
+ * 书名是否像中文读物。
+ *
+ * ── 为什么光改提示词不够 ──
+ *
+ * 选书的提示词早就要求「书名必须是中文」，但候选池是**先从书库召回、不足才联网**。
+ * 那几本英文书（《Jane Eyre: New Casebooks》《The Brontë Myth》…）是在这条约束
+ * 加上去**之前**沉淀进书库的，于是每次都被原样召回——提示词修好了，脏数据还在。
+ *
+ * 判据放在召回与写入两侧，脏数据既召不回来、也写不进去。
+ *
+ * 规则：含中日韩字符即通过；一个中文字都没有、却含拉丁字母的，判为外文原名。
+ * 《1984》《S.》这类无字母的数字/符号书名放行——它们在中文市场就是这么叫的。
+ */
+export function looksChineseTitle(title: unknown): boolean {
+  if (typeof title !== 'string') return false
+  const t = title.replace(/[《》\s]/g, '')
+  if (!t) return false
+  if (/[一-鿿぀-ヿ가-힯]/.test(t)) return true
+  return !/[A-Za-zÀ-ɏ]/.test(t)
+}

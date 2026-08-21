@@ -137,7 +137,10 @@ describe('fromBodyData —— 文字层字号与位置', () => {
     const cap = o.assStyle.captionSizePx
     expect(o.assStyle.openTitleSizePx).toBe(cap * 2)
     expect(o.assStyle.flashTitleSizePx).toBe(cap * 3)
-    expect(o.assStyle.titleSizePx).toBe(cap * 4)
+    // 常驻大标题额外乘 TITLE_BOOST(1.3)：客户要求成片里的书名再大一些，
+    // 是**有意偏离**草稿实测比例。放在渲染层而不是改 text.bookTitleScale，
+    // 因为那个值来自草稿解析，重新导入工程会被覆盖回去。
+    expect(o.assStyle.titleSizePx).toBe(Math.round(cap * 4 * 1.3))
   })
 
   it('各层竖直位置原样带过去（之前是写死在渲染层的）', () => {

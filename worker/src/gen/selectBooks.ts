@@ -25,6 +25,7 @@ import {
   findBookByTitle,
   findBooksByTheme,
   upsertBook,
+  looksChineseTitle,
   pickSubset,
   parseBookList,
   dedupeBooks,
@@ -254,7 +255,14 @@ async function collectCandidates(theme: string, studentBook: BookOut, n: number)
   let pool: PickedBook[] = []
   try {
     const rows = await findBooksByTheme(theme, n * 2)
-    pool = rows.map((r) => ({ title: r.title, author: r.author, ...(r.points ? { points: r.points } : {}) }))
+    // ★ 召回侧要挡：那几本英文书是在「书名必须是中文」这条约束加上去**之前**
+    // 沉淀进书库的，不挡的话每次都被原样召回 —— 提示词修好了、脏数据还在。
+    // 线上成片的快闪卡上整屏英文书名就是这么来的。
+    const zh = rows.filter((r) => looksChineseTitle(r.title))
+    if (zh.length < rows.length) {
+      console.warn(`[gen] select-books: 书库召回里剔除 ${rows.length - zh.length} 本外文书名（${rows.filter((r) => !looksChineseTitle(r.title)).map((r) => r.title).join('、')}）`)
+    }
+    pool = zh.map((r) => ({ title: r.title, author: r.author, ...(r.points ? { points: r.points } : {}) }))
   } catch (err) {
     console.warn('[gen] select-books: findBooksByTheme 失败', err)
   }
@@ -264,7 +272,9 @@ async function collectCandidates(theme: string, studentBook: BookOut, n: number)
   if (need > 0) {
     try {
       const raw = await llmComplete({ prompt: buildRecommendPrompt(theme, need), enableSearch: true, maxTokens: 800 })
-      const recommended = dedupeBooks(parseBookList(raw))
+      // 写入侧也要挡：模型偶尔无视「必须中文」这条，放进去就会污染书库、
+      // 之后被召回侧反复取到。挡在这里，脏数据既进不来也传不下去。
+      const recommended = dedupeBooks(parseBookList(raw)).filter((b) => looksChineseTitle(b.title))
       const verified: PickedBook[] = []
       for (const b of recommended) {
         let ok = false

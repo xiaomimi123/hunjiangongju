@@ -58,5 +58,6 @@ export {
   dedupeBooks,
   isSameBook,
   resolveBookCount,
+  looksChineseTitle,
 } from './booklist/bookPick'
 export type { PickedBook } from './booklist/bookPick'

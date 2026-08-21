@@ -3,8 +3,16 @@ import { runCmd, probeText } from '../runCmd'
 import path from 'path'
 import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
-import { speechSlotDurations } from '@mixcut/db'
+import { slotDurationsForSegments, openFlashWindowMs } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
+
+/** 配音超出槽位这个倍数才动手压；以下的零头交给画面自然吸收，不值得为它变速 */
+const PACE_TOLERANCE = 1.06
+/**
+ * 变速上限。1.25× 以内听感仍自然（豆包语速本就偏慢）；再快就开始有"赶话"感，
+ * 那时宁可让该段画面变长，也不把话说成机关枪——并记一条告警提示配额要重标定。
+ */
+const MAX_TEMPO = 1.25
 
 // 纯函数：从 GenerationTask.variables（Json）中取出运营在生成表单里选的克隆音色 voiceId。
 export function readVoiceId(variables: unknown): string | undefined {
@@ -44,6 +52,29 @@ async function padSilenceTo(audioAbs: string, targetMs: number): Promise<void> {
 }
 
 // 把多个音频切片按顺序无缝拼成一条 wav（concat filter 会重采样统一格式，容忍各片格式不一）。
+/**
+ * 保音高变速：把音频压到 targetMs（只压不拉）。
+ *
+ * 用 atempo 而不是改采样率——atempo 只动语速、**不动音高**。
+ * 原先这里的策略是「只补不压」，理由写的是「变速会把声音捏尖」；
+ * 那个理由对重采样成立，对 atempo 不成立，所以策略改掉了。
+ * 压回槽位是「复刻剪映工程」这个目标的直接要求：不压的话，
+ * 某一段配音超长就会把整条时间轴顶开（线上实测一段顶出 7 秒）。
+ *
+ * @returns 实际使用的变速倍数（1 表示没压）
+ */
+export async function compressTo(audioAbs: string, curMs: number, targetMs: number, maxFactor: number): Promise<number> {
+  const want = curMs / targetMs
+  if (!Number.isFinite(want) || want <= 1) return 1
+  const factor = Math.min(want, maxFactor)
+  const tmp = `${audioAbs}.tempo.wav`
+  const r = await runCmd('ffmpeg',
+    ['-y', '-i', audioAbs, '-af', `atempo=${factor.toFixed(4)}`, '-ar', '48000', '-ac', '1', tmp])
+  if (!r.ok) throw new Error(`配音变速失败: ${r.out.slice(-400)}`)
+  await fs.rename(tmp, audioAbs)
+  return factor
+}
+
 async function concatClips(clipPaths: string[], outAbs: string): Promise<void> {
   const inputs = clipPaths.flatMap((p) => ['-i', p])
   const filter = clipPaths.map((_p, i) => `[${i}:a]`).join('') + `concat=n=${clipPaths.length}:v=0:a=1[a]`
@@ -101,8 +132,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
   const tp = parseTemplateParams(
     (task?.framework?.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
   )
-  const flashTotalMs = (tp.flash.clipMs ?? []).reduce((a, b) => a + b, 0)
-  const openFlashMs = tp.mode === 'flash' && flashTotalMs > 0 ? tp.open.durationMs + flashTotalMs : 0
+  const openFlashMs = openFlashWindowMs(tp)
 
   // ── 正片各段补静音到草稿的分镜时长 ──
   //
@@ -115,13 +145,17 @@ export async function generateTts(genTaskId: string): Promise<void> {
   // **只补不压**：配音比目标长时不做变速。变速会改音高与语流，
   // 而「话说得比原片满一点」远比「声音被捏尖」可接受。超出多少记一条日志，
   // 长期超出说明字数配额需要重新标定，不该靠变速掩盖。
-  // ★ 必须与字数配额共用同一份槽位时长（speechSlotDurations）。
+  // ★ 必须与字数配额共用同一份槽位表（slotDurationsForSegments）。
   // 第一版这里直接取 `slotDurationsMs[i-1]`：配额按"滤掉纯画面段后"的列表分，
   // 补静音却按原始列表取——第 1 段拿到 781ms 的目标却被分了 27 个字（约 4.5 秒），
   // 补不了静音，那一段直接超出 3.7 秒。
-  // 第 0 段是开场+快闪窗口，不在正片槽位里；正片从第 1 段起对应下标 0。
-  const bodySlots = speechSlotDurations(tp.body.slotDurationsMs, Math.max(1, segments.length - 1))
-  const slotFor = (i: number): number | undefined => (i >= 1 ? bodySlots[i - 1] : undefined)
+  // 第二版改成共用 speechSlotDurations，但两侧传的 segCount 仍然不同
+  //（文案侧含开场白那一段、配音侧不含），配额表整体错位一格。
+  // 现在两侧都取同一份含第 0 格（开场+快闪）的完整槽位表。
+  const allSlots = slotDurationsForSegments(openFlashMs, tp.body.slotDurationsMs, segments.length)
+  // 草稿没给正片槽位时回退老行为：只有第 0 段按开场+快闪窗口对齐
+  const slotFor = (i: number): number | undefined =>
+    allSlots[i] ?? (i === 0 && openFlashMs > 0 ? openFlashMs : undefined)
 
   const clipPaths: string[] = []
   const bodyTimings: { seqNo: number; startMs: number; endMs: number }[] = []
@@ -146,19 +180,25 @@ export async function generateTts(genTaskId: string): Promise<void> {
     // 第 0 段补静音到草稿的开场+快闪长度（只补不截：旁白比草稿还长时按旁白走，
     // 截断会把话说到一半切掉）
     let durMs = speechMs
-    if (i === 0 && openFlashMs > speechMs) {
-      await padSilenceTo(clipPath, openFlashMs)
-      durMs = (await probeDurationMs(clipPath)) || openFlashMs
-      console.log(`[gen] generate-tts ${genTaskId}: 第 0 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿开场+快闪）`)
-    }
     const slotMs = slotFor(i)
     if (slotMs && slotMs > speechMs) {
       await padSilenceTo(clipPath, slotMs)
       durMs = (await probeDurationMs(clipPath)) || slotMs
-      console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿分镜 ${slotMs}ms）`)
-    } else if (slotMs && speechMs > slotMs * 1.06) {
-      // 只记不改：见上面「只补不压」。持续出现说明字数配额偏松，要回头调 deriveSlotCharBudgets
-      console.warn(`[gen] generate-tts ${genTaskId}: 第 ${i} 段配音 ${Math.round(speechMs)}ms 超出草稿分镜 ${slotMs}ms（+${Math.round((speechMs / slotMs - 1) * 100)}%），该段画面会相应变长`)
+      console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿槽位 ${slotMs}ms）`)
+    } else if (slotMs && speechMs > slotMs * PACE_TOLERANCE) {
+      // 超出容差 → 保音高压回槽位（见 compressTo）。压不到位的部分照旧让画面变长，
+      // 并记一条告警：持续出现说明字数配额偏松，要回头调语速常数。
+      const used = await compressTo(clipPath, speechMs, slotMs, MAX_TEMPO)
+      durMs = (await probeDurationMs(clipPath)) || speechMs / used
+      if (durMs < slotMs) {
+        // 变速后略短于槽位（atempo 的取整）→ 补静音精确落位
+        await padSilenceTo(clipPath, slotMs)
+        durMs = (await probeDurationMs(clipPath)) || slotMs
+      }
+      const over = Math.round((durMs / slotMs - 1) * 100)
+      const msg = `[gen] generate-tts ${genTaskId}: 第 ${i} 段配音 ${Math.round(speechMs)}ms 超草稿槽位 ${slotMs}ms，变速 ${used.toFixed(2)}× → ${Math.round(durMs)}ms`
+      if (over > 1) console.warn(`${msg}（仍超 +${over}%，已到变速上限 ${MAX_TEMPO}×，该段画面会相应变长）`)
+      else console.log(msg)
     }
     clipPaths.push(clipPath)
 

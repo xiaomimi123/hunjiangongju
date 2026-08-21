@@ -143,15 +143,51 @@ export function deriveSlotCharBudgets(
   totalChars: number,
 ): number[] {
   const n = Math.max(1, Math.floor(segCount) || 1)
-  const total = Math.max(n * MIN_CHARS_PER_SEG, Math.floor(totalChars) || 0)
   const weights = speechSlotDurations(slotDurationsMs, n)
-  // 没有可用的槽位时长 → 平均分，与加这个功能之前的行为一致
-  if (weights.length === 0) {
+  return charBudgetsFromWeights(weights.length ? weights : new Array(n).fill(1), totalChars)
+}
+
+/**
+ * 一条片子**全部**分镜槽位的目标时长，第 0 格是开场+快闪。
+ *
+ * ★ 这是文案字数配额与配音补静音**唯一**的槽位来源。
+ *
+ * 两侧共用是这个模块从一开始就写明的要求，但调用点上一直没做到：
+ * 文案侧传 segCount（含开场白那一段），配音侧传 segCount-1（开场段不在正片槽位里），
+ * 同一个函数被喂了不同的 n，产出的配额表整体错位一格。
+ * 客户样例里文案侧因此以为有 4 个正片槽位（实际 3 个），
+ * 各段配额从 [36,50,38] 变成 [28,28,39,29]。
+ *
+ * @param openFlashMs 开场+快闪窗口时长；<=0（classic 模式）时第 0 格取 MIN_SPEECH_SLOT_MS 兜底
+ * @param bodySlotDurationsMs 草稿正片段时长（含过短的纯画面段，由 speechSlotDurations 过滤）
+ * @param segCount 文案总段数（含开场白那一段）
+ * @returns 长度 = segCount 的槽位时长；草稿没有可用正片槽位时返回空数组（调用方维持原行为）
+ */
+export function slotDurationsForSegments(
+  openFlashMs: number,
+  bodySlotDurationsMs: number[] | undefined,
+  segCount: number,
+): number[] {
+  const n = Math.max(1, Math.floor(segCount) || 1)
+  if (n < 2) return []
+  const body = speechSlotDurations(bodySlotDurationsMs, n - 1)
+  if (body.length === 0) return []
+  const open = Number.isFinite(openFlashMs) && openFlashMs > 0 ? openFlashMs : MIN_SPEECH_SLOT_MS
+  return [open, ...body]
+}
+
+/**
+ * 按权重把总字数按比例分到各段（每段不低于 MIN_CHARS_PER_SEG）。
+ * 权重就是各槽位时长——**槽位多长就分多少字**。
+ */
+export function charBudgetsFromWeights(weights: number[], totalChars: number): number[] {
+  const n = Math.max(1, weights.length)
+  const total = Math.max(n * MIN_CHARS_PER_SEG, Math.floor(totalChars) || 0)
+  const sum = weights.reduce((a, b) => a + b, 0)
+  if (!Number.isFinite(sum) || sum <= 0) {
     const each = Math.floor(total / n)
     return new Array(n).fill(each)
   }
-  const sum = weights.reduce((a, b) => a + b, 0)
-
   // 先按比例分，再把因取整丢掉的字数补给最长的那一段
   const out = weights.map((w) => Math.max(MIN_CHARS_PER_SEG, Math.round((w / sum) * total)))
   const drift = total - out.reduce((a, b) => a + b, 0)

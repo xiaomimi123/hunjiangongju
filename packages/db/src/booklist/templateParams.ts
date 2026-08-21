@@ -244,3 +244,16 @@ export function flashTimeline(p: TemplateParams, seg0EndMs: number, bookCount: n
   }
   return { openEndMs, flashEndMs: seg0EndMs, perClipMs, count }
 }
+
+/**
+ * 开场 + 快闪窗口的总时长（ms），即第 0 段文案要占的那一格槽位。
+ *
+ * 文案配额侧与配音补静音侧都要用它，写在这里避免两边各算一遍算出不同的值
+ * ——那正是逐段配额错位一格的成因。
+ *
+ * 非 flash 模板、或草稿没给快闪卡时长时返回 0（调用方各自兜底）。
+ */
+export function openFlashWindowMs(p: TemplateParams): number {
+  const flashTotalMs = (p.flash.clipMs ?? []).reduce((a, b) => a + b, 0)
+  return p.mode === 'flash' && flashTotalMs > 0 ? p.open.durationMs + flashTotalMs : 0
+}

@@ -12,7 +12,10 @@ import {
   pickAngle,
   parseTemplateParams,
   fitToSegmentCount,
-  deriveSlotCharBudgets,
+  slotDurationsForSegments,
+  charBudgetsFromWeights,
+  rebalanceToSlotChars,
+  openFlashWindowMs,
 } from '@mixcut/db'
 import { splitScriptToSegments } from './splitScript'
 
@@ -477,14 +480,20 @@ export async function generateScript(genTaskId: string): Promise<void> {
   // 写超一点点不该被裁 —— 裁剪从尾部整行丢弃,丢掉的正是收尾句,
   // 听感上就是「话没说完就结束了」(线上实测: 105 字被裁到 89,收尾句没了)。
   const hardCap = readCharHardCap(fw.overlayTemplate, maxTotalChars) ?? maxTotalChars
-  // 逐段字数配额：按草稿各正片段的实测时长分。只给总数与平均值时，
+  // 仅 flash 模板会把第 0 段整段吃进开场快闪且不出字幕（indexHtml 正片字幕取 segs.slice(1)），
+  // 只有这种模板需要一句与开场标题呼应的旁白；classic 模板第 0 段照常出字幕，不加开场白。
+  const tp = parseTemplateParams((fw.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
+  const openTitleText = tp.mode === 'flash' ? tp.open.titleText : undefined
+
+  // 逐段字数配额：按草稿各分镜的实测时长分。只给总数与平均值时，
   // LLM 会把字堆在某一段（实测成片正片是 3.6/4.2/9.4 秒，草稿是 5.7/8.1/6.1）。
-  const slotDurations = parseTemplateParams(
-    (fw.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
-  ).body.slotDurationsMs
-  const slotChars = slotDurations?.length
-    ? deriveSlotCharBudgets(slotDurations, segCount, maxTotalChars)
-    : undefined
+  //
+  // ★ 槽位表必须与 generateTts 用的是同一份（slotDurationsForSegments）。
+  // 此前这里传 segCount、配音侧传 segCount-1，同一个函数被喂了不同的 n，
+  // 配额表整体错位一格：文案侧以为有 4 个正片槽位，实际只有 3 个，
+  // 第 0 段其实是开场白（占开场+快闪窗口，不在正片槽位里）。
+  const allSlots = slotDurationsForSegments(openFlashWindowMs(tp), tp.body.slotDurationsMs, segCount)
+  const slotChars = allSlots.length ? charBudgetsFromWeights(allSlots, maxTotalChars) : undefined
 
   const resolved = resolveScriptMode(task.variables)
   const mode = resolved.mode
@@ -499,11 +508,6 @@ export async function generateScript(genTaskId: string): Promise<void> {
   const perGenBookTitle = readBookTitle(task.variables)
   // 单本模式：仅 auto 文案模式生效。manual/imitate 是用户自控文案，themeBook 不得劫持它们。
   const themeBook = scriptMode === 'auto' ? readThemeBook(task.variables) : undefined
-
-  // 仅 flash 模板会把第 0 段整段吃进开场快闪且不出字幕（indexHtml 正片字幕取 segs.slice(1)），
-  // 只有这种模板需要一句与开场标题呼应的旁白；classic 模板第 0 段照常出字幕，不加开场白。
-  const tp = parseTemplateParams((fw.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
-  const openTitleText = tp.mode === 'flash' ? tp.open.titleText : undefined
 
   let clean: string[] | null = null
   let markedIdxs: number[] | null = null
@@ -594,6 +598,21 @@ export async function generateScript(genTaskId: string): Promise<void> {
     const before = lines.length
     lines = fitToSegmentCount(lines, slotCount)
     console.warn(`[gen] generate-script ${genTaskId}: 文案 ${before} 段 → 规整为 ${lines.length} 段（图片槽位数 ${slotCount}）`)
+  }
+
+  // ★ 逐段字数配额是给 LLM 的**建议**，不是约束；fitToSegmentCount 也只保证段数不保证分量。
+  // 线上实测：117 字的文案里最后一段被塞了约一半，配音 13464ms 对着草稿 6067ms 的槽位（+122%），
+  // 成片 24.6→31.3 秒。这里按槽位比例做一次确定性重排兜底（明显失衡才介入）。
+  //
+  // 开场白不参与：它与第二段的分工是硬约定（开场白不得含书名、书名留到第二段开头），
+  // 句子跨过这条边界搬运会直接破坏它。
+  if (slotChars && openTitleText && lines.length === slotChars.length && lines.length >= 3) {
+    const body = rebalanceToSlotChars(lines.slice(1), slotChars.slice(1))
+    if (body.some((t, i) => t !== lines[i + 1])) {
+      const cnt = (arr: string[]) => arr.map((t) => Array.from(t).length).join('/')
+      console.warn(`[gen] generate-script ${genTaskId}: 各段字数偏离草稿槽位，按比例重排 ${cnt(lines.slice(1))} → ${cnt(body)}（目标 ${slotChars.slice(1).join('/')}）`)
+      lines = [lines[0], ...body]
+    }
   }
 
   // 单本模式：所有正文段统一挂主题书，不走位置均分、也不走书序号标记。

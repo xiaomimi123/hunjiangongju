@@ -13,7 +13,7 @@
 // 但不能消除损失。调用方应记一条告警说明发生了规整，不要静默。
 
 /** 中文断句标点，按「切开后两半都还像句子」的优先级排序 */
-const BREAK_CHARS = ['，', '。', '；', '！', '？', '、', '：']
+export const BREAK_CHARS = ['，', '。', '；', '！', '？', '、', '：']
 
 function splitAtBestPoint(text: string): [string, string] {
   const chars = Array.from(text)

@@ -18,7 +18,7 @@ export * from './assets/signedUrl'
 export {
   DEFAULT_PARAMS,
   parseTemplateParams,
-  flashTimeline,
+  flashTimeline, openFlashWindowMs,
 } from './booklist/templateParams'
 export type { TemplateParams, TemplateMode, FlashTimeline, GradeParams } from './booklist/templateParams'
 export { parseJianyingDraft } from './booklist/parseJianyingDraft'
@@ -30,7 +30,8 @@ export type { DraftStructure } from './booklist/draftStructure'
 export { extractDraftGrade } from './booklist/draftGrade'
 export { extractDraftMoves } from './booklist/draftMotion'
 export { fitToSegmentCount } from './booklist/fitSegments'
-export { deriveDraftCharBudget, deriveDraftSpeechRate, deriveSlotCharBudgets, speechSlotDurations } from './booklist/draftCharBudget'
+export { deriveDraftCharBudget, deriveDraftSpeechRate, deriveSlotCharBudgets, speechSlotDurations, slotDurationsForSegments, charBudgetsFromWeights } from './booklist/draftCharBudget'
+export { rebalanceToSlotChars, splitSentences } from './booklist/rebalanceSlots'
 export { readCharHardCap } from './booklist/charHardCap'
 export { readImageSlots, slotAt, readOpenImage } from './booklist/imageSlots'
 export { readFrameworkVoices, allowVoiceForFramework } from './booklist/frameworkVoices'

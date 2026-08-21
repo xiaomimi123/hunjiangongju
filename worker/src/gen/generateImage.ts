@@ -4,7 +4,7 @@ import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, read
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
-import { pickAssetsForSegments, readAssetSource } from './stockAssets'
+import { pickAssetsForSegments, readAssetSource, poolForFolder, resolveSlotFolders } from './stockAssets'
 import { pickArtScenes, buildFreeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
 import { makeThumb } from '../thumb'
 
@@ -60,17 +60,38 @@ export async function generateImage(genTaskId: string): Promise<void> {
 
   // 配图来源：素材库优先时，按分镜顺序分配素材库图片，够用的分镜跳过 AI 生图；不够的分镜（null）回退 AI。
   const { source: assetSource, folder: assetFolder } = readAssetSource(task.variables)
-  // 有逐槽配置时，只要任一槽位要素材库就得把库读出来（不能再依赖全局 assetSource）
-  const anySlotLibrary = (slotCfg?.slots ?? []).some((x: { source: string }) => x.source === 'library')
-  const libraryAssets = assetSource === 'library' || anySlotLibrary
-    ? await prisma.stockAsset.findMany({
-        where: { kind: 'image', ...(assetFolder ? { folder: assetFolder } : {}) },
-        orderBy: { createdAt: 'asc' },
-      })
+  // 逐槽位决定「这一张从哪个文件夹抽」：槽位自己的 folder 优先，其次是任务上的全局 folder。
+  // 之前 slot.folder 只被解析、从未被使用 —— 后台能填、填了没用。
+  const slotFolders = resolveSlotFolders(
+    segments.length,
+    (i) => slotAt(slotCfg, i)?.source,
+    (i) => slotAt(slotCfg, i)?.folder,
+    assetSource,
+    assetFolder,
+  )
+  // 不按文件夹过滤地一次读全库，再在内存里分池：文件夹过滤有"留空=全库"这一档，
+  // 用 SQL 表达会绕进 NULL 三值逻辑；素材库是每任务读一次的小表，放内存更清楚。
+  const libraryAssets = slotFolders.some((f) => f !== null)
+    ? await prisma.stockAsset.findMany({ where: { kind: 'image' }, orderBy: { createdAt: 'asc' } })
     : []
-  // 传 genTaskId 作为随机种子：同任务可复现、不同任务不撞图。批量场景下这是必需的——
-  // 不传的话每条片子都取素材库前几张，一天几千条全长一个样。
-  const assignedAssets = pickAssetsForSegments(libraryAssets, segments.length, genTaskId)
+  // 按有效文件夹分组抽取：同组内不重复；不同组各抽各的池子。
+  // 种子带上文件夹名，否则两个不同文件夹会抽到相同下标、看起来像"刻意配对"。
+  const assignedAssets: (typeof libraryAssets[number] | null)[] = new Array(segments.length).fill(null)
+  const byFolder = new Map<string, number[]>()
+  slotFolders.forEach((f, i) => {
+    if (f === null) return
+    byFolder.set(f, [...(byFolder.get(f) ?? []), i])
+  })
+  for (const [folder, idxs] of byFolder) {
+    const pool = poolForFolder(libraryAssets, folder || undefined)
+    if (pool.length === 0) {
+      console.warn(`[gen] generate-image ${genTaskId}: 素材文件夹「${folder || '(全库)'}」没有可用图片，这些槽位回退 AI 生图`)
+    }
+    // 传 genTaskId 作为随机种子：同任务可复现、不同任务不撞图。批量场景下这是必需的——
+    // 不传的话每条片子都取素材库前几张，一天几千条全长一个样。
+    const picked = pickAssetsForSegments(pool, idxs.length, `${genTaskId}:${folder}`)
+    idxs.forEach((segIdx, k) => { assignedAssets[segIdx] = picked[k] })
+  }
 
   // 配图与文案完全脱钩：主体只来自 genTaskId 派生的场景方向，不再由 LLM 从口播提炼画面
   // （那样必然逐句配插画：说碗画碗、说台阶画台阶）。同任务重跑一致，不同任务必然不同。
@@ -78,10 +99,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
 
   for (const [i, seg] of segments.entries()) {
     const slot = slotAt(slotCfg, i)
-    // 槽位显式指定 ai → 即使全局是素材库也走 AI；显式指定 library → 即使全局是 AI 也取库。
-    const asset = slot?.source === 'ai' ? null : slot?.source === 'library'
-      ? (assignedAssets[i] ?? null)
-      : assignedAssets[i]
+    // 走不走素材库已经在 resolveSlotFolders 里定了（槽位显式来源优先于全局来源）；
+    // 池子空时 assignedAssets[i] 为 null，该槽位自然回退 AI 生图。
+    const asset = assignedAssets[i]
     let imageUrl: string
 
     if (asset) {

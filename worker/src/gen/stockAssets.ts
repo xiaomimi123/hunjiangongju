@@ -1,4 +1,4 @@
-import { pickSubset } from '@mixcut/db'
+import { pickSubset, COVER_FOLDER_SUFFIX } from '@mixcut/db'
 // 素材库接入的纯函数：按序分配素材给分镜、解析生成变量里的「配图来源」。
 
 // 按序分配：assets[i] 给第 i 个分镜；分镜数超过素材数的部分为 null（null → 回退 AI 生图）；
@@ -40,4 +40,49 @@ export function readAssetSource(variables: unknown): { source: 'ai' | 'library';
   if (v.assetSource !== 'library') return { source: 'ai' }
   const folder = typeof v.assetFolder === 'string' ? v.assetFolder.trim() : ''
   return folder ? { source: 'library', folder } : { source: 'library' }
+}
+
+/**
+ * 书封文件夹判定。剪映导入时快闪书封被放进 `<工程名>·书封`（COVER_FOLDER_SUFFIX）。
+ *
+ * 为什么要在抽取这一层再挡一道：分文件夹入库只有在**按文件夹过滤**时才有效。
+ * 线上实测框架的素材文件夹是空的，查询退化成 `where kind='image'` —— 抽的是全库，
+ * 挪进书封文件夹的那 9 张照样被正片抽中，等于分文件夹白做了。
+ * 书封不该出现在正片里是条不变量，不能依赖运营有没有填对文件夹。
+ */
+export function isCoverFolder(folder: string | null | undefined): boolean {
+  return typeof folder === 'string' && folder.endsWith(COVER_FOLDER_SUFFIX)
+}
+
+/**
+ * 取某个槽位可用的素材池。
+ * @param folder 指定文件夹则精确匹配；留空表示「全库」，此时排除书封文件夹。
+ */
+export function poolForFolder<T extends { folder: string | null }>(assets: T[], folder?: string): T[] {
+  const want = (folder ?? '').trim()
+  if (want) return assets.filter((a) => a.folder === want)
+  return assets.filter((a) => !isCoverFolder(a.folder))
+}
+
+/**
+ * 逐槽位决定「这一张从哪个素材文件夹抽」。
+ *
+ * 槽位自己的 folder 优先，其次是生成任务上的全局 folder。
+ * 之前 readImageSlots 解析了 slot.folder，但 generateImage 从没读过它 ——
+ * 后台能填、填了没用，属于静默失效。
+ *
+ * @returns 每个分镜的有效文件夹；该分镜不走素材库时为 null
+ */
+export function resolveSlotFolders(
+  segCount: number,
+  slotSourceAt: (i: number) => 'ai' | 'library' | undefined,
+  slotFolderAt: (i: number) => string | undefined,
+  globalSource: 'ai' | 'library',
+  globalFolder?: string,
+): (string | null)[] {
+  return Array.from({ length: segCount }, (_, i) => {
+    const src = slotSourceAt(i) ?? globalSource
+    if (src !== 'library') return null
+    return (slotFolderAt(i) ?? globalFolder ?? '').trim()
+  })
 }

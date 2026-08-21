@@ -112,6 +112,21 @@ export async function generateTts(genTaskId: string): Promise<void> {
   const flashTotalMs = (tp.flash.clipMs ?? []).reduce((a, b) => a + b, 0)
   const openFlashMs = tp.mode === 'flash' && flashTotalMs > 0 ? tp.open.durationMs + flashTotalMs : 0
 
+  // ── 正片各段补静音到草稿的分镜时长 ──
+  //
+  // 段时长原先完全等于该段配音的长度，于是节奏由文案长短决定：实测成片正片三段是
+  // 3.6/4.2/9.4 秒（最后一张图挂了 9.4 秒），而草稿是 5.7/8.1/6.1。
+  //
+  // 现在文案已按草稿各段时长分配字数（deriveSlotCharBudgets），配音长度本就接近目标；
+  // 这里再补静音把它对齐到目标，画面切点就落在草稿的位置上。
+  //
+  // **只补不压**：配音比目标长时不做变速。变速会改音高与语流，
+  // 而「话说得比原片满一点」远比「声音被捏尖」可接受。超出多少记一条日志，
+  // 长期超出说明字数配额需要重新标定，不该靠变速掩盖。
+  const bodySlots = tp.body.slotDurationsMs ?? []
+  // 第 0 段是开场+快闪窗口，不在正片槽位里；正片从第 1 段起对应 bodySlots[0]
+  const slotFor = (i: number): number | undefined => (i >= 1 ? bodySlots[i - 1] : undefined)
+
   const clipPaths: string[] = []
   const bodyTimings: { seqNo: number; startMs: number; endMs: number }[] = []
   let cursorMs = 0
@@ -139,6 +154,15 @@ export async function generateTts(genTaskId: string): Promise<void> {
       padSilenceTo(clipPath, openFlashMs)
       durMs = probeDurationMs(clipPath) || openFlashMs
       console.log(`[gen] generate-tts ${genTaskId}: 第 0 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿开场+快闪）`)
+    }
+    const slotMs = slotFor(i)
+    if (slotMs && slotMs > speechMs) {
+      padSilenceTo(clipPath, slotMs)
+      durMs = probeDurationMs(clipPath) || slotMs
+      console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿分镜 ${slotMs}ms）`)
+    } else if (slotMs && speechMs > slotMs * 1.06) {
+      // 只记不改：见上面「只补不压」。持续出现说明字数配额偏松，要回头调 deriveSlotCharBudgets
+      console.warn(`[gen] generate-tts ${genTaskId}: 第 ${i} 段配音 ${Math.round(speechMs)}ms 超出草稿分镜 ${slotMs}ms（+${Math.round((speechMs / slotMs - 1) * 100)}%），该段画面会相应变长`)
     }
     clipPaths.push(clipPath)
 

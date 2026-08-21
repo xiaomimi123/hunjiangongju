@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveDraftSpeechRate, deriveDraftCharBudget, MAX_VIDEO_SEC } from './draftCharBudget'
+import { deriveDraftSpeechRate, deriveDraftCharBudget, MAX_VIDEO_SEC , deriveSlotCharBudgets } from './draftCharBudget'
 import { CHARS_PER_SEC } from '../pipeline'
 
 describe('deriveDraftSpeechRate', () => {
@@ -65,5 +65,62 @@ describe('deriveDraftCharBudget —— 按我们自己的语速算', () => {
     expect(deriveDraftCharBudget(0, 4, 1000)).toBeNull()
     expect(deriveDraftCharBudget(-1, 4, 1000)).toBeNull()
     expect(deriveDraftCharBudget(NaN, 4, 1000)).toBeNull()
+  })
+})
+
+// ★ 字数预算原先只有**全局**一个总数，LLM 想怎么分就怎么分：
+// 实测成片正片三段是 3.6s / 4.2s / 9.4s（最后一张图挂了 9.4 秒），而草稿是 5.7 / 8.1 / 6.1。
+// 段时长由 TTS 时长累加决定、TTS 时长由字数决定，所以要治时长得先治逐段字数。
+describe('deriveSlotCharBudgets —— 逐段字数按草稿分镜时长分配', () => {
+  // 客户样例正片四段：781 / 5704 / 8065 / 6068
+  const SLOTS = [781, 5704, 8065, 6068]
+
+  // ★ 这条第一版是**假绿**：断言写成 `Math.max(...b) === b[1]`（三个值全相等时也成立）
+  // 加 `toBeCloseTo(ratio, 0)`（容差 ±0.5，把 1.0 也放过了），
+  // 于是把实现改回平均分照样通过。改成直接比对「字数占比 vs 时长占比」。
+  it('按时长比例分配，长镜头拿到更多字', () => {
+    const b = deriveSlotCharBudgets(SLOTS, 3, 123)
+    expect(b).toHaveLength(3)
+    expect(b.reduce((a, c) => a + c, 0)).toBe(123)
+
+    const durs = [5704, 8065, 6068] // 781 那段过短，不参与分配
+    const durSum = durs.reduce((a, c) => a + c, 0)
+    const charSum = b.reduce((a, c) => a + c, 0)
+    b.forEach((chars, i) => {
+      const charShare = chars / charSum
+      const durShare = durs[i] / durSum
+      expect(Math.abs(charShare - durShare), `第 ${i} 段字数占比 ${charShare.toFixed(3)} 与时长占比 ${durShare.toFixed(3)} 相差过大`)
+        .toBeLessThan(0.02)
+    })
+    // 长镜头必须**严格**多于两侧，不能只是"不小于"
+    expect(b[1]).toBeGreaterThan(b[0])
+    expect(b[1]).toBeGreaterThan(b[2])
+  })
+
+  // 781ms 装不下一句话：草稿里那一段本来就没有字幕（字幕 4830ms 才开始、正片 3985ms 起），
+  // 是快闪之后的换气镜头。硬塞 4 个字念出来是急促的半句，比留白更糟。
+  it('过短的纯画面段不参与分配', () => {
+    const b = deriveSlotCharBudgets(SLOTS, 3, 123)
+    const withoutShort = deriveSlotCharBudgets([5704, 8065, 6068], 3, 123)
+    expect(b).toEqual(withoutShort)
+  })
+
+  it('段数与草稿槽位数不等时按比例重采样，总数仍守恒', () => {
+    for (const n of [1, 2, 4, 5, 8]) {
+      const b = deriveSlotCharBudgets(SLOTS, n, 200)
+      expect(b).toHaveLength(n)
+      expect(b.reduce((a, c) => a + c, 0)).toBe(200)
+    }
+  })
+
+  // 老框架没有 slotDurationsMs：必须退回平均分，不能因此炸掉或给出空数组
+  it('没有槽位时长时平均分（老框架零回归）', () => {
+    expect(deriveSlotCharBudgets([], 3, 120)).toEqual([40, 40, 40])
+    expect(deriveSlotCharBudgets([0, -5, NaN], 2, 100)).toEqual([50, 50])
+  })
+
+  it('每段不低于下限，避免算出「每段 3 个字」', () => {
+    const b = deriveSlotCharBudgets(SLOTS, 6, 20)
+    expect(Math.min(...b)).toBeGreaterThanOrEqual(6)
   })
 })

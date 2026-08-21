@@ -12,6 +12,7 @@ import {
   pickAngle,
   parseTemplateParams,
   fitToSegmentCount,
+  deriveSlotCharBudgets,
 } from '@mixcut/db'
 import { splitScriptToSegments } from './splitScript'
 
@@ -81,6 +82,36 @@ function styleRules(hasOpenTitle: boolean): string {
   ].join('\n')
 }
 
+/**
+ * 提示词要用到的框架约束。
+ *
+ * slotChars：**逐段**字数配额。原先只给一个总数 + 平均值，而平均是均匀的，
+ * 草稿的正片段却是不均的（实测 5.7/8.1/6.1 秒 → 28.7%/40.6%/30.6%）。
+ * 段时长由 TTS 时长累加决定、TTS 时长由字数决定，所以只给平均值，
+ * 成片节奏就永远回不到草稿（实测出来是 3.6/4.2/9.4 秒）。
+ */
+export interface ScriptFrameworkArgs {
+  frameworkText: string
+  segCount: number
+  maxLines: number
+  maxTotalChars: number
+  slotChars?: number[]
+}
+
+/**
+ * 字数提示：有逐段配额就逐段给，否则回退平均值（老框架零回归）。
+ * 逐段配额来自草稿各正片段的实测时长，见 ScriptFrameworkArgs.slotChars。
+ */
+function charsHint(f: ScriptFrameworkArgs, fallback = ''): string {
+  const per = f.slotChars
+  if (Array.isArray(per) && per.length === f.segCount && per.length > 0) {
+    return `（各段目标字数依次为 ${per.join('、')}，这是按原片各分镜时长定的，务必逐段贴近，不要把字堆在某一段）`
+  }
+  // fallback 必须是**该处提示词改动前的原文**：仿写等提示词有逐字节回归红线守着，
+  // 没有逐段配额时多出一句「平均每段约 X 字」也算破坏契约。
+  return fallback
+}
+
 export function buildScriptPrompt(args: {
   mode: 'books' | 'subject'
   subject: string
@@ -107,7 +138,7 @@ export function buildScriptPrompt(args: {
       openLine,
       '按书单顺序为每本书逐句撰写书评文案；语言需贴合书评人口吻，突出该书的核心价值与阅读理由。',
       '除行首的「书序号|」外，只输出文案正文，不要编号、不要额外标题、不要任何解释说明。',
-      `总字数不超过 ${maxTotalChars} 字（不含行首书序号），总行数不超过 ${maxLines} 行，请依书目数量合理分配每本书的篇幅。`,
+      `总字数不超过 ${maxTotalChars} 字（不含行首书序号）${charsHint(framework)}，总行数不超过 ${maxLines} 行，请依书目数量合理分配每本书的篇幅。`,
       '严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
       ...(angle ? [`本条整体采用「${angle}」的切入角度展开，与其它角度明显区分。`] : []),
     ]
@@ -131,7 +162,7 @@ export function buildScriptPrompt(args: {
     `分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
     ...(openTitle ? [`第一段必须是开场白，以「${openTitle}」开头，用一句话点出这条视频要解决的问题。`] : []),
     '只输出文案正文，不要编号、不要标题、不要选书清单、不要任何解释说明。',
-    `总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+    `总字数不超过 ${maxTotalChars} 字${charsHint(framework)}，总行数不超过 ${maxLines} 行。`,
     '严禁照搬原文或框架示例，必须围绕选题原创改写。',
   ]
   return [
@@ -282,7 +313,7 @@ export function buildTranslatePrompt(zh: string): string {
 export function buildImitatePrompt(args: {
   reference: string
   subject: string
-  framework: { frameworkText: string; segCount: number; maxLines: number; maxTotalChars: number }
+  framework: ScriptFrameworkArgs
   openTitleText?: string
 }): string {
   const { reference, subject, framework, openTitleText } = args
@@ -294,7 +325,7 @@ export function buildImitatePrompt(args: {
     ...(openTitle ? [`第一段必须是开场白，以「${openTitle}」开头，用一句话点出这条视频要解决的问题。`] : []),
     '只输出文案正文，不要编号、不要标题、不要任何解释说明。',
     '必须原创改写，严禁照抄参考文案或框架示例。',
-    `总字数不超过 ${maxTotalChars} 字，总行数不超过 ${maxLines} 行。`,
+    `总字数不超过 ${maxTotalChars} 字${charsHint(framework)}，总行数不超过 ${maxLines} 行。`,
   ]
   return [
     '你是一名书单号短视频文案写手。请【仿照】下面这段【参考文案】的语气、句式、情感浓度与第二人称口吻，就同一主题原创改写一条新文案。',
@@ -337,7 +368,7 @@ export function buildSingleBookPrompt(args: {
     '只输出文案正文，不要编号、不要标题、不要任何解释说明。',
     // 字数上限来自「正片时长 × 实测语速」，是硬约束：超了配音就塞不进画面。
     // 平均到每段的字数一并给出——只给总数时模型容易把字都堆在最后一段。
-    `总字数**严格不超过 ${maxTotalChars} 字**（平均每段约 ${Math.floor(maxTotalChars / Math.max(1, segCount))} 字），总行数不超过 ${maxLines} 行。宁可少写，不可超。`,
+    `总字数**严格不超过 ${maxTotalChars} 字**${charsHint(framework, `（平均每段约 ${Math.floor(maxTotalChars / Math.max(1, segCount))} 字）`)}，总行数不超过 ${maxLines} 行。宁可少写，不可超。`,
     '严禁照搬书籍简介原文，必须围绕给定要点原创改写。',
     // 不禁止的话模型会去复述原著：人物、桥段、结局一路讲下来，既像剧透又填满字数。
     // 书单号要的是「这本书打中了我哪里」，不是「这本书讲了什么故事」。
@@ -430,6 +461,14 @@ export async function generateScript(genTaskId: string): Promise<void> {
   // 写超一点点不该被裁 —— 裁剪从尾部整行丢弃,丢掉的正是收尾句,
   // 听感上就是「话没说完就结束了」(线上实测: 105 字被裁到 89,收尾句没了)。
   const hardCap = readCharHardCap(fw.overlayTemplate, maxTotalChars) ?? maxTotalChars
+  // 逐段字数配额：按草稿各正片段的实测时长分。只给总数与平均值时，
+  // LLM 会把字堆在某一段（实测成片正片是 3.6/4.2/9.4 秒，草稿是 5.7/8.1/6.1）。
+  const slotDurations = parseTemplateParams(
+    (fw.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
+  ).body.slotDurationsMs
+  const slotChars = slotDurations?.length
+    ? deriveSlotCharBudgets(slotDurations, segCount, maxTotalChars)
+    : undefined
 
   const resolved = resolveScriptMode(task.variables)
   const mode = resolved.mode
@@ -465,10 +504,10 @@ export async function generateScript(genTaskId: string): Promise<void> {
     // imitate: 用参考仿写；auto: 现状。二者复用现有 validate/重试/兜底循环。
     const angle = pickAngle(genTaskId)
     const basePrompt = scriptMode === 'imitate'
-      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, openTitleText })
+      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars, ...(slotChars ? { slotChars } : {}) }, openTitleText })
       : themeBook
-        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, angle, openTitleText })
-        : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars }, variablesText, angle, openTitleText })
+        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars, ...(slotChars ? { slotChars } : {}) }, angle, openTitleText })
+        : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars, ...(slotChars ? { slotChars } : {}) }, variablesText, angle, openTitleText })
 
     let prompt = basePrompt
     let lastErrors: string[] = []

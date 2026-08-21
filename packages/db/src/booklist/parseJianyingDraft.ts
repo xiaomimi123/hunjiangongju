@@ -786,6 +786,10 @@ export function parseJianyingDraft(draft: unknown): { params: TemplateParams; me
     },
     body: {
       subtitleFontFamily, subtitleColor, subtitlePosY, kenBurns,
+      // 各正片段时长：段时长的骨架。见 templateParams.body.slotDurationsMs
+      ...(structure.segments.some((sg) => sg.role === 'body')
+        ? { slotDurationsMs: structure.segments.filter((sg) => sg.role === 'body').map((sg) => sg.durationMs) }
+        : {}),
       ...(structure.bodyScale !== 1 ? { photoScale: structure.bodyScale } : {}),
       ...(entrance ? { subtitleEntrance: entrance } : {}),
     },

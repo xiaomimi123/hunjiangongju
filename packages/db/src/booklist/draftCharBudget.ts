@@ -91,3 +91,59 @@ export function deriveDraftCharBudget(
   const maxLines = Math.max(seg, Math.ceil(hardCapChars / 12))
   return { maxLines, maxTotalChars, hardCapChars }
 }
+
+/**
+ * 时长过短、装不下一句话的正片段，视为**纯画面停顿**，不分配文案。
+ *
+ * 客户样例里正片第一段只有 781ms，字幕从 4830ms 才开始（正片 3985ms 起）——
+ * 那是快闪之后的一个换气镜头，原作者本来就没在那里说话。
+ * 按比例硬塞给它 4 个字，念出来是急促的半句，比留白更糟。
+ */
+const MIN_SPEECH_SLOT_MS = 1200
+
+/**
+ * 按草稿各正片段的时长，把总字数配额分到每一段。
+ *
+ * 为什么需要：字数预算原先只有**全局**一个总数，LLM 想怎么分就怎么分。
+ * 实测成片正片三段是 3.6s / 4.2s / 9.4s——最后一张图挂了 9.4 秒，
+ * 而草稿是 5.7 / 8.1 / 6.1。段时长是 TTS 时长累加出来的，
+ * 而 TTS 时长由每段字数决定，所以要治时长得先治逐段字数。
+ *
+ * @param slotDurationsMs 草稿各正片段时长（含过短的纯画面段）
+ * @param segCount 我们实际要生成的文案段数（未必等于草稿段数）
+ * @param totalChars 总字数配额（deriveDraftCharBudget 的 maxTotalChars）
+ * @returns 每段的目标字数；段数对不上时按时长比例重采样
+ */
+export function deriveSlotCharBudgets(
+  slotDurationsMs: number[],
+  segCount: number,
+  totalChars: number,
+): number[] {
+  const n = Math.max(1, Math.floor(segCount) || 1)
+  const total = Math.max(n * MIN_CHARS_PER_SEG, Math.floor(totalChars) || 0)
+  const valid = (Array.isArray(slotDurationsMs) ? slotDurationsMs : [])
+    .filter((d) => typeof d === 'number' && Number.isFinite(d) && d >= MIN_SPEECH_SLOT_MS)
+  // 没有可用的槽位时长 → 平均分，与加这个功能之前的行为一致
+  if (valid.length === 0) {
+    const each = Math.floor(total / n)
+    return new Array(n).fill(each)
+  }
+
+  // 段数与草稿槽位数不等时按比例重采样：第 i 段取草稿第 round(i*len/n) 个槽位的时长。
+  // 不做插值——插出来的时长没有对应的画面，还不如落在某个真实槽位上。
+  const weights: number[] = []
+  for (let i = 0; i < n; i++) {
+    weights.push(valid[Math.min(valid.length - 1, Math.floor((i * valid.length) / n))])
+  }
+  const sum = weights.reduce((a, b) => a + b, 0)
+
+  // 先按比例分，再把因取整丢掉的字数补给最长的那一段
+  const out = weights.map((w) => Math.max(MIN_CHARS_PER_SEG, Math.round((w / sum) * total)))
+  const drift = total - out.reduce((a, b) => a + b, 0)
+  if (drift !== 0) {
+    let longest = 0
+    for (let i = 1; i < out.length; i++) if (weights[i] > weights[longest]) longest = i
+    out[longest] = Math.max(MIN_CHARS_PER_SEG, out[longest] + drift)
+  }
+  return out
+}

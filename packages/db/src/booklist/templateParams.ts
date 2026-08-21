@@ -28,7 +28,11 @@ export interface TemplateParams {
     enterBodyHardCut?: boolean
     bodyCycle?: { renderType: 'crossfade' | 'wipe' | 'shard' | 'glide-push' | 'blur-dissolve'; durationMs: number }[]
   }
-  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string }
+  // slotDurationsMs：草稿各正片段的实测时长。
+  // 段时长原先完全由 TTS 时长累加决定，而 TTS 时长由每段字数决定，字数预算又只有一个全局总数
+  // ——LLM 想怎么分就怎么分。实测成片正片三段是 3.6/4.2/9.4 秒（最后一张图挂了 9.4 秒），
+  // 草稿是 5.7/8.1/6.1。有了逐段时长才能按比例分配字数、进而把节奏拉回草稿。
+  body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string; slotDurationsMs?: number[] }
   audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
   grade?: GradeParams
   // keyframes：从草稿 common_keyframes 提取的**实测**运镜数值（阶段1只含缩放）。
@@ -145,6 +149,13 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       kenBurns: body.kenBurns === 'off' ? 'off' : 'subtle',
       ...(typeof body.photoScale === 'number' && Number.isFinite(body.photoScale) ? { photoScale: body.photoScale } : {}),
       ...(typeof body.subtitleEntrance === 'string' && body.subtitleEntrance ? { subtitleEntrance: body.subtitleEntrance } : {}),
+      ...(Array.isArray(body.slotDurationsMs)
+        ? {
+            slotDurationsMs: (body.slotDurationsMs as unknown[]).filter(
+              (x): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0,
+            ),
+          }
+        : {}),
     },
     audio: {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),

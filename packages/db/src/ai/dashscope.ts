@@ -24,6 +24,45 @@ export function dashVoiceEnrollEndpoint(baseUrl: string): string {
   return `${origin}/api/v1/services/audio/tts/customization`
 }
 
+/**
+ * OpenAI 兼容模式的 base（`.../compatible-mode/v1`）。
+ *
+ * 用户填的 base 有两种形态：MAAS 专属端点已经带 `/compatible-mode/v1`，
+ * 而 `https://dashscope.aliyuncs.com` 是裸域名。列模型走的是兼容模式的 `/models`，
+ * 两种都要能拼对。
+ */
+export function dashCompatBase(baseUrl: string): string {
+  const trimmed = (baseUrl || '').replace(/\/+$/, '')
+  if (/\/compatible-mode\/v\d+$/.test(trimmed)) return trimmed
+  let origin = 'https://dashscope.aliyuncs.com'
+  try { origin = new URL(trimmed).origin } catch { /* 用默认 */ }
+  return `${origin}/compatible-mode/v1`
+}
+
+/**
+ * 列出该端点可用的模型 id。
+ *
+ * 换模型不该靠猜名字：「Model not exist」既可能是名字写错、也可能是这个端点
+ * 根本不服务该模型（MAAS 专属端点只服务你部署上去的那几个）。列一遍就不用猜了。
+ */
+export async function dashListModels(baseUrl: string, apiKey: string, timeoutMs = 20_000): Promise<string[]> {
+  const url = `${dashCompatBase(baseUrl)}/models`
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` }, signal: ctrl.signal })
+    const text = await res.text().catch(() => '')
+    if (!res.ok) throw new Error(`列模型失败 ${res.status}（${url}）: ${text.slice(0, 200)}`)
+    const json = JSON.parse(text) as { data?: { id?: unknown }[] }
+    return (json.data ?? [])
+      .map((m) => m?.id)
+      .filter((id): id is string => typeof id === 'string' && !!id)
+      .sort()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // 下载 DashScope 返回的图片/音频 URL 为 Buffer（带超时，防挂起）
 export async function fetchUrlToBuffer(url: string, timeoutMs = 60_000): Promise<Buffer<ArrayBuffer>> {
   const ctrl = new AbortController()
@@ -65,6 +104,13 @@ export async function dashPost(
     clearTimeout(timer)
   }
   const text = await res.text().catch(() => '')
-  if (!res.ok) throw new Error(`DashScope 请求失败 ${res.status}: ${text.slice(0, 300)}`)
+  if (!res.ok) {
+    // 一定要带上**端点**与**模型名**：换模型时最常见的失败是「Model not exist」，
+    // 而它既可能是模型名写错，也可能是这个端点不服务该模型 —— 少了这两条信息没法区分。
+    const model = (body as { model?: unknown } | null)?.model
+    throw new Error(
+      `DashScope 请求失败 ${res.status}（端点 ${endpoint}，模型 ${String(model ?? '(未指定)')}）: ${text.slice(0, 300)}`,
+    )
+  }
   try { return JSON.parse(text) } catch { throw new Error(`DashScope 返回非 JSON: ${text.slice(0, 200)}`) }
 }

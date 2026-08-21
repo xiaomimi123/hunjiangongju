@@ -26,6 +26,22 @@ function TryImage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [shots, setShots] = useState<{ url: string; model: string; ms: number; size: string }[]>([])
+  const [avail, setAvail] = useState<{ endpoint: string; models: string[] } | null>(null)
+
+  // 列出该端点可用的模型 —— 换模型时先看有什么，比猜名字快得多
+  async function listModels() {
+    setBusy(true); setErr(''); setAvail(null)
+    try {
+      const res = await fetch(`/api/admin/models/available?credsFrom=${credsFrom}`)
+      const j = await res.json()
+      if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
+      setAvail(j)
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function run() {
     setBusy(true); setErr('')
@@ -80,9 +96,22 @@ function TryImage() {
       <label className="block text-sm text-ink2">提示词
         <textarea className="field mt-1 text-xs" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
       </label>
-      <button onClick={run} disabled={busy || !prompt.trim()} className="btn-primary">
-        {busy ? '生成中…' : '生成一张'}
-      </button>
+      <div className="flex gap-2">
+        <button onClick={run} disabled={busy || !prompt.trim()} className="btn-primary">
+          {busy ? '生成中…' : '生成一张'}
+        </button>
+        <button onClick={listModels} disabled={busy} className="btn-ghost">列出可用模型</button>
+      </div>
+      {avail && (
+        <div className="rounded border border-line p-2 text-xs">
+          <p className="text-ink3">{avail.endpoint} · 共 {avail.models.length} 个</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {avail.models.map((m) => (
+              <button key={m} type="button" className="btn-ghost text-[11px]" onClick={() => setModel(m)}>{m}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {err && <p className="pill pill-bad break-all">{err}</p>}
       {shots.length > 0 && (
         <div className="flex flex-wrap gap-3">

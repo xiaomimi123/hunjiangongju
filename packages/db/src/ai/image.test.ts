@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { toDashSize } from './image'
+import { dashCompatBase } from './dashscope'
 
 // ★ 百炼分支原先**完全忽略**调用方传的 size，写死 `extra.size ?? '1024*1024'`。
 // 后果:模型按正方形构图 → 我们 cover 裁成 9:12 竖屏 → 左右各砍掉 12.5%,
@@ -47,5 +48,29 @@ describe('toDashSize —— 生图尺寸按调用方的比例换算', () => {
     expect(toDashSize('')).toBe('768*1024')
     expect(toDashSize('bad')).toBe('768*1024')
     expect(toDashSize('0x0')).toBe('768*1024')
+  })
+})
+
+// 换模型最常见的失败是「Model not exist」,而它既可能是模型名写错、
+// 也可能是这个端点不服务该模型(MAAS 专属端点只服务你部署上去的那几个)。
+// 少了端点与模型名这两条信息就没法区分 —— 所以拼 base 的规则要有断言守着。
+describe('dashCompatBase —— 列模型用的兼容模式地址', () => {
+  it('裸域名补上 /compatible-mode/v1', () => {
+    expect(dashCompatBase('https://dashscope.aliyuncs.com')).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
+  })
+
+  it('已带兼容模式路径的原样保留（MAAS 专属端点就是这种）', () => {
+    const maas = 'https://ws-x.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
+    expect(dashCompatBase(maas)).toBe(maas)
+  })
+
+  it('容忍结尾斜杠', () => {
+    expect(dashCompatBase('https://dashscope.aliyuncs.com/')).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
+    expect(dashCompatBase('https://x.com/compatible-mode/v1/')).toBe('https://x.com/compatible-mode/v1')
+  })
+
+  it('地址非法时回退官方域名，不抛错', () => {
+    expect(dashCompatBase('')).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
+    expect(dashCompatBase('不是地址')).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
   })
 })

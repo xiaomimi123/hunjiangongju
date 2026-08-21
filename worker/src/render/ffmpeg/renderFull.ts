@@ -127,8 +127,12 @@ export function buildRenderFullPlan(o: RenderFullOpts): RenderFullPlan {
     imageAbs: s.imageAbs,
     durationMs: Math.max(1, s.endMs - s.startMs),
     ...(kfs.length ? { motion: kfs[i % kfs.length] } : {}),
+    // 转场时长 <= 0 视为**硬切**。渲染层只实现了叠化，所以「这条边界要硬切」
+    // 只能靠时长表达（草稿解析出的时长恒 > 0，老框架零回归）。
+    // 不能靠 durationMs=0 走叠化分支——bodyGraph 会把它夹到 1ms，
+    // 变成一次看不见却照样走 xfade 的转场，与硬切不是一回事。
     ...(i > 0
-      ? cyc.length === 0
+      ? cyc.length === 0 || !(cyc[(i - 1) % cyc.length].durationMs > 0)
         ? { transitionIn: null as null }
         : { transitionIn: 'crossfade' as const, transitionMs: cyc[(i - 1) % cyc.length].durationMs }
       : {}),

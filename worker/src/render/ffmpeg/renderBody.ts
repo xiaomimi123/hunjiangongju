@@ -95,10 +95,12 @@ export function buildRenderBodyPlan(o: RenderBodyOpts): RenderBodyPlan {
     let transitionIn: 'crossfade' | null | undefined
     let transitionMs: number | undefined
     if (i > 0) {
-      if (cyc.length === 0) {
-        transitionIn = null // 没有实测序列时一律硬切，不凭空造叠化
+      const b0 = cyc.length ? cyc[(i - 1) % cyc.length] : null
+      // 时长 <= 0 视为硬切（见 renderFull.ts 同处注释）
+      if (!b0 || !(b0.durationMs > 0)) {
+        transitionIn = null // 没有实测序列、或该边界显式设为硬切时不凭空造叠化
       } else {
-        const b = cyc[(i - 1) % cyc.length]
+        const b = b0
         // 渲染层目前只实现了叠化。其余类型一律退化为叠化——与解析器
         // JIANYING_TRANSITION_MAP 未命中时的处理一致，保真度报告会如实标出。
         transitionIn = 'crossfade'

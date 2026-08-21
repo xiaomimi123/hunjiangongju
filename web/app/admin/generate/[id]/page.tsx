@@ -95,6 +95,10 @@ export default function GenerateDetailPage() {
   const canResetToEdit = task.status === 'FAILED' || (!!rt && (rt.status === 'QC_FAILED' || rt.status === 'FAILED'))
   // 成片库发布：仅当最新 RenderTask 已 EXPORTED 时可发布/取消发布。
   const canPublish = !!rt && rt.status === 'EXPORTED'
+  // 剪辑工作台的窗口：素材就绪、或成片已产出且**未发布**。
+  // 与服务端 lib/studioWindow.ts 同一口径——那边是权威，这里只决定按钮显不显示。
+  const canStudio = !task.published
+    && (ready || (!!rt && ['PREVIEW_PENDING', 'QC_RUNNING', 'QC_PASSED', 'QC_FAILED', 'EXPORTED', 'FAILED'].includes(rt.status)))
   // PREVIEW_PENDING 非终态（等操作），但不算「后台处理中」——不显示自动刷新提示。
   const working = !isSettled(task) && displayStatus !== 'ASSET_READY' && displayStatus !== 'PREVIEW_PENDING'
   const preview = task.renderTasks.find((r) => r.videoUrl)
@@ -116,6 +120,9 @@ export default function GenerateDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           {ready && (
             <Link href={`/admin/generate/${id}/edit`} className="btn-ghost">编辑素材包</Link>
+          )}
+          {canStudio && (
+            <Link href={`/admin/generate/${id}/studio`} className="btn-ghost">剪辑工作台</Link>
           )}
           {canRender && (
             <button onClick={() => act('render', 'render')} disabled={busy === 'render'} className="btn-primary">

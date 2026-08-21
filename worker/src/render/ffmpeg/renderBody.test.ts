@@ -90,6 +90,35 @@ describe('buildRenderBodyPlan', () => {
     expect(p.totalMs).toBe(15000)
   })
 
+  // ★ 逐边界硬切：渲染层只实现了叠化，所以「这条边界要硬切」只能靠时长表达。
+  // 不能指望 durationMs=0 走叠化分支后自然消失——bodyGraph 会把它夹到 1ms
+  //（`Math.max(1, ...)`），产出一次看不见却照样走 xfade 的转场，与硬切不是一回事：
+  // xfade 会改变滤镜图结构与帧的来源，而硬切是 concat。
+  it('转场时长为 0 → 该边界硬切（走 concat 而非 xfade）', () => {
+    const p = buildRenderBodyPlan(baseOpts(segs, {
+      bodyCycle: [{ renderType: 'crossfade', durationMs: 0 }],
+    }))
+    expect(p.args.join(' '), '时长 0 仍走了 xfade').not.toContain('xfade')
+    expect(p.args.join(' ')).toContain('concat=')
+    expect(p.totalMs).toBe(15000)
+  })
+
+  it('叠化与硬切可以逐边界混用（循环套用）', () => {
+    const three = [
+      { imageAbs: '/a.png', startMs: 0, endMs: 5000, captionBeats: [] },
+      { imageAbs: '/b.png', startMs: 5000, endMs: 10000, captionBeats: [] },
+      { imageAbs: '/c.png', startMs: 10000, endMs: 15000, captionBeats: [] },
+    ]
+    const p = buildRenderBodyPlan(baseOpts(three, {
+      // 第 1 条边界硬切、第 2 条叠化 500ms
+      bodyCycle: [{ renderType: 'crossfade', durationMs: 0 }, { renderType: 'crossfade', durationMs: 500 }],
+    }))
+    const f = p.args.join(' ')
+    expect(f, '混用时叠化那条没生效').toContain('xfade=transition=fade:duration=0.5')
+    // 只该有一处 xfade：两条边界里只有一条是叠化
+    expect(f.match(/xfade/g)?.length, '硬切那条也变成了叠化').toBe(1)
+  })
+
   it('运镜按序循环套用到各段', () => {
     const p = buildRenderBodyPlan(baseOpts(segs, {
       keyframes: [{ scaleFrom: 1, scaleTo: 1.108 }, { scaleFrom: 1, scaleTo: 1.082 }],

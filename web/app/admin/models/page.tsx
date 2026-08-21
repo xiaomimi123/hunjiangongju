@@ -130,6 +130,88 @@ function TryImage() {
   )
 }
 
+/**
+ * 试听：选音色 + 填一句话，直接出声。
+ *
+ * 新登记一个克隆音色后,「它到底能不能合成」原先只能靠跑一整条任务
+ * (文案 → 生图 → 配音)才知道。**音色格式对 ≠ 音色可用**——
+ * 复刻任务没训练完、id 抄漏一位、resource 填错,都要到真正合成时才暴露。
+ */
+function TryTts() {
+  const [text, setText] = useState('如果你总困在过往的遗憾里，那么你永远没办法好好拥抱当下。')
+  const [voice, setVoice] = useState('')
+  const [voices, setVoices] = useState<{ id: string; label: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [clips, setClips] = useState<{ url: string; voice: string; ms: number }[]>([])
+
+  useEffect(() => {
+    fetch('/api/tts/voices')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (Array.isArray(j?.voices)) setVoices(j.voices) })
+      .catch(() => { /* 拉不到就只留「默认音色」一项，不影响试听 */ })
+  }, [])
+
+  async function run() {
+    setBusy(true); setErr('')
+    try {
+      const res = await fetch('/api/admin/tts/try', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        throw new Error(j?.error ?? `HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      setClips((p) => [{
+        url: URL.createObjectURL(blob),
+        voice: voices.find((v) => v.id === voice)?.label ?? voice ?? '(默认音色)',
+        ms: Number(res.headers.get('X-Gen-Ms') ?? 0),
+      }, ...p].slice(0, 6))
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card mt-6 space-y-3 p-5">
+      <div>
+        <p className="font-display font-bold">试听配音</p>
+        <p className="text-xs text-ink3">
+          新登记克隆音色后先在这里验一次：只做一次合成调用，不跑整条任务。
+          音色格式合法不代表可用——复刻没训练完、id 抄错、resource 不对，都要到真正合成才暴露。
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-sm text-ink2">音色
+          <select className="field mt-1 w-56" value={voice} onChange={(e) => setVoice(e.target.value)}>
+            <option value="">（配置里的默认音色）</option>
+            {voices.map((v) => <option key={v.id} value={v.id}>{v.label} · {v.id}</option>)}
+          </select>
+        </label>
+        <button onClick={run} disabled={busy || !text.trim()} className="btn-primary">
+          {busy ? '合成中…' : '试听'}
+        </button>
+      </div>
+      <label className="block text-sm text-ink2">试听文本（60 字以内）
+        <textarea className="field mt-1 text-xs" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
+      </label>
+      {err && <p className="pill pill-bad break-all">{err}</p>}
+      {clips.map((c, i) => (
+        <div key={c.url} className="flex items-center gap-2 text-xs">
+          <span className="w-48 shrink-0 truncate text-ink3">{c.voice} · {(c.ms / 1000).toFixed(1)}s</span>
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <audio src={c.url} controls className="h-8 flex-1" autoPlay={i === 0} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function ModelsPage() {
   const [list, setList] = useState<Cap[]>([])
   const [keyInput, setKeyInput] = useState<Record<string, string>>({})
@@ -220,6 +302,7 @@ export default function ModelsPage() {
         ))}
       </div>
       <TryImage />
+      <TryTts />
     </div>
   )
 }

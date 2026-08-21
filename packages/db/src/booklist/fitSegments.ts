@@ -53,10 +53,22 @@ export function fitToSegmentCount(lines: string[], target: number): string[] {
   const out = lines.map((l) => String(l ?? '').trim()).filter(Boolean)
   if (out.length === 0) return []
 
-  // 多了：尾部合并
+  // 多了：合并**最短的相邻一对**
+  //
+  // 原先是无条件往尾部合并。线上实测踩了坑：LLM 返回 5 段、槽位是 4 段，
+  // 合并后最后一段拿到了两段的文案，配音 11640ms 对着 6068ms 的槽位——超 92%，
+  // 成片从 24.6 秒涨到 29.4 秒，贴着 30 秒上限。
+  //
+  // 合并发生在**字数配额之后**，所以尾部合并等于把配额作废。
+  // 挑最短的一对合并，能把「合并后最长段」压到最小，配额的损失也最小。
   while (out.length > target) {
-    const last = out.pop()!
-    out[out.length - 1] = out[out.length - 1] + last
+    let at = 0
+    let best = Infinity
+    for (let i = 0; i + 1 < out.length; i++) {
+      const len = Array.from(out[i]).length + Array.from(out[i + 1]).length
+      if (len < best) { best = len; at = i }
+    }
+    out.splice(at, 2, out[at] + out[at + 1])
   }
 
   // 少了：切最长的一段

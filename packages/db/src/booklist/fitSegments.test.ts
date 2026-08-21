@@ -2,13 +2,34 @@ import { describe, it, expect } from 'vitest'
 import { fitToSegmentCount } from './fitSegments'
 
 describe('fitToSegmentCount', () => {
+  // 复刻线上那条真实数据：LLM 给 5 段、槽位 4 段。
+  // 尾部合并会让最后一段变成 7+27=34 字（对着 6068ms 的槽位，实测超 92%）；
+  // 合并最短相邻一对后最长段是 27 字，落在该槽位的配额内。
+  it('线上实测场景：合并后最长段明显更短', () => {
+    const lines = [
+      '如果你总困在过往的遗憾里', '内耗与执念反复拉扯', '那么你永远没办法好好拥抱当下',
+      '安稳温柔的生活', '自愈的路上没有人能替你抚平情绪，也没有人能帮你放下心结',
+    ]
+    const out = fitToSegmentCount(lines, 4)
+    expect(out).toHaveLength(4)
+    const maxLen = Math.max(...out.map((l) => Array.from(l).length))
+    // 尾部合并会得到 34（7+27）；合并最短相邻一对得到 27
+    expect(maxLen, `最长段 ${maxLen} 字，尾部合并会是 34`).toBeLessThan(30)
+    // 内容不能丢：合并只是拼接，总字数必须守恒
+    expect(out.join('').length).toBe(lines.join('').length)
+  })
+
   it('恰好相等 → 原样返回', () => {
     const lines = ['甲', '乙', '丙']
     expect(fitToSegmentCount(lines, 3)).toEqual(lines)
   })
 
-  it('多了 → 从尾部合并相邻两段（尾部是收束句，合并损失最小）', () => {
-    expect(fitToSegmentCount(['一', '二', '三', '四', '五'], 3)).toEqual(['一', '二', '三四五'])
+  // ★ 改自「无条件往尾部合并」。线上实测踩了坑：LLM 返回 5 段、槽位 4 段，
+  // 合并后最后一段拿到两段文案，配音 11640ms 对着 6068ms 的槽位——超 92%，
+  // 成片从 24.6 秒涨到 29.4 秒。合并发生在**字数配额之后**，尾部合并等于把配额作废。
+  it('多了 → 合并最短的相邻一对（把合并后的最长段压到最小）', () => {
+    // 等长时取最靠前的一对，结果稳定可预期
+    expect(fitToSegmentCount(['一', '二', '三', '四', '五'], 3)).toEqual(['一二', '三四', '五'])
   })
 
   it('多很多 → 合并到恰好 N 段，不丢内容', () => {

@@ -44,6 +44,11 @@ export interface BodyData {
   seed?: string
   /** 模板模式：flash=碎裂开场+书单快闪+叠化正片；缺省/classic=既有编排不变 */
   template?: 'classic' | 'flash'
+  /**
+   * 开场碎裂那张图（相对 hf 目录）。
+   * 缺省时渲染层回退正片第 1 张——老框架/未配置开场图时零回归。
+   */
+  openImage?: BodyImage
   templateParams?: import('./templateParams.js').TemplateParams
   flashCovers?: FlashCover[]
   fonts?: { family: string; url: string }[]

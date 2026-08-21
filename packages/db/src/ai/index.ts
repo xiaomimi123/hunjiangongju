@@ -8,7 +8,7 @@ export { cosyvoiceSynthesize, cosyvoiceWsUrl, isCosyvoiceVoiceId, resolveCosyvoi
 export type { CosyvoiceSynthOpts } from './cosyvoiceSynth'
 export { asrTranscribe } from './asr'
 export { enrollVoice, parseEnrollResult, listVoices } from './voiceClone'
-export { describeImageStyle, parseVisionStyle, MOCK_VISION_STYLE, describeBooksFromImages, parseBooksResult } from './vision'
+export { describeImageStyle, parseVisionStyle, MOCK_VISION_STYLE, describeBooksFromImages, parseBooksResult, describeStyleForPrompt, parseStylePrompt, MOCK_STYLE_PROMPT } from './vision'
 export type { VisualStyleType, VisionStyleResult } from './vision'
 export { TTS_VOICES, isValidVoice, isPlausibleVoiceId } from './ttsVoices'
 export type { TtsVoice } from './ttsVoices'

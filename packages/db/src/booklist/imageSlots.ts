@@ -60,3 +60,28 @@ export function readImageSlots(overlayTemplate: unknown): ImageSlotConfig | null
 export function slotAt(cfg: ImageSlotConfig | null, index: number): ImageSlot | undefined {
   return cfg?.slots.find((s) => s.index === index)
 }
+
+/**
+ * 开场碎裂用的那张图 —— **它有自己的槽位，不占用正片第 1 张**。
+ *
+ * 原先渲染层直接取 `images[0]`（正片第 1 张）当开场底图。后果是「开场卡通人物头像」
+ * 和「正片艺术画风」二选一：把第 1 槽配成头像，正片第一段也会变成那张头像。
+ * 而草稿里开场本来就是独立素材（客户样例是一段 .mov），与正片分开。
+ *
+ * 留空表示不单独生成，渲染层回退到正片第 1 张——老框架零回归。
+ */
+export interface OpenImageConfig {
+  /** 主体提示词。留空则用「人物特写」这类由 style 决定的默认主体 */
+  prompt?: string
+  /** 画风。留空则沿用框架的 imageStylePrompt */
+  style?: string
+}
+
+export function readOpenImage(overlayTemplate: unknown): OpenImageConfig | null {
+  const raw = obj(obj(overlayTemplate).__openImage)
+  const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : ''
+  const style = typeof raw.style === 'string' ? raw.style.trim() : ''
+  // 两个字段都空 = 没配。空对象不该让渲染层以为"配了但内容为空"而生成一张默认图
+  if (!prompt && !style) return null
+  return { ...(prompt ? { prompt } : {}), ...(style ? { style } : {}) }
+}

@@ -182,3 +182,84 @@ export async function describeBooksFromImages(imageUrls: string[]): Promise<{ ti
     return []
   }
 }
+
+// ── 参考图反推「生图用的画风提示词」 ──
+//
+// 与 describeImageStyle 的区别：那个是给**拆解**用的，目标是把源视频归到 5 类词表里，
+// 只输出一句话概括（「厚涂油画质感,情绪化,统一画风」）。这个是给**生图**用的，
+// 目标是把参考图的风格描述到足以复现——媒介、笔触、色调、光线、构图、情绪都要有。
+// 一句话概括喂给文生图模型是出不来对应风格的。
+
+/** 反推失败/mock 时的兜底。故意保守：宁可回退到通用描述，也不编造一个具体流派。 */
+export const MOCK_STYLE_PROMPT = '厚涂油画质感,浓郁色彩,可见笔触,柔和光线,古典氛围'
+
+const STYLE_PROMPT_INSTRUCTION =
+  '你是一名 AI 绘画提示词工程师。请观察这张参考图的**画风**（不是画的内容），' +
+  '输出一句可直接用于文生图模型的中文画风提示词。' +
+  '要覆盖：艺术媒介或流派、笔触与质感、主色调与配色关系、光线特征、构图特点、整体情绪。' +
+  '用逗号分隔的短语，不超过 60 字。' +
+  '**只描述风格，不要描述画面里的具体物体、人物或场景**——' +
+  '这句提示词会被复用到完全不同的题材上。' +
+  '直接输出提示词本身，不要任何解释、前缀或引号。'
+
+/** 从模型返回里取出提示词并做清洗。绝不抛错——反推失败退回兜底，不该让后台报 500。 */
+export function parseStylePrompt(raw: any): string {
+  try {
+    const message = raw?.output?.choices?.[0]?.message
+    const content = message?.content
+    let text: string = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((c: { text?: string }) => c?.text ?? '').join('')
+        : (raw?.choices?.[0]?.message?.content ?? '')
+    text = String(text ?? '').trim()
+    // 模型偶尔会加「画风提示词：」这类前缀或整句加引号，一并剥掉
+    // 引号要**首尾各剥一次**：不加 g 的 replace 只换第一处，结尾那个会留着。
+    // 字符集必须含中文弯引号（模型十有八九给的是 “”），漏了等于没剥。
+    text = text.replace(/^[^：:]{0,12}[：:]\s*/, '').trim()
+    text = text.replace(/^["'「『“]/, '').replace(/["'」』”]$/, '').trim()
+    // 只取第一段：偶尔会追加一段解释
+    text = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] ?? ''
+    return text || MOCK_STYLE_PROMPT
+  } catch {
+    return MOCK_STYLE_PROMPT
+  }
+}
+
+/**
+ * 参考图 → 生图用的画风提示词。
+ * @param imageUrls 参考图的**公网可达** URL（百炼要自己去拉，本机路径不行）
+ */
+export async function describeStyleForPrompt(imageUrls: string[]): Promise<string> {
+  const cfg = await getCapabilityConfig('vision')
+  // mock 必须在这一层自己兜底：这是一条新的 vision 用法，不能借道 describeImageStyle
+  // 的 mock（那个返回的是拆解用的一句话概括，语义不同）
+  if (isMockMode(cfg)) return MOCK_STYLE_PROMPT
+
+  if (isDashScope(cfg.baseUrl)) {
+    const content = [...imageUrls.map((url) => ({ image: url })), { text: STYLE_PROMPT_INSTRUCTION }]
+    const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
+      model: cfg.model,
+      input: { messages: [{ role: 'user', content }] },
+      parameters: {},
+    })
+    return parseStylePrompt(data)
+  }
+
+  const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [{
+        role: 'user',
+        content: [
+          ...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
+          { type: 'text', text: STYLE_PROMPT_INSTRUCTION },
+        ],
+      }],
+    }),
+  })
+  if (!res.ok) throw new Error(`vision 反推画风失败 ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  return parseStylePrompt(await res.json())
+}

@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
@@ -51,6 +51,53 @@ const STYLE_PRESETS = [
   { label: '日系动漫男头像', v: '日系动漫画风,男性少年面部特写,黑色短发,冷调夜色光影,细腻高光与阴影,单人半身,情绪感' },
   { label: '日系动漫女头像', v: '日系动漫画风,女性少女面部特写,清透大眼,柔和高光,浅色调,单人半身' },
 ]
+
+/**
+ * 参考图反推画风。
+ *
+ * 预设词表覆盖不了所有风格——运营看到一张想要的图，最直接的做法就是把图丢上来，
+ * 让 vision 模型把画风描述成可直接用于文生图的提示词。
+ *
+ * 反推是一次计费的模型调用，所以按钮要有 pending 态挡住连点（后端也有限流兜底）。
+ */
+function StyleFromImage({ onDone }: { onDone: (prompt: string) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const id = useId()
+  return (
+    <span className="inline-flex items-center gap-2">
+      <label htmlFor={id} className={`btn-ghost text-xs ${busy ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}>
+        {busy ? '反推中…' : '上传参考图反推'}
+      </label>
+      <input
+        id={id}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          // 选同一个文件两次也要能触发：不清空 value 的话第二次不会有 change 事件
+          e.target.value = ''
+          if (!file) return
+          setBusy(true); setErr('')
+          try {
+            const fd = new FormData()
+            fd.append('file', file)
+            const res = await fetch('/api/admin/style/from-image', { method: 'POST', body: fd })
+            const j = await res.json()
+            if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
+            onDone(String(j.stylePrompt ?? ''))
+          } catch (e2) {
+            setErr((e2 as Error).message)
+          } finally {
+            setBusy(false)
+          }
+        }}
+      />
+      {err ? <span className="text-xs text-red-500">{err}</span> : null}
+    </span>
+  )
+}
 
 export default function FrameworksPage() {
   const [rows, setRows] = useState<FrameworkRow[] | null>(null)
@@ -242,6 +289,7 @@ export default function FrameworksPage() {
                     {p.label}
                   </button>
                 ))}
+                <StyleFromImage onDone={(v) => setF({ imageStylePrompt: v })} />
               </div>
               <textarea className="field mt-1 text-xs" rows={3} value={form.imageStylePrompt} onChange={(e) => setF({ imageStylePrompt: e.target.value })} />
             </label>
@@ -272,9 +320,42 @@ export default function FrameworksPage() {
                 next.sort((a, b) => (a.index as number) - (b.index as number))
                 setF({ overlayTemplate: JSON.stringify({ ...ot, __imageSlots: { count, slots: next } }, null, 2) })
               }
+              const openRaw = ot.__openImage
+              const openCfg = (openRaw && typeof openRaw === 'object' && !Array.isArray(openRaw)
+                ? openRaw : {}) as { prompt?: string; style?: string }
+              const writeOpen = (patch: Record<string, string>) => {
+                const merged = { ...openCfg, ...patch }
+                // 两个字段都空就把整块删掉：留一个空对象会让后端以为"配了开场图"
+                const clean = Object.fromEntries(Object.entries(merged).filter(([, v]) => String(v ?? '').trim()))
+                const next = { ...ot }
+                if (Object.keys(clean).length) next.__openImage = clean
+                else delete next.__openImage
+                setF({ overlayTemplate: JSON.stringify(next, null, 2) })
+              }
               return (
                 <div className="block">
-                  <span className="eyebrow">图片槽位（{count} 张正片配图）</span>
+                  <span className="eyebrow">开场图（碎裂那一张）</span>
+                  <p className="mt-1 text-xs text-ink3">
+                    留空则沿用正片第 1 张。填了就单独生成一张，正片第 1 张不受影响
+                    —— 「开场卡通人物头像 + 正片艺术画风」要同时成立，就得填这里。
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-line px-2 py-2">
+                    <input
+                      className="field flex-1 text-xs"
+                      value={openCfg.prompt ?? ''}
+                      onChange={(e) => writeOpen({ prompt: e.target.value })}
+                      placeholder="画什么（留空 = 人物特写）"
+                    />
+                    <input
+                      className="field flex-1 text-xs"
+                      value={openCfg.style ?? ''}
+                      onChange={(e) => writeOpen({ style: e.target.value })}
+                      placeholder="画风（留空 = 全局画风）"
+                    />
+                    <StyleFromImage onDone={(v) => writeOpen({ style: v })} />
+                  </div>
+
+                  <span className="eyebrow mt-4 block">图片槽位（{count} 张正片配图）</span>
                   <p className="mt-1 text-xs text-ink3">
                     提示词只写「画什么」。画风默认取上面的「图片风格提示词」，改一次全部槽位生效；
                     个别槽位要不同画风（例如开场用卡通人物头像、后面用达芬奇），在该槽位单独填「画风」覆盖。
@@ -309,6 +390,7 @@ export default function FrameworksPage() {
                                 onChange={(e) => write(i, { style: e.target.value })}
                                 placeholder="画风（留空 = 用上面的全局画风）"
                               />
+                              <StyleFromImage onDone={(v) => write(i, { style: v })} />
                             </>
                           ) : (
                             <input

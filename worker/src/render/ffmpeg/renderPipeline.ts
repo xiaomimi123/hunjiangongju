@@ -83,8 +83,9 @@ async function renderOpening(hfDir: string, data: BodyData, durationMs: number, 
   await fs.mkdir(dir, { recursive: true })
   const { width, height } = data.size
   const maps = await ensureShatterMaps(cacheRoot, width, height, durationMs)
-  // 开场用正片第 1 张图（与切换前同一张，换渲染器时开场画面不变）
-  const imgAbs = path.join(hfDir, data.images[0]?.src ?? 'media/01.png')
+  // 开场图优先用它自己的那张（__openImage 配了才有）。
+  // 缺省回退正片第 1 张——那是加独立开场槽位之前的行为，老框架零回归。
+  const imgAbs = path.join(hfDir, data.openImage?.src ?? data.images[0]?.src ?? 'media/01.png')
   const outAbs = path.join(dir, 'open.mp4')
   const r = run('ffmpeg', buildShatterArgs({
     imgAbs, width, height, fps: FPS, durationMs, ...maps, outAbs,

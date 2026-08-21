@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readImageSlots, slotAt } from './imageSlots'
+import { readImageSlots, slotAt , readOpenImage } from './imageSlots'
 
 describe('readImageSlots', () => {
   it('未配置 → null（调用方维持现状）', () => {
@@ -73,5 +73,29 @@ describe('逐槽画风覆盖', () => {
     expect(slotAt(cfg, 0)?.style).toBe('日系卡通头像,人物特写')
     expect(slotAt(cfg, 1)?.style).toBeUndefined()
     expect(slotAt(cfg, 2)?.style).toBeUndefined()
+  })
+})
+
+// ★ 开场图必须有自己的槽位。之前渲染层直接取正片第 1 张当开场底图，
+// 于是「开场卡通人物头像」和「正片艺术画风」二选一——把第 1 槽配成头像，
+// 正片第一段也会变成那张头像。草稿里开场本来就是独立素材。
+describe('readOpenImage', () => {
+  it('读出开场图的主体与画风', () => {
+    expect(readOpenImage({ __openImage: { prompt: '少年侧脸', style: '日系动漫画风,男性少年面部特写' } }))
+      .toEqual({ prompt: '少年侧脸', style: '日系动漫画风,男性少年面部特写' })
+  })
+
+  it('只填其一也算配了', () => {
+    expect(readOpenImage({ __openImage: { style: '达芬奇油画' } })).toEqual({ style: '达芬奇油画' })
+    expect(readOpenImage({ __openImage: { prompt: '人物特写' } })).toEqual({ prompt: '人物特写' })
+  })
+
+  // 没配 → null，渲染层回退正片第 1 张。这是老框架的零回归保证。
+  it('未配置/空对象/空串 → null（渲染层回退正片第 1 张）', () => {
+    expect(readOpenImage(null)).toBeNull()
+    expect(readOpenImage({})).toBeNull()
+    expect(readOpenImage({ __openImage: {} })).toBeNull()
+    expect(readOpenImage({ __openImage: { prompt: '   ', style: '' } })).toBeNull()
+    expect(readOpenImage({ __openImage: 'x' })).toBeNull()
   })
 })

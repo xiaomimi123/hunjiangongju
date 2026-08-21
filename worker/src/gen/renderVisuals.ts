@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process'
-import { promises as fs } from 'fs'
+import { promises as fs, existsSync } from 'fs'
 import path from 'path'
 import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
@@ -143,6 +143,14 @@ export function buildBodyData(
       { family: 'flash-title', url: 'fonts/title.ttf' },
       { family: 'subtitle', url: 'fonts/sub.otf' },
     ]
+    // 开场图：generate-image 配了 __openImage 才会产出 open.png。
+    // 存在才带上——不存在时渲染层回退正片第 1 张，老任务/未配置零回归。
+    // 这里只声明，文件存不存在由 renderVisuals 拷贝时 best-effort 处理。
+    const openAbs = path.join(DATA_DIR, 'gen', genTaskId, 'open.png')
+    if (existsSync(openAbs)) {
+      images.push({ seqNo: 2000, abs: openAbs, rel: 'media/open.png' })
+      ;(data as BodyData).openImage = { src: 'media/open.png' }
+    }
   }
   return { data, images }
 }

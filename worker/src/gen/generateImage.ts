@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt } from '@mixcut/db'
+import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
@@ -126,8 +126,29 @@ export async function generateImage(genTaskId: string): Promise<void> {
     })
   }
 
-  // flash 模式：为书单每本书补生一张「书封底图」(无字)，供快闪叠书名用。
   const params = parseTemplateParams((task.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
+
+  // 开场碎裂那张图：**独立生成**，不占用正片第 1 张。
+  // 没配就不生成，渲染层回退正片第 1 张（老框架零回归）。
+  const openCfg = readOpenImage(task.framework.overlayTemplate)
+  if (params.mode === 'flash' && openCfg) {
+    // 主体缺省给「人物特写」：开场碎裂是整屏一张脸，给风景会碎得没有焦点。
+    // 真正画成什么样由 style 决定（如「日系动漫男头像」）。
+    const prompt = buildFreeArtPrompt(openCfg.style ?? stylePrompt, openCfg.prompt ?? '人物特写')
+    const png = await withRetry(
+      () => imageGenerate({ prompt, size: '720x960', negativePrompt: IMAGE_NEGATIVE_PROMPT }),
+      {
+        attempts: 3, delayMs: 3000,
+        onRetry: (err, n) => console.warn(`[gen] open-image ${genTaskId} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),
+      },
+    )
+    const abs = path.join(dir, 'open.png')
+    await fs.writeFile(abs, png)
+    await makeThumbSafely(abs)
+    console.log(`[gen] generate-image ${genTaskId}: 开场图已生成 (${prompt.slice(0, 40)}…)`)
+  }
+
+  // flash 模式：为书单每本书补生一张「书封底图」(无字)，供快闪叠书名用。
   if (params.mode === 'flash') {
     const books = resolveBooks(task.framework.overlayTemplate, task.variables)
     const coversDir = path.join(dir, 'covers')

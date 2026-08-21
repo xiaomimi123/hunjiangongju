@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseVisionStyle, parseBooksResult } from './vision'
+import { parseVisionStyle, parseBooksResult , parseStylePrompt, MOCK_STYLE_PROMPT } from './vision'
 
 describe('parseBooksResult', () => {
   const wrap = (text: string) => ({ output: { choices: [{ message: { content: text } }] } })
@@ -63,5 +63,38 @@ describe('parseVisionStyle（DashScope qwen-vl 画风响应解析，纯函数）
       imageStylePrompt: '厚涂油画质感,情绪化,统一画风',
       visualStyleType: 'oil_painting',
     })
+  })
+})
+
+// ★ 参考图反推「生图用的」画风提示词。与 describeImageStyle 不同：
+// 那个是拆解用的、只输出一句话概括并归到 5 类词表；这个要细到能复现风格。
+describe('parseStylePrompt —— 参考图反推画风', () => {
+  const dash = (text: string) => ({ output: { choices: [{ message: { content: [{ text }] } }] } })
+
+  it('取出 DashScope 原生响应里的提示词', () => {
+    expect(parseStylePrompt(dash('厚涂油画,可见笔触,暖褐色调,侧逆光,古典构图,沉静'))) 
+      .toBe('厚涂油画,可见笔触,暖褐色调,侧逆光,古典构图,沉静')
+  })
+
+  it('取出 OpenAI 兼容响应里的提示词', () => {
+    expect(parseStylePrompt({ choices: [{ message: { content: '水彩晕染,淡雅色调' } }] }))
+      .toBe('水彩晕染,淡雅色调')
+  })
+
+  // 模型常自作主张加前缀或引号，直接塞进提示词会污染生图
+  it('剥掉「画风提示词：」这类前缀与包裹的引号', () => {
+    expect(parseStylePrompt(dash('画风提示词：厚涂油画,暖褐色调'))).toBe('厚涂油画,暖褐色调')
+    expect(parseStylePrompt(dash('“水彩晕染,淡雅色调”'))).toBe('水彩晕染,淡雅色调')
+  })
+
+  it('只取第一行，丢掉模型追加的解释', () => {
+    expect(parseStylePrompt(dash('厚涂油画,暖褐色调\n\n这种风格常见于古典肖像。'))).toBe('厚涂油画,暖褐色调')
+  })
+
+  // 反推失败不能抛错：这是后台的一个辅助按钮，模型抽风不该让运营看到 500
+  it('响应形状不对/为空 → 回退兜底，不抛错', () => {
+    expect(parseStylePrompt(null)).toBe(MOCK_STYLE_PROMPT)
+    expect(parseStylePrompt({})).toBe(MOCK_STYLE_PROMPT)
+    expect(parseStylePrompt(dash('   '))).toBe(MOCK_STYLE_PROMPT)
   })
 })

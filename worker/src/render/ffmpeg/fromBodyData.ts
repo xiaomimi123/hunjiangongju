@@ -98,9 +98,9 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     : undefined
 
   const g = p?.grade
-  // 开场底图 = 正片第 1 张（与 HyperFrames 分支同一张）。
+  // 开场底图：优先用开场自己的那张（__openImage），缺省回退正片第 1 张。
   // 有碎裂开场片段时它用不上；没有时靠它补住开场那一段，否则成片会短掉整个开场时长。
-  const openStillAbs = abs(io.hfDir, data.images[0]?.src ?? '')
+  const openStillAbs = abs(io.hfDir, data.openImage?.src ?? data.images[0]?.src ?? '')
 
   return {
     ...(io.openingClipAbs ? { openingClipAbs: io.openingClipAbs } : { openStillAbs }),

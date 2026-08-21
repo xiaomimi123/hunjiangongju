@@ -1,7 +1,7 @@
 import { runCmd, probeText } from '../runCmd'
 import { promises as fs, existsSync } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, buildSrt, enqueueGen } from '@mixcut/db'
+import { prisma, transitionRender, buildSrt, enqueueGen, resolveTemplateParamsRaw } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams, flashTimeline } from '../../templates/booklist/templateParams'
 import { resolveBooks } from './generateImage'
@@ -59,6 +59,10 @@ export function buildFfmpegArgs(opts: {
   durSec: number
   outAbs: string
   bgmVolume?: number
+  /** BGM 从曲子的第几毫秒开始取（副歌卡点用）。输入带 -stream_loop -1，超过曲长会取到下一轮。 */
+  bgmStartMs?: number
+  bgmFadeInMs?: number
+  bgmFadeOutMs?: number
   sfx?: { gearAbs?: string; dropAbs?: string; openEndSec: number; flashEndSec: number; dropAtSec: number }
 }): string[] {
   const { bodyAbs, audioAbs, bgmAbs, durSec, outAbs, sfx } = opts
@@ -94,7 +98,20 @@ export function buildFfmpegArgs(opts: {
 
   const chains: string[] = [`[1:a]aresample=48000,${VOICE_FX},volume=1.0[voice]`]
   const mixLabels = ['[voice]']
-  if (bgmIdx >= 0) { chains.push(`[${bgmIdx}:a]atrim=0:${durSec.toFixed(3)},aresample=48000,volume=${bgmVol}[bgm]`); mixLabels.push('[bgm]') }
+  if (bgmIdx >= 0) {
+    // 取片段：从 bgmStartMs 起截 durSec。asetpts 必须跟在 atrim 之后把时间戳拉回 0，
+    // 否则后面的 afade（按绝对时间 st= 定位）会整段落在片子之外，听感上就是"淡入没生效"。
+    const start = Math.max(0, opts.bgmStartMs ?? 0) / 1000
+    const fadeIn = Math.max(0, opts.bgmFadeInMs ?? 0) / 1000
+    // 淡入淡出各自不得超过片长，且两者之和也不得超过——否则 afade 的窗口会互相压住，
+    // 中段音量被吃掉，听起来像 BGM 整体变轻了。
+    const fadeOut = Math.min(Math.max(0, opts.bgmFadeOutMs ?? 0) / 1000, Math.max(0, durSec - fadeIn))
+    const parts = [`atrim=${start.toFixed(3)}:${(start + durSec).toFixed(3)}`, 'asetpts=PTS-STARTPTS', 'aresample=48000', `volume=${bgmVol}`]
+    if (fadeIn > 0) parts.push(`afade=t=in:st=0:d=${fadeIn.toFixed(3)}`)
+    if (fadeOut > 0) parts.push(`afade=t=out:st=${(durSec - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}`)
+    chains.push(`[${bgmIdx}:a]${parts.join(',')}[bgm]`)
+    mixLabels.push('[bgm]')
+  }
   // 齿轮音：起点 = 开场结束，长度 = 快闪段时长。
   // 原实现是 `atrim=0:openEndSec` 且不加 adelay —— 把「开场结束的时间点」当成了「时长」，
   // 结果从 0 秒起播、整段盖在开场上，开场一结束就断。实测客户样例草稿是 2.159s→3.983s，
@@ -169,9 +186,18 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
   const sortedTimings = [...timings].sort((a, b) => a.startMs - b.startMs)
 
   // flash 模板：把快闪段齿轮音 + 快闪→正文转场水滴音混进合成音轨；classic 模板不带 SFX（原行为）。
-  const params = parseTemplateParams(
-    (genTask.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
-  )
+  // ★ 与 renderVisuals 必须读同一份参数（含工作台的逐任务覆盖）。
+  // 两处若不一致，会出现「画面按新参数渲、混音按框架旧参数」的半新半旧成片。
+  const rawParams = resolveTemplateParamsRaw(genTask.framework.overlayTemplate, genTask.variables)
+  const params = parseTemplateParams(rawParams)
+  // ★ classic 模板的 BGM 音量：**只有显式写过才生效**。
+  // 不能直接用 params.audio.bgmVolume —— 没配 __templateParams 的老 classic 框架会拿到
+  // 默认值 0.69，而它们一直跑在 buildFfmpegArgs 的兜底 0.32 上，直接改等于把这些片子的
+  // BGM 凭空调响一倍。所以查 raw JSON 里有没有这个键，没有就继续走兜底。
+  const rawAudio = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
+    ? (rawParams as Record<string, unknown>).audio : undefined) as Record<string, unknown> | undefined
+  const explicitBgmVolume = typeof rawAudio?.bgmVolume === 'number' && Number.isFinite(rawAudio.bgmVolume)
+    ? (rawAudio.bgmVolume as number) : undefined
   let sfx: { gearAbs?: string; dropAbs?: string; openEndSec: number; flashEndSec: number; dropAtSec: number } | undefined
   let bgmVolume: number | undefined
   if (params.mode === 'flash') {
@@ -189,10 +215,18 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
       ...(params.audio.sfx.transitionDrop && existsSync(dropAbs) ? { dropAbs } : {}),
     }
     bgmVolume = params.audio.bgmVolume
+  } else {
+    bgmVolume = explicitBgmVolume
   }
 
   const outAbs = path.join(genDir, 'final.mp4')
-  const args = buildFfmpegArgs({ bodyAbs, audioAbs, bgmAbs, durSec, outAbs, bgmVolume, sfx })
+  // 裁剪与淡入淡出默认全 0（= 从头播、不淡化），两种模板都适用，加这三个字段前后行为一致。
+  const args = buildFfmpegArgs({
+    bodyAbs, audioAbs, bgmAbs, durSec, outAbs, bgmVolume, sfx,
+    bgmStartMs: params.audio.bgmStartMs,
+    bgmFadeInMs: params.audio.bgmFadeInMs,
+    bgmFadeOutMs: params.audio.bgmFadeOutMs,
+  })
   const r = await runCmd('ffmpeg', args)
   if (!r.ok) {
     throw new Error(`ffmpeg 混音失败 (code ${r.status}): ${r.out.slice(-800)}`)

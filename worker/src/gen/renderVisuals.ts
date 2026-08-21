@@ -1,7 +1,7 @@
 import { probeText } from '../runCmd'
 import { promises as fs, existsSync } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults } from '@mixcut/db'
+import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults, resolveTemplateParamsRaw } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import type { BodyData, BodyOverlay } from '../../templates/booklist/bodyData'
 import { renderBodyWithFfmpeg } from '../render/ffmpeg/renderPipeline'
@@ -124,7 +124,9 @@ export function buildBodyData(
     ...(style ? { style } : {}),
   }
 
-  const params = parseTemplateParams((task.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
+  // ★ 走 resolveTemplateParamsRaw：框架那份 + 本任务在工作台里改的那份（variables.__templateParams）。
+  // 无覆盖时它原样返回框架那份，老任务零回归。
+  const params = parseTemplateParams(resolveTemplateParamsRaw(task.framework.overlayTemplate, task.variables))
   if (params.mode === 'flash') {
     const books = resolveBooks(task.framework.overlayTemplate, task.variables)
     const flashCovers = books.map((b, i) => ({

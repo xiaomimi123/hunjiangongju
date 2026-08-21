@@ -33,7 +33,16 @@ export interface TemplateParams {
   // ——LLM 想怎么分就怎么分。实测成片正片三段是 3.6/4.2/9.4 秒（最后一张图挂了 9.4 秒），
   // 草稿是 5.7/8.1/6.1。有了逐段时长才能按比例分配字数、进而把节奏拉回草稿。
   body: { subtitleFontFamily: string; subtitleColor: string; subtitlePosY: number; kenBurns: 'subtle' | 'off'; photoScale?: number; subtitleEntrance?: string; slotDurationsMs?: number[] }
-  audio: { bgmVolume: number; sfx: { openGear: boolean; transitionDrop: boolean } }
+  // bgmStartMs / bgmFadeInMs / bgmFadeOutMs：默认全 0 = 从头播、不淡入淡出，与加这三个字段
+  // 之前的行为逐字节一致。BGM 输入带 -stream_loop -1，所以 bgmStartMs 落在循环后的时间轴上，
+  // 取值超过曲长也不会取空（会取到下一轮的对应位置）。
+  audio: {
+    bgmVolume: number
+    bgmStartMs: number
+    bgmFadeInMs: number
+    bgmFadeOutMs: number
+    sfx: { openGear: boolean; transitionDrop: boolean }
+  }
   grade?: GradeParams
   // keyframes：从草稿 common_keyframes 提取的**实测**运镜数值（阶段1只含缩放）。
   // 与 moves 的区别：moves 是把曲线归类成 6 种预设招式、幅度硬编码；keyframes 是照抄原值。
@@ -74,7 +83,7 @@ export const DEFAULT_PARAMS: TemplateParams = {
   flash: { perClipMs: 200, minClipMs: 120, bounceIn: true, titleFontFamily: 'flash-title' },
   transition: { type: 'dissolve', durationMs: 400 },
   body: { subtitleFontFamily: 'subtitle', subtitleColor: '#ffffff', subtitlePosY: 0.78, kenBurns: 'subtle' },
-  audio: { bgmVolume: 0.69, sfx: { openGear: true, transitionDrop: true } },
+  audio: { bgmVolume: 0.69, bgmStartMs: 0, bgmFadeInMs: 0, bgmFadeOutMs: 0, sfx: { openGear: true, transitionDrop: true } },
   // 按客户样例草稿实测标定（今天分享的是/draft_content.json，720×960）。
   // 给默认值而不是留空：库里已有的框架是在这个字段存在之前导入的，留空它们会继续用
   // 旧的拍脑袋位置；而它们本来就是同一份模板导入的，用实测值只会更准。
@@ -159,6 +168,11 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
     },
     audio: {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),
+      // 负值一律归零：负的起点/淡化时长会让 ffmpeg 的 atrim/afade 产出空流或整段静音，
+      // 而那是一路"看起来在混音、实际没声音"的输入，排查起来毫无线索。
+      bgmStartMs: Math.max(0, num(audio.bgmStartMs, D.audio.bgmStartMs)),
+      bgmFadeInMs: Math.max(0, num(audio.bgmFadeInMs, D.audio.bgmFadeInMs)),
+      bgmFadeOutMs: Math.max(0, num(audio.bgmFadeOutMs, D.audio.bgmFadeOutMs)),
       sfx: { openGear: bool(sfx.openGear, D.audio.sfx.openGear), transitionDrop: bool(sfx.transitionDrop, D.audio.sfx.transitionDrop) },
     },
     // 文字层位置/相对字号：逐字段回退，缺哪个补哪个。

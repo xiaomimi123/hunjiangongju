@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
 import path from 'path'
 import fs from 'fs/promises'
-import { describeStyleForPrompt, publicAssetUrl } from '@mixcut/db'
+import { describeStyleForPrompt, publicAssetUrl, getCapabilityConfig } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
@@ -24,6 +24,24 @@ export const POST = handler(async (req) => {
   const { userId } = await requireRole('operator')
   // 反推一次是一次 vision 调用，要限流；否则连点几十下就是几十次计费调用
   checkRate('style-from-image', userId, 20)
+
+  // ★ 能力没配时必须**明说**，不能返回兜底串。
+  // vision 没有配置行时 getCapabilityConfig 返回 enabled:false，describeStyleForPrompt
+  // 会直接返回 mock 值、一次网络请求都不发。运营看到的是一句像模像样的
+  // 「厚涂油画质感,浓郁色彩…」，完全不知道模型压根没读图——线上就是这么踩的。
+  // AI_MOCK=1 是本地/测试的显式开关，那种情况放行。
+  if (process.env.AI_MOCK !== '1') {
+    const cap = await getCapabilityConfig('vision')
+    if (!cap.enabled) {
+      throw new HttpError(503, 'vision 能力未开启：请到「模型配置」页配置 vision（如 qwen-vl-max）并启用后重试')
+    }
+    if (!cap.baseUrl || !cap.model) {
+      throw new HttpError(503, 'vision 能力配置不完整：缺少 base_url 或 model')
+    }
+    if (!process.env.PUBLIC_BASE_URL) {
+      throw new HttpError(503, 'PUBLIC_BASE_URL 未配置：百炼需要用公网地址来拉取参考图')
+    }
+  }
 
   const form = await req.formData()
   const file = form.get('file')

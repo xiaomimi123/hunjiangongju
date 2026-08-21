@@ -3,6 +3,7 @@ import { promises as fs, renameSync } from 'fs'
 import path from 'path'
 import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
+import { speechSlotDurations } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
 
 // 纯函数：从 GenerationTask.variables（Json）中取出运营在生成表单里选的克隆音色 voiceId。
@@ -123,8 +124,12 @@ export async function generateTts(genTaskId: string): Promise<void> {
   // **只补不压**：配音比目标长时不做变速。变速会改音高与语流，
   // 而「话说得比原片满一点」远比「声音被捏尖」可接受。超出多少记一条日志，
   // 长期超出说明字数配额需要重新标定，不该靠变速掩盖。
-  const bodySlots = tp.body.slotDurationsMs ?? []
-  // 第 0 段是开场+快闪窗口，不在正片槽位里；正片从第 1 段起对应 bodySlots[0]
+  // ★ 必须与字数配额共用同一份槽位时长（speechSlotDurations）。
+  // 第一版这里直接取 `slotDurationsMs[i-1]`：配额按"滤掉纯画面段后"的列表分，
+  // 补静音却按原始列表取——第 1 段拿到 781ms 的目标却被分了 27 个字（约 4.5 秒），
+  // 补不了静音，那一段直接超出 3.7 秒。
+  // 第 0 段是开场+快闪窗口，不在正片槽位里；正片从第 1 段起对应下标 0。
+  const bodySlots = speechSlotDurations(tp.body.slotDurationsMs, Math.max(1, segments.length - 1))
   const slotFor = (i: number): number | undefined => (i >= 1 ? bodySlots[i - 1] : undefined)
 
   const clipPaths: string[] = []

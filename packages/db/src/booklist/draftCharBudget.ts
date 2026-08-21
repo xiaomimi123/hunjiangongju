@@ -114,6 +114,29 @@ const MIN_SPEECH_SLOT_MS = 1200
  * @param totalChars 总字数配额（deriveDraftCharBudget 的 maxTotalChars）
  * @returns 每段的目标字数；段数对不上时按时长比例重采样
  */
+/**
+ * 把草稿的正片段时长映射到**我们实际的文案段数**上。
+ *
+ * 两件事：
+ * 1. 滤掉装不下一句话的纯画面段（见 MIN_SPEECH_SLOT_MS）
+ * 2. 段数与草稿槽位数不等时按比例重采样
+ *
+ * **字数配额与配音补静音必须共用这一份。** 第一版没共用：配额按过滤后的列表分，
+ * 补静音却按原始列表取（`slotDurationsMs[i-1]`），于是第 1 段拿到 781ms 的目标
+ * 却被分了 27 个字（约 4.5 秒）——补不了静音，那一段直接超 3.7 秒。
+ *
+ * @returns 每段的目标时长；没有可用槽位时长时返回空数组（调用方维持原行为）
+ */
+export function speechSlotDurations(slotDurationsMs: number[] | undefined, segCount: number): number[] {
+  const n = Math.max(1, Math.floor(segCount) || 1)
+  const valid = (Array.isArray(slotDurationsMs) ? slotDurationsMs : [])
+    .filter((d) => typeof d === 'number' && Number.isFinite(d) && d >= MIN_SPEECH_SLOT_MS)
+  if (valid.length === 0) return []
+  // 不做插值——插出来的时长没有对应的画面，还不如落在某个真实槽位上
+  return Array.from({ length: n }, (_, i) =>
+    valid[Math.min(valid.length - 1, Math.floor((i * valid.length) / n))])
+}
+
 export function deriveSlotCharBudgets(
   slotDurationsMs: number[],
   segCount: number,
@@ -121,19 +144,11 @@ export function deriveSlotCharBudgets(
 ): number[] {
   const n = Math.max(1, Math.floor(segCount) || 1)
   const total = Math.max(n * MIN_CHARS_PER_SEG, Math.floor(totalChars) || 0)
-  const valid = (Array.isArray(slotDurationsMs) ? slotDurationsMs : [])
-    .filter((d) => typeof d === 'number' && Number.isFinite(d) && d >= MIN_SPEECH_SLOT_MS)
+  const weights = speechSlotDurations(slotDurationsMs, n)
   // 没有可用的槽位时长 → 平均分，与加这个功能之前的行为一致
-  if (valid.length === 0) {
+  if (weights.length === 0) {
     const each = Math.floor(total / n)
     return new Array(n).fill(each)
-  }
-
-  // 段数与草稿槽位数不等时按比例重采样：第 i 段取草稿第 round(i*len/n) 个槽位的时长。
-  // 不做插值——插出来的时长没有对应的画面，还不如落在某个真实槽位上。
-  const weights: number[] = []
-  for (let i = 0; i < n; i++) {
-    weights.push(valid[Math.min(valid.length - 1, Math.floor((i * valid.length) / n))])
   }
   const sum = weights.reduce((a, b) => a + b, 0)
 

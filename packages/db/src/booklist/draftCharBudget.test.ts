@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveDraftSpeechRate, deriveDraftCharBudget, MAX_VIDEO_SEC , deriveSlotCharBudgets } from './draftCharBudget'
+import { deriveDraftSpeechRate, deriveDraftCharBudget, MAX_VIDEO_SEC , deriveSlotCharBudgets , speechSlotDurations } from './draftCharBudget'
 import { CHARS_PER_SEC } from '../pipeline'
 
 describe('deriveDraftSpeechRate', () => {
@@ -122,5 +122,45 @@ describe('deriveSlotCharBudgets —— 逐段字数按草稿分镜时长分配',
   it('每段不低于下限，避免算出「每段 3 个字」', () => {
     const b = deriveSlotCharBudgets(SLOTS, 6, 20)
     expect(Math.min(...b)).toBeGreaterThanOrEqual(6)
+  })
+})
+
+// ★ 字数配额与配音补静音**必须共用同一份槽位时长**。
+// 第一版没共用：配额按「滤掉纯画面段后」的列表分，generateTts 补静音却按原始列表取
+// (slotDurationsMs[i-1])，于是第 1 段拿到 781ms 的目标却被分了 27 个字（约 4.5 秒）
+// ——补不了静音，那一段直接超出 3.7 秒，全片跟着长 3.7 秒。
+describe('speechSlotDurations —— 配额与补静音共用的槽位时长', () => {
+  const SLOTS = [781, 5704, 8065, 6068]
+
+  it('过短的纯画面段永远不会成为某一段的目标时长', () => {
+    for (const n of [1, 2, 3, 4, 6]) {
+      expect(speechSlotDurations(SLOTS, n), `${n} 段时把 781ms 当成了说话段的目标`)
+        .not.toContain(781)
+    }
+  })
+
+  it('段数与草稿槽位数相等时逐一对应', () => {
+    expect(speechSlotDurations(SLOTS, 3)).toEqual([5704, 8065, 6068])
+  })
+
+  it('长度始终等于段数', () => {
+    for (const n of [1, 2, 5, 9]) expect(speechSlotDurations(SLOTS, n)).toHaveLength(n)
+  })
+
+  // 老框架没有 slotDurationsMs：返回空数组，调用方维持原行为（不补静音、平均分字数）
+  it('没有槽位时长 → 空数组', () => {
+    expect(speechSlotDurations(undefined, 3)).toEqual([])
+    expect(speechSlotDurations([], 3)).toEqual([])
+    expect(speechSlotDurations([500, 800], 2), '全是过短段也算没有').toEqual([])
+  })
+
+  // 这条守的就是那个 bug：两者必须由同一份列表派生，字数多的段目标时长也必须更长
+  it('字数配额与目标时长同序：字多的段目标时长也长', () => {
+    const n = 3
+    const durs = speechSlotDurations(SLOTS, n)
+    const chars = deriveSlotCharBudgets(SLOTS, n, 124)
+    const byChars = [...chars.keys()].sort((a, b) => chars[a] - chars[b])
+    const byDurs = [...durs.keys()].sort((a, b) => durs[a] - durs[b])
+    expect(byChars).toEqual(byDurs)
   })
 })

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import { effStatus } from '@/lib/effStatus'
 
 // 生成流水线状态标签（本地维护，不用旧混剪的 lib/status.ts）
 const GEN_LABELS: Record<string, string> = {
@@ -38,8 +39,6 @@ type Task = {
   framework: { name: string | null } | null
   renderTasks: { status: string }[]
 }
-// autoRender 任务 generationTask.status 停在 VISUAL_RENDERING；真实终态在最新 RenderTask 上
-function effStatus(t: Task): string { return t.renderTasks[0]?.status ?? t.status }
 const TABS = ['全部', '生成中', '已完成', '失败'] as const
 
 export default function WorksPage() {

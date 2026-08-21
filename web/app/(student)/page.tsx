@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import { effStatus } from '@/lib/effStatus'
 
 // 生成任务状态 → 中文标签 + 色调（成片流水线，区别于旧混剪状态）
 const GEN_LABELS: Record<string, string> = {
@@ -17,7 +18,13 @@ function genTone(s: string): 'ok' | 'bad' | 'run' {
   return 'run'
 }
 
-type Gen = { id: string; subject: string; status: string; createdAt: string; framework: { name: string } | null }
+// renderTasks 必须一起取：autoRender 任务的 status 停在 VISUAL_RENDERING，
+// 真实进度在最新 RenderTask 上（见 lib/effStatus）
+type Gen = {
+  id: string; subject: string; status: string; createdAt: string
+  framework: { name: string } | null
+  renderTasks: { status: string }[]
+}
 type Work = { id: string; subject: string; framework: { name: string | null }; videoUrl: string | null; createdAt: string }
 type Me = { nickname: string | null }
 
@@ -62,7 +69,7 @@ export default function HomePage() {
                   <p className="truncate text-sm font-medium">{t.subject}</p>
                   <p className="mt-0.5 truncate text-xs text-ink3">{t.framework?.name ?? '框架'}</p>
                 </div>
-                <span className={`pill pill-${genTone(t.status)} shrink-0`}>{GEN_LABELS[t.status] ?? t.status}</span>
+                <span className={`pill pill-${genTone(effStatus(t))} shrink-0`}>{GEN_LABELS[effStatus(t)] ?? effStatus(t)}</span>
               </Link>
             ))}
           </div>

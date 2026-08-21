@@ -36,8 +36,33 @@ export function toDashSize(size: string | undefined, fallback = '768*1024'): str
   return best
 }
 
-export async function imageGenerate(opts: ImageOpts): Promise<Buffer> {
-  const cfg = await getCapabilityConfig('image')
+/**
+ * 临时覆盖生图配置。**只给后台的「试生成」用**——运营要在正式写进配置之前
+ * 先比几个模型出图的效果，否则换模型只能靠猜名字 + 跑整条任务，试错太贵。
+ *
+ * credsFrom 让它复用**别的能力**的 base_url + 密钥：想在百炼标准平台上试 qwen-image，
+ * 而现在 image 指向的是 MAAS 专属端点时，直接借 asr/vision 那把就行，不用重新填密钥。
+ */
+export interface ImageOverride {
+  baseUrl?: string
+  apiKey?: string
+  model?: string
+}
+
+export async function imageGenerate(opts: ImageOpts, override?: ImageOverride): Promise<Buffer> {
+  const base = await getCapabilityConfig('image')
+  const cfg = override
+    ? {
+        ...base,
+        ...(override.baseUrl ? { baseUrl: override.baseUrl } : {}),
+        ...(override.apiKey ? { apiKey: override.apiKey } : {}),
+        ...(override.model ? { model: override.model } : {}),
+        // 覆盖时忽略 image 能力自己的 extra.size：试生成要按传入的比例出图，
+        // 否则会被线上那条固定档位盖掉，试了半天比例还是旧的
+        extra: {},
+        enabled: true,
+      }
+    : base
   if (isMockMode(cfg)) return mockImagePng()
 
   // 百炼 qwen-image：DashScope 原生 multimodal-generation，返回图片 URL

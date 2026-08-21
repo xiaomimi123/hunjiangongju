@@ -11,6 +11,96 @@ const LABELS: Record<string, { name: string; hint: string }> = {
   asr: { name: 'ASR 转写', hint: '原视频语音转文字' },
 }
 
+/**
+ * 试生成：填模型名 + 提示词，直接出一张图。
+ *
+ * 换生图模型原先只能靠猜模型名 + 跑一整条任务（几分钟，还要等文案与配音）才看得到效果。
+ * 这里只做一次生图调用，几秒出图，可以把候选模型挨个比过去，选定了再写进上面的配置。
+ * **不落库、不改配置**——填的东西只对这一次调用生效。
+ */
+function TryImage() {
+  const [prompt, setPrompt] = useState('男性少年面部特写，日系动漫风格，细腻笔触，柔和光影，蓝灰色调，清澈蓝色眼眸')
+  const [model, setModel] = useState('')
+  const [size, setSize] = useState('720x960')
+  const [credsFrom, setCredsFrom] = useState('image')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [shots, setShots] = useState<{ url: string; model: string; ms: number; size: string }[]>([])
+
+  async function run() {
+    setBusy(true); setErr('')
+    try {
+      const res = await fetch('/api/admin/image/try', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, model, size, credsFrom }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        throw new Error(j?.error ?? `HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      // 新的排在前面：换模型时最有用的是"刚才那张 vs 这张"的直接对比
+      setShots((p) => [{
+        url: URL.createObjectURL(blob),
+        model: decodeURIComponent(res.headers.get('X-Gen-Model') ?? model ?? ''),
+        ms: Number(res.headers.get('X-Gen-Ms') ?? 0),
+        size,
+      }, ...p].slice(0, 8))
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card mt-6 space-y-3 p-5">
+      <div>
+        <p className="font-display font-bold">试生成</p>
+        <p className="text-xs text-ink3">
+          换模型前先在这里比效果：只做一次生图调用，不改上面的配置。
+          「借用凭据」是指用哪个能力的接口地址与密钥——想在百炼标准平台试
+          qwen-image，而 image 指向 MAAS 专属端点时，借 asr / vision 那把即可。
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <label className="text-sm text-ink2">借用凭据
+          <select className="field mt-1 w-32" value={credsFrom} onChange={(e) => setCredsFrom(e.target.value)}>
+            {['image', 'llm', 'asr', 'vision'].map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <label className="flex-1 text-sm text-ink2">模型名（留空用该能力当前配置的模型）
+          <input className="field mt-1" value={model} onChange={(e) => setModel(e.target.value)} placeholder="如 qwen-image / wan2.7-image" autoCapitalize="none" />
+        </label>
+        <label className="text-sm text-ink2">尺寸
+          <input className="field mt-1 w-28" value={size} onChange={(e) => setSize(e.target.value)} placeholder="720x960" />
+        </label>
+      </div>
+      <label className="block text-sm text-ink2">提示词
+        <textarea className="field mt-1 text-xs" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      </label>
+      <button onClick={run} disabled={busy || !prompt.trim()} className="btn-primary">
+        {busy ? '生成中…' : '生成一张'}
+      </button>
+      {err && <p className="pill pill-bad break-all">{err}</p>}
+      {shots.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {shots.map((s, i) => (
+            <figure key={s.url} className="w-40">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={s.url} alt={`试生成 ${i + 1}`} className="w-full rounded border border-line" />
+              <figcaption className="mt-1 break-all text-[11px] text-ink3">
+                {s.model || '(默认模型)'} · {s.size} · {(s.ms / 1000).toFixed(1)}s
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ModelsPage() {
   const [list, setList] = useState<Cap[]>([])
   const [keyInput, setKeyInput] = useState<Record<string, string>>({})
@@ -67,6 +157,7 @@ export default function ModelsPage() {
           </div>
         ))}
       </div>
+      <TryImage />
     </div>
   )
 }

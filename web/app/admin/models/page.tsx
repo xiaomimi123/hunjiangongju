@@ -133,6 +133,8 @@ function TryImage() {
 export default function ModelsPage() {
   const [list, setList] = useState<Cap[]>([])
   const [keyInput, setKeyInput] = useState<Record<string, string>>({})
+  // extra 的文本态单独存：JSON 边打边不合法是常态，不能每敲一个字就往 Cap.extra 里塞对象
+  const [extraText, setExtraText] = useState<Record<string, string>>({})
   const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState('')
 
   async function load() { try { setList(await api<Cap[]>('/api/admin/models')) } catch (e) { setErr((e as Error).message) } }
@@ -143,8 +145,29 @@ export default function ModelsPage() {
   async function save(c: Cap) {
     setBusy(c.capability + ':save'); setErr(''); setMsg('')
     try {
-      await api(`/api/admin/models/${c.capability}`, { method: 'PUT', body: { baseUrl: c.baseUrl, model: c.model, enabled: c.enabled, apiKey: keyInput[c.capability] || undefined } })
-      setKeyInput((k) => ({ ...k, [c.capability]: '' })); setMsg(`${LABELS[c.capability].name} 已保存`); await load()
+      // extra 必须在**保存前**校验并整体拒绝：写进去一个坏 JSON，
+      // 表现是「音色下拉里那两个克隆音色莫名其妙不见了」，而不会有任何报错。
+      let extra: unknown
+      const raw = extraText[c.capability]
+      if (raw !== undefined) {
+        const t = raw.trim()
+        if (!t) extra = {}
+        else {
+          try { extra = JSON.parse(t) } catch { throw new Error('高级参数不是合法 JSON，请检查引号与逗号') }
+          if (!extra || typeof extra !== 'object' || Array.isArray(extra)) throw new Error('高级参数必须是一个 JSON 对象')
+        }
+      }
+      await api(`/api/admin/models/${c.capability}`, {
+        method: 'PUT',
+        body: {
+          baseUrl: c.baseUrl, model: c.model, enabled: c.enabled,
+          apiKey: keyInput[c.capability] || undefined,
+          ...(extra !== undefined ? { extra } : {}),
+        },
+      })
+      setKeyInput((k) => ({ ...k, [c.capability]: '' }))
+      setExtraText((t) => { const n = { ...t }; delete n[c.capability]; return n })
+      setMsg(`${LABELS[c.capability].name} 已保存`); await load()
     } catch (e) { setErr((e as Error).message) } finally { setBusy('') }
   }
   async function test(c: Cap) {
@@ -179,6 +202,16 @@ export default function ModelsPage() {
               <input className="field mt-1" value={c.model} onChange={(e) => upd(c.capability, { model: e.target.value })} /></label>
             <label className="block text-sm text-ink2">密钥 {c.hasKey && <span className="text-ink3">（已设置，留空不改）</span>}
               <input className="field mt-1" type="password" value={keyInput[c.capability] ?? ''} onChange={(e) => setKeyInput((k) => ({ ...k, [c.capability]: e.target.value }))} placeholder={c.hasKey ? '••••••••' : ''} autoCapitalize="none" /></label>
+            <label className="block text-sm text-ink2">高级参数（JSON，留空为 {}）
+              <textarea
+                className="field mt-1 font-mono text-xs"
+                rows={3}
+                value={extraText[c.capability] ?? JSON.stringify(c.extra ?? {}, null, 2)}
+                onChange={(e) => setExtraText((t) => ({ ...t, [c.capability]: e.target.value }))}
+                spellCheck={false}
+                placeholder={'{"customVoices":[{"id":"S_xxx","label":"我的男声"}]}'}
+              />
+            </label>
             <div className="flex gap-2">
               <button onClick={() => save(c)} disabled={busy === c.capability + ':save'} className="btn-primary flex-1">保存</button>
               <button onClick={() => test(c)} disabled={busy === c.capability + ':test'} className="btn-ghost shrink-0">测试连通</button>

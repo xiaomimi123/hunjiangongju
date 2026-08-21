@@ -301,7 +301,7 @@ export default function FrameworksPage() {
                 ))}
                 <StyleFromImage onDone={(v) => setF({ imageStylePrompt: v })} />
               </div>
-              <textarea className="field mt-1 text-xs" rows={3} value={form.imageStylePrompt} onChange={(e) => setF({ imageStylePrompt: e.target.value })} />
+              <textarea className="field mt-1 text-xs" rows={3} value={form.imageStylePrompt} onChange={(e) => setF({ imageStylePrompt: e.target.value })} placeholder="留空则用默认：写实摄影质感,柔和自然光,低饱和统一色调,浅景深,电影感构图" />
             </label>
             <label className="block">
               <span className="eyebrow">叠加模板（JSON）</span>

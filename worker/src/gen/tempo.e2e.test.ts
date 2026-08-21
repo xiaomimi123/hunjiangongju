@@ -10,7 +10,7 @@ import { spawnSync } from 'child_process'
 import { mkdtempSync, rmSync, copyFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
-import { compressTo } from './generateTts'
+import { compressTo, prependSilence } from './generateTts'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -84,6 +84,30 @@ d('真音频验收 —— 配音变速压回槽位', () => {
     const used = await compressTo(f, SRC_MS, 1500, 1.25)
     expect(used).toBe(1.25)
     expect(durationMs(f), '压过头了，封顶没生效').toBeGreaterThan(2300)
+  })
+
+  // ★ 书名前的留白：快闪结束后先静一下，书名才出口。
+  // 必须验「静音加在**开头**」而不是只验时长变长——加在结尾时长一样会变长，
+  // 但节奏完全是另一回事（那是段尾补静音干的活）。
+  it('前置留白：静音加在开头，原声整体后移', async () => {
+    const f = path.join(dir, 'e.wav')
+    copyFileSync(srcTone, f)
+    await prependSilence(f, 400)
+    expect(Math.abs(durationMs(f) - (SRC_MS + 400)), `总长不对: ${durationMs(f)}`).toBeLessThan(40)
+
+    // 头 300ms 必须是静音，而 500ms 处必须已经有声音
+    const rms = (fromSec: number, durSec: number): number => {
+      const r = spawnSync(FFMPEG,
+        ['-v', 'error', '-ss', String(fromSec), '-t', String(durSec), '-i', f,
+          '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '1', '-'],
+        { encoding: 'buffer', maxBuffer: 16 * 1024 * 1024 })
+      const b = r.stdout as unknown as Buffer
+      let sum = 0
+      for (let i = 0; i + 1 < b.length; i += 2) sum += b.readInt16LE(i) ** 2
+      return Math.sqrt(sum / (b.length / 2))
+    }
+    expect(rms(0, 0.3), '开头不是静音，留白没加在前面').toBeLessThan(50)
+    expect(rms(0.5, 0.3), '留白之后没有声音').toBeGreaterThan(1000)
   })
 
   // 只压不拉：配音比槽位短时该走补静音那条路，不该在这里被拉长

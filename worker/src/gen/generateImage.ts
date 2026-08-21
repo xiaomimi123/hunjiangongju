@@ -27,7 +27,19 @@ async function makeThumbSafely(abs: string): Promise<void> {
  */
 const COVER_CONCURRENCY = 4
 
-export const DEFAULT_IMAGE_STYLE = '梵高后印象派风格,旋转笔触,厚重颜料肌理,鲜明蓝黄对比,星夜质感,无人物'
+/**
+ * 框架没填画风时用的兜底。
+ *
+ * ★ 这里**不能**放带流派签名的画风。原值是「梵高后印象派风格,旋转笔触,厚重颜料肌理,…」，
+ * 而后台那个输入框连 placeholder 都没有——运营看到的是空白框，出来的图却全是梵高，
+ * 从界面上完全看不出这个默认值的存在（线上实测反馈：「我什么都没填，为什么都是梵高」）。
+ *
+ * 也不能干脆留空：一条片子四张图各自发一次生图请求，没有统一画风约束时，
+ * 模型可能给出照片/插画/3D 混搭的四张，成片观感是坏的。
+ * 所以兜底取**中性但一致**的方向——只约束质感与光线，不指定任何画派。
+ * 同一份文案要什么画派，由运营在框架里显式填，或用「参考图反推」。
+ */
+export const DEFAULT_IMAGE_STYLE = '写实摄影质感,柔和自然光,低饱和统一色调,浅景深,电影感构图'
 
 // 取书单：variables.books 优先，回退 overlayTemplate.books；过滤无 title 的脏项。
 // 顺序在此**必须原样保留**——快闪书封按该顺序出卡，主题书排在末位即「最后一张定格」。
@@ -53,7 +65,10 @@ export async function generateImage(genTaskId: string): Promise<void> {
     where: { id: genTaskId },
     include: { framework: true },
   })
-  const stylePrompt = (task.framework.imageStylePrompt ?? '').trim() || DEFAULT_IMAGE_STYLE
+  const framed = (task.framework.imageStylePrompt ?? '').trim()
+  const stylePrompt = framed || DEFAULT_IMAGE_STYLE
+  // 画风是成片观感的头号变量，务必让日志能回答「这条片子到底用了哪个画风、是谁给的」
+  console.log(`[gen] generate-image ${genTaskId}: 画风=${framed ? '框架指定' : '默认兜底'} 「${stylePrompt}」`)
 
   const segments = await prisma.generatedSegment.findMany({
     where: { generationTaskId: genTaskId },

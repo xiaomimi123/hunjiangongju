@@ -2,13 +2,28 @@ import { describe, it, expect } from 'vitest'
 import { resolveBooks, DEFAULT_IMAGE_STYLE } from './generateImage'
 
 describe('DEFAULT_IMAGE_STYLE', () => {
-  it('导出非空的梵高后印象派默认画风兜底文案', () => {
+  // ★ 兜底画风**不得带流派签名**。
+  //
+  // 原值是「梵高后印象派风格,旋转笔触,厚重颜料肌理,…」，而后台那个输入框连
+  // placeholder 都没有：运营看到空白框、什么都没填，出来的图却全是梵高，
+  // 从界面上完全看不出这个默认值存在（线上实测反馈）。
+  it('不含任何画派/画家名', () => {
     expect(DEFAULT_IMAGE_STYLE).toBeTruthy()
-    expect(DEFAULT_IMAGE_STYLE).toContain('梵高')
-    // 默认画风保守带「无人物」：不配画风时产出风景/静物最稳。
-    // 注意 negative_prompt 已不再硬禁人物(见 artScenes.ts:IMAGE_NEGATIVE_PROMPT)——
-    // 要人物的槽位自己写画风即可,不必再改这个兜底值。
-    expect(DEFAULT_IMAGE_STYLE).toContain('无人物')
+    for (const painter of ['梵高', '莫奈', '达芬奇', '毕加索', '浮世绘', '后印象派', '印象派']) {
+      expect(DEFAULT_IMAGE_STYLE, `兜底画风又混进了流派签名: ${DEFAULT_IMAGE_STYLE}`).not.toContain(painter)
+    }
+  })
+
+  // 也不能干脆留空：四张图各发一次生图请求，没有统一约束时模型会给出
+  // 照片/插画/3D 混搭的四张，成片观感是坏的。兜底只约束质感与光线。
+  it('仍给出统一的质感/光线方向（不是空串）', () => {
+    expect(Array.from(DEFAULT_IMAGE_STYLE).length).toBeGreaterThan(8)
+  })
+
+  // 「无人物」已去掉：negative_prompt 不再硬禁人物（见 artScenes.ts:IMAGE_NEGATIVE_PROMPT），
+  // 而开场那张卡通头像走的正是这个兜底值——留着它头像根本出不来。
+  it('不禁人物（开场头像槽位靠它）', () => {
+    expect(DEFAULT_IMAGE_STYLE).not.toContain('无人物')
   })
 })
 

@@ -3,7 +3,7 @@ import { runCmd, probeText } from '../runCmd'
 import path from 'path'
 import { prisma, ttsSynthesize, setGenerationStatus, enqueueGen, withRetry, timeCaptionBeats, isValidVoice, isPlausibleVoiceId } from '@mixcut/db'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
-import { slotDurationsForSegments, openFlashWindowMs } from '@mixcut/db'
+import { slotDurationsForSegments, speechCapacities, openFlashWindowMs, BOOK_TITLE_LEAD_MS } from '@mixcut/db'
 import { DATA_DIR } from '../paths'
 
 /** 配音超出槽位这个倍数才动手压；以下的零头交给画面自然吸收，不值得为它变速 */
@@ -73,6 +73,20 @@ export async function compressTo(audioAbs: string, curMs: number, targetMs: numb
   if (!r.ok) throw new Error(`配音变速失败: ${r.out.slice(-400)}`)
   await fs.rename(tmp, audioAbs)
   return factor
+}
+
+/**
+ * 在音频**开头**插入静音。
+ *
+ * 用途：快闪结束后先静一下，书名才出口——原片的节奏是「今天分享的是…」说完，
+ * 书封一张张翻过去（无旁白），停顿一下，再报书名。
+ */
+export async function prependSilence(audioAbs: string, leadMs: number): Promise<void> {
+  const tmp = `${audioAbs}.lead.wav`
+  const r = await runCmd('ffmpeg',
+    ['-y', '-i', audioAbs, '-af', `adelay=${Math.round(leadMs)}:all=1`, '-ar', '48000', '-ac', '1', tmp])
+  if (!r.ok) throw new Error(`插入前置留白失败: ${r.out.slice(-400)}`)
+  await fs.rename(tmp, audioAbs)
 }
 
 async function concatClips(clipPaths: string[], outAbs: string): Promise<void> {
@@ -152,10 +166,14 @@ export async function generateTts(genTaskId: string): Promise<void> {
   // 第二版改成共用 speechSlotDurations，但两侧传的 segCount 仍然不同
   //（文案侧含开场白那一段、配音侧不含），配额表整体错位一格。
   // 现在两侧都取同一份含第 0 格（开场+快闪）的完整槽位表。
-  const allSlots = slotDurationsForSegments(openFlashMs, tp.body.slotDurationsMs, segments.length)
+  const timelineMs = slotDurationsForSegments(openFlashMs, tp.body.slotDurationsMs, segments.length)
+  // 「占多长」与「能说多久」是两件事：快闪期间无旁白、书名前留 400ms，
+  // 这些留白是节奏的一部分，不能拿来塞话（见 speechCapacities）。
+  const speechCap = speechCapacities(timelineMs, tp.open.durationMs)
   // 草稿没给正片槽位时回退老行为：只有第 0 段按开场+快闪窗口对齐
   const slotFor = (i: number): number | undefined =>
-    allSlots[i] ?? (i === 0 && openFlashMs > 0 ? openFlashMs : undefined)
+    timelineMs[i] ?? (i === 0 && openFlashMs > 0 ? openFlashMs : undefined)
+  const capFor = (i: number): number | undefined => speechCap[i] ?? slotFor(i)
 
   const clipPaths: string[] = []
   const bodyTimings: { seqNo: number; startMs: number; endMs: number }[] = []
@@ -181,24 +199,32 @@ export async function generateTts(genTaskId: string): Promise<void> {
     // 截断会把话说到一半切掉）
     let durMs = speechMs
     const slotMs = slotFor(i)
-    if (slotMs && slotMs > speechMs) {
+    const capMs = capFor(i)
+
+    // ① 话太长 → 保音高压到「能说话的时长」（不是占位时长，否则会把留白吃掉）
+    if (capMs && speechMs > capMs * PACE_TOLERANCE) {
+      const used = await compressTo(clipPath, speechMs, capMs, MAX_TEMPO)
+      durMs = (await probeDurationMs(clipPath)) || speechMs / used
+      const over = Math.round((durMs / capMs - 1) * 100)
+      const msg = `[gen] generate-tts ${genTaskId}: 第 ${i} 段配音 ${Math.round(speechMs)}ms 超可说话时长 ${capMs}ms，变速 ${used.toFixed(2)}× → ${Math.round(durMs)}ms`
+      if (over > 1) console.warn(`${msg}（仍超 +${over}%，已到变速上限 ${MAX_TEMPO}×）`)
+      else console.log(msg)
+    }
+
+    // ② 正片第 1 段：书名出口前先留白
+    if (i === 1 && timelineMs.length > 0 && BOOK_TITLE_LEAD_MS > 0) {
+      await prependSilence(clipPath, BOOK_TITLE_LEAD_MS)
+      durMs = (await probeDurationMs(clipPath)) || durMs + BOOK_TITLE_LEAD_MS
+    }
+
+    // ③ 短于槽位 → 段尾补静音，精确落回草稿的切点
+    if (slotMs && slotMs > durMs) {
+      const was = durMs
       await padSilenceTo(clipPath, slotMs)
       durMs = (await probeDurationMs(clipPath)) || slotMs
-      console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段补静音 ${Math.round(speechMs)}→${Math.round(durMs)}ms（对齐草稿槽位 ${slotMs}ms）`)
-    } else if (slotMs && speechMs > slotMs * PACE_TOLERANCE) {
-      // 超出容差 → 保音高压回槽位（见 compressTo）。压不到位的部分照旧让画面变长，
-      // 并记一条告警：持续出现说明字数配额偏松，要回头调语速常数。
-      const used = await compressTo(clipPath, speechMs, slotMs, MAX_TEMPO)
-      durMs = (await probeDurationMs(clipPath)) || speechMs / used
-      if (durMs < slotMs) {
-        // 变速后略短于槽位（atempo 的取整）→ 补静音精确落位
-        await padSilenceTo(clipPath, slotMs)
-        durMs = (await probeDurationMs(clipPath)) || slotMs
-      }
-      const over = Math.round((durMs / slotMs - 1) * 100)
-      const msg = `[gen] generate-tts ${genTaskId}: 第 ${i} 段配音 ${Math.round(speechMs)}ms 超草稿槽位 ${slotMs}ms，变速 ${used.toFixed(2)}× → ${Math.round(durMs)}ms`
-      if (over > 1) console.warn(`${msg}（仍超 +${over}%，已到变速上限 ${MAX_TEMPO}×，该段画面会相应变长）`)
-      else console.log(msg)
+      console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段补静音 ${Math.round(was)}→${Math.round(durMs)}ms（对齐草稿槽位 ${slotMs}ms）`)
+    } else if (slotMs && durMs > slotMs * PACE_TOLERANCE) {
+      console.warn(`[gen] generate-tts ${genTaskId}: 第 ${i} 段 ${Math.round(durMs)}ms 仍超槽位 ${slotMs}ms（+${Math.round((durMs / slotMs - 1) * 100)}%），该段画面会相应变长`)
     }
     clipPaths.push(clipPath)
 

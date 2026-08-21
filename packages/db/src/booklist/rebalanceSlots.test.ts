@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { rebalanceToSlotChars, splitSentences } from './rebalanceSlots'
-import { slotDurationsForSegments, charBudgetsFromWeights } from './draftCharBudget'
+import { slotDurationsForSegments, charBudgetsFromWeights, speechCapacities, charsForSpeechMs, BOOK_TITLE_LEAD_MS } from './draftCharBudget'
 
 const len = (s: string) => Array.from(s).length
 
@@ -92,6 +92,80 @@ describe('rebalanceToSlotChars', () => {
       expect(Math.abs(c / total - want[i]), `第 ${i} 段比例 ${(c / total).toFixed(3)} 偏离目标 ${want[i].toFixed(3)}: ${got}`)
         .toBeLessThan(0.09)
     })
+  })
+})
+
+describe('rebalanceToSlotChars —— 写太少也算失衡', () => {
+  // ★ 判定必须双向。第一版只判「写太多」：线上那条片子段2 只写到配额的 0.71 倍
+  //（29 字 / 配额 41），不触发重排 —— 8 秒的槽位里有 3 秒没人说话，靠补静音填成静场。
+  it('某段远低于配额（0.7×）时也触发重排', () => {
+    // 段0 塞满、段1 空荡：段1 只有配额的 ~0.3 倍，但没有任何一段超出 1.4 倍
+    const long = Array.from({ length: 12 }, (_, i) => `甲${i}，`).join('')
+    const short = '乙，'
+    const lines = [long, short]
+    // 先确认「只判写太多」的话这组数据不会触发
+    expect(Array.from(long).length / 30).toBeLessThan(1.4)
+    const out = rebalanceToSlotChars(lines, [30, 30])
+    expect(out, `写太少没被判为失衡: ${lines.map(len)}`).not.toEqual(lines)
+    const got = out.map(len)
+    expect(Math.min(...got) / Math.max(...got), `重排后仍然一头沉: ${got}`).toBeGreaterThan(0.6)
+  })
+})
+
+describe('speechCapacities —— 占多长 ≠ 能说多久', () => {
+  const timeline = [3984, 5703, 8064, 6067]
+
+  // ★ 第 0 段在时间轴上占「开场+快闪」整个窗口，但话只能说到碎裂动画结束为止：
+  // 快闪那一段（书封一张张翻过去）原片没有旁白。此前按整个窗口给字数，
+  // 开场白被写成 27 字念了 5064ms，整个快闪期间都在说话。
+  it('第 0 段的可说话时长 = 开场碎裂窗口，不含快闪', () => {
+    expect(speechCapacities(timeline, 2159)[0]).toBe(2159)
+  })
+
+  // 断言具体值而不是 `5703 - BOOK_TITLE_LEAD_MS`：后者是恒等式，
+  // 把常数置 0 时两边一起变成 5703，照样绿（第一版就是这么假绿的）。
+  it('第 1 段头部扣掉书名前的留白', () => {
+    expect(BOOK_TITLE_LEAD_MS, '留白被去掉了，书名会紧贴快闪出口').toBeGreaterThan(0)
+    expect(speechCapacities(timeline, 2159)[1]).toBe(5303)
+  })
+
+  it('其余段不动（留白只在这两处）', () => {
+    const cap = speechCapacities(timeline, 2159)
+    expect(cap[2]).toBe(8064)
+    expect(cap[3]).toBe(6067)
+  })
+
+  it('openWindowMs 缺失/不小于第 0 格 → 第 0 段不裁（classic 模板零回归）', () => {
+    expect(speechCapacities(timeline, 0)[0]).toBe(3984)
+    expect(speechCapacities(timeline, 9999)[0]).toBe(3984)
+  })
+
+  it('空槽位表 → 空数组', () => {
+    expect(speechCapacities([], 2159)).toEqual([])
+  })
+
+  // ★ 效果验收：按可说话时长分字数，开场白的配额必须明显小于按占位时长分的
+  it('按可说话时长分字数：开场白配额被砍下来', () => {
+    const byTimeline = charBudgetsFromWeights(timeline, 124)
+    const byCapacity = charBudgetsFromWeights(speechCapacities(timeline, 2159), 124)
+    expect(byCapacity[0], `开场白配额没被砍: ${byTimeline[0]} → ${byCapacity[0]}`).toBeLessThan(byTimeline[0] * 0.7)
+  })
+})
+
+describe('charsForSpeechMs —— 按实测语速折算字数', () => {
+  it('按实测语速折算（5.5 字/秒）', () => {
+    expect(charsForSpeechMs(2000)).toBe(11)
+    expect(charsForSpeechMs(10000)).toBe(55)
+  })
+  // ★ 常数必须比换音色前那个 6 小：实测这条克隆音色是 5.56 字/秒，
+  // 按 6 推预算会系统性偏松约 8%，每段都得靠变速压回来。
+  // 用 10 秒而不是 1 秒来比：1 秒时 round(5.5)=6，取整会把差别抹平。
+  it('比换音色前的 CHARS_PER_SEC=6 保守', () => {
+    expect(charsForSpeechMs(10_000)).toBeLessThan(60)
+  })
+  it('非法时长 → 0', () => {
+    expect(charsForSpeechMs(0)).toBe(0)
+    expect(charsForSpeechMs(NaN)).toBe(0)
   })
 })
 

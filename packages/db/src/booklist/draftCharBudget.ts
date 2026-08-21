@@ -177,6 +177,59 @@ export function slotDurationsForSegments(
 }
 
 /**
+ * 我们自己配音的**实测**语速（字/秒）。
+ *
+ * pipeline.ts 的 CHARS_PER_SEC = 6 是**换成豆包声音复刻 2.0 之前**测的
+ *（注释里记的是「99 字念了 16.15 秒」）。换音色之后没人回测过。
+ *
+ * 2026-08-22 线上实测这条克隆音色（任务 fd61a260）：
+ *   段0 27字/5064ms=5.33   段1 26字/4440ms=5.86
+ *   段2 29字/5064ms=5.73   段3 37字/6816ms=5.43
+ *   整体 119字/21384ms = 5.56 字/秒
+ * 取 5.5 略保守：宁可字少一点靠补静音填满，也不要字多了靠变速压——
+ * 变速有上限，压不动就会把时间轴顶开。
+ *
+ * 换音色就要重新标定。worker 日志里的「第 N 段配音 XXXXms」配上该段字数即可算出。
+ */
+export const SPEECH_CHARS_PER_SEC = 5.5
+
+/** 按实测语速，一段时长最多装得下多少字 */
+export function charsForSpeechMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 0
+  return Math.round((ms / 1000) * SPEECH_CHARS_PER_SEC)
+}
+
+/** 正片第 1 段念出书名之前的留白：快闪结束后先静一下，书名才落下来 */
+export const BOOK_TITLE_LEAD_MS = 400
+
+/**
+ * 各段里**能用来说话**的时长——与「这一段在时间轴上占多长」不是一回事。
+ *
+ * 两处刻意留白，它们是节奏的一部分，不是可以拿来塞字的空间：
+ *
+ * 1. **第 0 段**在时间轴上占「开场 + 快闪」整个窗口，但话只能说到碎裂动画结束为止；
+ *    快闪那一段（书封一张张翻过去）原片是没有旁白的。
+ *    此前这里按整个窗口给字数，开场白因此被写成 27 字、念了 5064ms，
+ *    整个快闪期间都在说话，还得靠变速压——留白被字填满了。
+ * 2. **第 1 段**开头留 BOOK_TITLE_LEAD_MS，让书名在快闪之后停顿一下再出口。
+ *
+ * @param timelineMs slotDurationsForSegments 的产出（各段在时间轴上的长度）
+ * @param openWindowMs 开场碎裂窗口（快闪之前那段），<=0 或不小于第 0 格时不裁
+ */
+export function speechCapacities(
+  timelineMs: number[],
+  openWindowMs: number,
+  bookTitleLeadMs = BOOK_TITLE_LEAD_MS,
+): number[] {
+  if (!Array.isArray(timelineMs) || timelineMs.length === 0) return []
+  return timelineMs.map((t, i) => {
+    if (i === 0) return openWindowMs > 0 && openWindowMs < t ? openWindowMs : t
+    if (i === 1 && bookTitleLeadMs > 0) return Math.max(MIN_SPEECH_SLOT_MS, t - bookTitleLeadMs)
+    return t
+  })
+}
+
+/**
  * 按权重把总字数按比例分到各段（每段不低于 MIN_CHARS_PER_SEG）。
  * 权重就是各槽位时长——**槽位多长就分多少字**。
  */

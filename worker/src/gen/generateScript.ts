@@ -13,6 +13,8 @@ import {
   parseTemplateParams,
   fitToSegmentCount,
   slotDurationsForSegments,
+  speechCapacities,
+  charsForSpeechMs,
   charBudgetsFromWeights,
   rebalanceToSlotChars,
   openFlashWindowMs,
@@ -492,8 +494,21 @@ export async function generateScript(genTaskId: string): Promise<void> {
   // 此前这里传 segCount、配音侧传 segCount-1，同一个函数被喂了不同的 n，
   // 配额表整体错位一格：文案侧以为有 4 个正片槽位，实际只有 3 个，
   // 第 0 段其实是开场白（占开场+快闪窗口，不在正片槽位里）。
-  const allSlots = slotDurationsForSegments(openFlashWindowMs(tp), tp.body.slotDurationsMs, segCount)
-  const slotChars = allSlots.length ? charBudgetsFromWeights(allSlots, maxTotalChars) : undefined
+  const timelineMs = slotDurationsForSegments(openFlashWindowMs(tp), tp.body.slotDurationsMs, segCount)
+  // 分字数要按「能说话的时长」而不是「占位时长」：快闪期间与书名前的留白
+  // 是节奏的一部分，不是可以拿来塞字的空间（见 speechCapacities）。
+  const speechCap = speechCapacities(timelineMs, tp.open.durationMs)
+  // ★ 总量再按**实测语速**兜一道。
+  // 框架里存的 maxTotalChars 是导入时按 CHARS_PER_SEC=6 推的，而那个常数是换成
+  // 豆包声音复刻 2.0 **之前**测的；实测这条克隆音色只有 5.56 字/秒，按 6 推的预算
+  // 系统性偏松约 8%。改导入期的常数对**存量框架**无效（值已经落库），所以在这里
+  // 按语音容量重算一次上界，取两者较小的。
+  const capTotal = charsForSpeechMs(speechCap.reduce((a, b) => a + b, 0))
+  const budgetChars = capTotal > 0 ? Math.min(maxTotalChars, capTotal) : maxTotalChars
+  const slotChars = speechCap.length ? charBudgetsFromWeights(speechCap, budgetChars) : undefined
+  if (slotChars) {
+    console.log(`[gen] generate-script ${genTaskId}: 字数预算 ${maxTotalChars}→${budgetChars}（按语音容量 ${speechCap.join('/')}ms @ 实测语速），逐段 ${slotChars.join('/')}`)
+  }
 
   const resolved = resolveScriptMode(task.variables)
   const mode = resolved.mode
@@ -524,10 +539,10 @@ export async function generateScript(genTaskId: string): Promise<void> {
     // imitate: 用参考仿写；auto: 现状。二者复用现有 validate/重试/兜底循环。
     const angle = pickAngle(genTaskId)
     const basePrompt = scriptMode === 'imitate'
-      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars, ...(slotChars ? { slotChars } : {}) }, openTitleText })
+      ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, openTitleText })
       : themeBook
-        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars, ...(slotChars ? { slotChars } : {}) }, angle, openTitleText })
-        : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars, ...(slotChars ? { slotChars } : {}) }, variablesText, angle, openTitleText })
+        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, angle, openTitleText })
+        : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, variablesText, angle, openTitleText })
 
     let prompt = basePrompt
     let lastErrors: string[] = []
@@ -551,7 +566,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
       // parseBookMarkedLines 整体成功与否，都要逐行剥掉可能存在的标记（stripBookMark 复用
       // 同一 BOOK_MARK_RE，不会与 parseBookMarkedLines 的判定产生分歧）。
       const lines = marked ? marked.map((m) => m.text) : wantsBookMark ? rawLines.map(stripBookMark) : rawLines
-      const result = validateScript(lines, maxLines, maxTotalChars)
+      const result = validateScript(lines, maxLines, budgetChars)
       lastClean = result.clean
       lastIdxs = marked ? marked.map((m) => m.bookIdx) : null
 
@@ -563,7 +578,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
 
       lastErrors = result.errors
       // 追加压缩指令后重试
-      prompt = `${basePrompt}\n\n上一次生成过长（${result.errors.join('；')}），请压缩到 ${maxLines} 行 / ${maxTotalChars} 字以内重写。`
+      prompt = `${basePrompt}\n\n上一次生成过长（${result.errors.join('；')}），请压缩到 ${maxLines} 行 / ${budgetChars} 字以内重写。`
     }
 
     if (!clean) {

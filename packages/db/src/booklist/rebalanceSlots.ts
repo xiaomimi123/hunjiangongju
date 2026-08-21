@@ -18,8 +18,17 @@
 
 import { BREAK_CHARS } from './fitSegments'
 
-/** 超过目标字数这个倍数才认为「失衡」，值以下原样保留 LLM 的分段 */
-const DEFAULT_TOLERANCE = 1.4
+/** 超过目标字数这个倍数 → 失衡（这一段会把时间轴顶开） */
+const OVER_RATIO = 1.4
+/**
+ * 低于目标字数这个倍数 → 也算失衡。
+ *
+ * 判定必须**双向**。第一版只判「写太多」，结果线上那条片子里段2 只写到配额的
+ * 0.71 倍（29 字 / 配额 41），不触发重排——那 8 秒的槽位里有 3 秒没人说话，
+ * 全靠补静音填成了静场。写太少和写太多一样是失衡，只是症状从"顶开时间轴"
+ * 变成了"画面在那儿干挂着"。
+ */
+const UNDER_RATIO = 0.75
 
 const len = (s: string): number => Array.from(s).length
 
@@ -51,7 +60,8 @@ export function splitSentences(text: string): string[] {
  *
  * @param lines 已经是恰好 N 段的文案（**不含开场白**）
  * @param targetChars 各段目标字数，长度须与 lines 相同
- * @param tolerance 失衡判定阈值，默认 1.4（某段超出目标 40% 才介入）
+ * @param overRatio 写太多的判定阈值，默认 1.4
+ * @param underRatio 写太少的判定阈值，默认 0.75（写太少会让画面干挂着，同样是失衡）
  * @returns 重排后的 N 段；判定不失衡、或输入不合法、或切不出足够句子时**原样返回**
  *
  * 不丢字：返回各段拼接起来与输入各段拼接起来完全相同。
@@ -59,13 +69,17 @@ export function splitSentences(text: string): string[] {
 export function rebalanceToSlotChars(
   lines: string[],
   targetChars: number[],
-  tolerance = DEFAULT_TOLERANCE,
+  overRatio = OVER_RATIO,
+  underRatio = UNDER_RATIO,
 ): string[] {
   if (!Array.isArray(lines) || !Array.isArray(targetChars)) return lines
   if (lines.length < 2 || lines.length !== targetChars.length) return lines
   if (targetChars.some((t) => !Number.isFinite(t) || t <= 0)) return lines
 
-  const balanced = lines.every((l, i) => len(l) <= targetChars[i] * tolerance)
+  const balanced = lines.every((l, i) => {
+    const r = len(l) / targetChars[i]
+    return r <= overRatio && r >= underRatio
+  })
   if (balanced) return lines
 
   const sents = splitSentences(lines.join(''))

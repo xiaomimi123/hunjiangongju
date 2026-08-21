@@ -166,6 +166,17 @@ describe('fromBodyData —— 开场那一段不能留空', () => {
     expect(o.openingClipAbs).toBeUndefined()
     expect(o.openStillAbs).toBe('/data/gen/x/hf/media/01.png')
   })
+  // ★ 开场图有自己的槽位后，必须优先用它。
+  // 之前渲染层直接取正片第 1 张，导致「开场卡通头像」和「正片艺术画风」二选一。
+  it('配了开场图就用它，不再借正片第 1 张', () => {
+    const o = fromBodyData(data({ openImage: { src: 'media/open.png' } }), io)
+    expect(o.openStillAbs).toBe('/data/gen/x/hf/media/open.png')
+  })
+
+  it('没配开场图才回退正片第 1 张（老框架零回归）', () => {
+    expect(fromBodyData(data(), io).openStillAbs).toBe('/data/gen/x/hf/media/01.png')
+  })
+
   it('有开场片段时不再给 openStillAbs（用不上）', () => {
     const o = fromBodyData(data(), { ...io, openingClipAbs: '/o.mp4' })
     expect(o.openingClipAbs).toBe('/o.mp4')

@@ -17,6 +17,15 @@ export interface ImageSlot {
   style?: string
   /** source==='library' 时限定素材文件夹；留空则全库 */
   folder?: string
+  /**
+   * 参考图（DATA_DIR 下的相对路径，如 `refs/xxx.png`）。
+   *
+   * 与 style 的区别：style 是**文字**描述的画风，参考图是**图本身**参与生成
+   * （qwen-image-3.0 的 content 支持同时给 image 与 text）。
+   * 文字描述必然丢信息——同一句「日系动漫画风」能画出天差地别的东西；
+   * 带上原图让模型直接沿用它的笔触与配色，比任何描述都准。两者可以并用。
+   */
+  refImage?: string
 }
 
 export interface ImageSlotConfig {
@@ -51,6 +60,7 @@ export function readImageSlots(overlayTemplate: unknown): ImageSlotConfig | null
       ...(typeof s.prompt === 'string' && s.prompt.trim() ? { prompt: s.prompt.trim() } : {}),
       ...(typeof s.style === 'string' && s.style.trim() ? { style: s.style.trim() } : {}),
       ...(typeof s.folder === 'string' && s.folder.trim() ? { folder: s.folder.trim() } : {}),
+      ...(typeof s.refImage === 'string' && s.refImage.trim() ? { refImage: s.refImage.trim() } : {}),
     })
   }
   return { count, slots }
@@ -75,13 +85,20 @@ export interface OpenImageConfig {
   prompt?: string
   /** 画风。留空则沿用框架的 imageStylePrompt */
   style?: string
+  /** 参考图（DATA_DIR 下的相对路径）。见 ImageSlot.refImage */
+  refImage?: string
 }
 
 export function readOpenImage(overlayTemplate: unknown): OpenImageConfig | null {
   const raw = obj(obj(overlayTemplate).__openImage)
   const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : ''
   const style = typeof raw.style === 'string' ? raw.style.trim() : ''
-  // 两个字段都空 = 没配。空对象不该让渲染层以为"配了但内容为空"而生成一张默认图
-  if (!prompt && !style) return null
-  return { ...(prompt ? { prompt } : {}), ...(style ? { style } : {}) }
+  const refImage = typeof raw.refImage === 'string' ? raw.refImage.trim() : ''
+  // 三个字段都空 = 没配。空对象不该让渲染层以为"配了但内容为空"而生成一张默认图
+  if (!prompt && !style && !refImage) return null
+  return {
+    ...(prompt ? { prompt } : {}),
+    ...(style ? { style } : {}),
+    ...(refImage ? { refImage } : {}),
+  }
 }

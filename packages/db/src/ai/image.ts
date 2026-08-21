@@ -72,7 +72,16 @@ export async function imageGenerate(opts: ImageOpts, override?: ImageOverride): 
     const size = (cfg.extra.size as string) || toDashSize(opts.size)
     const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
       model: cfg.model,
-      input: { messages: [{ role: 'user', content: [{ text: opts.prompt }] }] },
+      // 参考图在前、文字在后：文档给的 content 顺序就是 {image} + {text}。
+      // 给了参考图即「参照这张图生成」，模型会沿用它的画风/构图。
+      input: {
+        messages: [{
+          role: 'user',
+          content: opts.refImageUrl
+            ? [{ image: opts.refImageUrl }, { text: opts.prompt }]
+            : [{ text: opts.prompt }],
+        }],
+      },
       parameters: {
         size,
         watermark: false,
@@ -86,7 +95,11 @@ export async function imageGenerate(opts: ImageOpts, override?: ImageOverride): 
     return fetchUrlToBuffer(url)
   }
 
-  // OpenAI 兼容默认
+  // OpenAI 兼容默认。/images/generations 没有「参考图」这一说——
+  // 静默忽略会让运营以为参考图生效了，实际出来的是纯文生图，所以明确拒绝。
+  if (opts.refImageUrl) {
+    throw new Error('当前接口地址走的是 OpenAI 兼容模式，不支持参考图生图；请把生图能力指向百炼原生端点')
+  }
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/images/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },

@@ -66,5 +66,7 @@ export const POST = handler(async (req) => {
     throw new HttpError(502, `反推画风失败：${(err as Error).message?.slice(0, 200)}`)
   }
 
-  return NextResponse.json({ stylePrompt, refUrl: `/api/files/${rel}` })
+  // rel 要回传给前端存进框架配置：生图时按它签一次短时效公网 URL 交给百炼。
+  // refUrl 只是给后台显示缩略图用的（走会话鉴权），不能拿去喂模型。
+  return NextResponse.json({ stylePrompt, ref: rel, refUrl: `/api/files/${rel}` })
 })

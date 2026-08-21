@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage } from '@mixcut/db'
+import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage, publicAssetUrl } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
@@ -118,6 +118,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
       // 画风优先用槽位自己的 style（支持「开场卡通头像、后面达芬奇」这种同片多画风），
       // 未配则沿用框架的 imageStylePrompt。
       const prompt = buildFreeArtPrompt(slot?.style ?? stylePrompt, slot?.prompt ?? scenes[i])
+      // 参考图：配了就让它参与生成（模型直接沿用其笔触与配色，比文字描述准）。
+      // 签名是短时效的，每张图各签一次，不要提到循环外复用。
+      const refUrl = slot?.refImage ? publicAssetUrl(slot.refImage) : undefined
       // 单张文生图偶发 504/超时是瞬时错误，逐图重试而非让整任务失败。
       const png = await withRetry(
         () =>
@@ -125,6 +128,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
             prompt,
             size: '720x960',
             negativePrompt: IMAGE_NEGATIVE_PROMPT,
+            ...(refUrl ? { refImageUrl: refUrl } : {}),
           }),
         {
           attempts: 3,
@@ -155,8 +159,12 @@ export async function generateImage(genTaskId: string): Promise<void> {
     // 主体缺省给「人物特写」：开场碎裂是整屏一张脸，给风景会碎得没有焦点。
     // 真正画成什么样由 style 决定（如「日系动漫男头像」）。
     const prompt = buildFreeArtPrompt(openCfg.style ?? stylePrompt, openCfg.prompt ?? '人物特写')
+    const openRef = openCfg.refImage ? publicAssetUrl(openCfg.refImage) : undefined
     const png = await withRetry(
-      () => imageGenerate({ prompt, size: '720x960', negativePrompt: IMAGE_NEGATIVE_PROMPT }),
+      () => imageGenerate({
+        prompt, size: '720x960', negativePrompt: IMAGE_NEGATIVE_PROMPT,
+        ...(openRef ? { refImageUrl: openRef } : {}),
+      }),
       {
         attempts: 3, delayMs: 3000,
         onRetry: (err, n) => console.warn(`[gen] open-image ${genTaskId} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),

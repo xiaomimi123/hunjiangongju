@@ -99,3 +99,34 @@ describe('readOpenImage', () => {
     expect(readOpenImage({ __openImage: 'x' })).toBeNull()
   })
 })
+
+// ★ 参考图直接参与生图（qwen-image-3.0 的 content 支持同时给 image 与 text）。
+// 与 style 的区别：style 是**文字**描述的画风，必然丢信息——同一句「日系动漫画风」
+// 能画出天差地别的东西；参考图让模型直接沿用原图的笔触与配色。两者可以并用。
+describe('参考图配置', () => {
+  it('槽位读得到参考图路径', () => {
+    const cfg = readImageSlots({
+      __imageSlots: { count: 2, slots: [{ index: 0, source: 'ai', refImage: 'refs/a.png', style: '日系动漫' }] },
+    })
+    expect(slotAt(cfg, 0)?.refImage).toBe('refs/a.png')
+    expect(slotAt(cfg, 0)?.style).toBe('日系动漫')
+  })
+
+  it('开场图读得到参考图路径', () => {
+    expect(readOpenImage({ __openImage: { refImage: 'refs/b.png' } })).toEqual({ refImage: 'refs/b.png' })
+  })
+
+  // 只配了参考图、没填文字，也算配了——参考图本身就足以决定风格
+  it('只有参考图也算配了开场图', () => {
+    expect(readOpenImage({ __openImage: { refImage: 'refs/b.png' } })).not.toBeNull()
+  })
+
+  it('空串/非字符串的参考图被丢弃，不会拿去签一个空路径', () => {
+    const cfg = readImageSlots({
+      __imageSlots: { count: 2, slots: [{ index: 0, source: 'ai', refImage: '  ' }, { index: 1, source: 'ai', refImage: 42 }] },
+    })
+    expect(slotAt(cfg, 0)?.refImage).toBeUndefined()
+    expect(slotAt(cfg, 1)?.refImage).toBeUndefined()
+    expect(readOpenImage({ __openImage: { refImage: '   ' } })).toBeNull()
+  })
+})

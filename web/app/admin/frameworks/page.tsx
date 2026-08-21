@@ -60,7 +60,7 @@ const STYLE_PRESETS = [
  *
  * 反推是一次计费的模型调用，所以按钮要有 pending 态挡住连点（后端也有限流兜底）。
  */
-function StyleFromImage({ onDone }: { onDone: (prompt: string) => void }) {
+function StyleFromImage({ onDone }: { onDone: (prompt: string, ref: string) => void }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const id = useId()
@@ -86,7 +86,9 @@ function StyleFromImage({ onDone }: { onDone: (prompt: string) => void }) {
             const res = await fetch('/api/admin/style/from-image', { method: 'POST', body: fd })
             const j = await res.json()
             if (!res.ok) throw new Error(j?.error ?? `HTTP ${res.status}`)
-            onDone(String(j.stylePrompt ?? ''))
+            // 同时给回反推出的文字与参考图路径：文字填进「画风」，
+            // 参考图存进配置,生图时一并交给模型(文字描述必然丢信息,原图更准)
+            onDone(String(j.stylePrompt ?? ''), String(j.ref ?? ''))
           } catch (e2) {
             setErr((e2 as Error).message)
           } finally {
@@ -322,7 +324,7 @@ export default function FrameworksPage() {
               }
               const openRaw = ot.__openImage
               const openCfg = (openRaw && typeof openRaw === 'object' && !Array.isArray(openRaw)
-                ? openRaw : {}) as { prompt?: string; style?: string }
+                ? openRaw : {}) as { prompt?: string; style?: string; refImage?: string }
               const writeOpen = (patch: Record<string, string>) => {
                 const merged = { ...openCfg, ...patch }
                 // 两个字段都空就把整块删掉：留一个空对象会让后端以为"配了开场图"
@@ -352,7 +354,14 @@ export default function FrameworksPage() {
                       onChange={(e) => writeOpen({ style: e.target.value })}
                       placeholder="画风（留空 = 全局画风）"
                     />
-                    <StyleFromImage onDone={(v) => writeOpen({ style: v })} />
+                    <StyleFromImage onDone={(v, ref) => writeOpen({ style: v, refImage: ref })} />
+                    {openCfg.refImage ? (
+                      <span className="inline-flex items-center gap-1">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/api/files/${openCfg.refImage}`} alt="参考图" className="h-9 w-9 rounded border border-line object-cover" />
+                        <button type="button" className="btn-ghost text-[11px]" onClick={() => writeOpen({ refImage: '' })}>移除参考图</button>
+                      </span>
+                    ) : null}
                   </div>
 
                   <span className="eyebrow mt-4 block">图片槽位（{count} 张正片配图）</span>
@@ -363,7 +372,7 @@ export default function FrameworksPage() {
                   </p>
                   <div className="mt-2 space-y-2">
                     {Array.from({ length: count }, (_, i) => {
-                      const sl = at(i) as { source?: string; prompt?: string; folder?: string; style?: string }
+                      const sl = at(i) as { source?: string; prompt?: string; folder?: string; style?: string; refImage?: string }
                       const isAi = sl.source !== 'library'
                       return (
                         <div key={i} className="flex flex-wrap items-center gap-2 rounded border border-line px-2 py-2">
@@ -390,7 +399,14 @@ export default function FrameworksPage() {
                                 onChange={(e) => write(i, { style: e.target.value })}
                                 placeholder="画风（留空 = 用上面的全局画风）"
                               />
-                              <StyleFromImage onDone={(v) => write(i, { style: v })} />
+                              <StyleFromImage onDone={(v, ref) => write(i, { style: v, refImage: ref })} />
+                              {sl.refImage ? (
+                                <span className="inline-flex items-center gap-1">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={`/api/files/${sl.refImage}`} alt="参考图" className="h-9 w-9 rounded border border-line object-cover" />
+                                  <button type="button" className="btn-ghost text-[11px]" onClick={() => write(i, { refImage: '' })}>移除参考图</button>
+                                </span>
+                              ) : null}
                             </>
                           ) : (
                             <input

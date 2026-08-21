@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server'
 import path from 'path'
 import fs from 'fs'
+import fsp from 'fs/promises'
 import { getSession } from '@/lib/auth'
 import { DATA_DIR } from '@/lib/paths'
 import { verifyAssetToken } from '@mixcut/db'
 import { contentDispositionAttachment } from '@/lib/contentDisposition'
-import { fallbackOriginal } from '@/lib/thumbFallback'
+import { findOriginal, generateOnce, isFile } from '@/lib/thumbFallback'
+import { makeThumb } from '@/lib/thumb'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.srt': 'text/plain; charset=utf-8',
@@ -25,25 +27,31 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
     return new Response('未登录', { status: 401 })
   }
   const root = path.resolve(DATA_DIR)
-  const resolve = (r: string) => path.normalize(path.join(DATA_DIR, r))
-  const inRoot = (a: string) => a === root || a.startsWith(root + path.sep)
-  const isFile = (a: string) => fs.existsSync(a) && fs.statSync(a).isFile()
-
-  let abs = resolve(rel)
-  if (!inRoot(abs)) return new Response('非法路径', { status: 400 })
-  if (!isFile(abs)) {
-    // 缩略图缺失时回退原图：缩略图是「锦上添花」的产物（批量导入时 makeThumb 失败
-    // 只记 warning，老素材更是在这个功能之前入的库），缺了不该让页面显示裂图。
-    // 兜底只对 .thumb.webp 生效——普通文件缺失照常 404，绝不悄悄换成别的文件。
-    const alt = fallbackOriginal(rel, (r) => {
-      const a = resolve(r)
-      return inRoot(a) && isFile(a)
-    })
-    if (!alt) return new Response('不存在', { status: 404 })
-    abs = resolve(alt)
+  // 根目录校验不通过直接返回 null，调用方据此跳过该候选，不给路径穿越留口子
+  const resolve = (r: string): string | null => {
+    const a = path.normalize(path.join(DATA_DIR, r))
+    return a === root || a.startsWith(root + path.sep) ? a : null
   }
 
-  const stat = fs.statSync(abs)
+  let abs = resolve(rel)
+  if (!abs) return new Response('非法路径', { status: 400 })
+  if (!(await isFile(abs))) {
+    // 缩略图缺失：**补生成一次**，之后永久命中。
+    //
+    // 上一版是「直接返回原图」，代价没算清：素材库一屏几十张图全缺缩略图时，
+    // 原先 N 次快速 404 变成 N 次全尺寸原图下载，而且是**不会自愈**的稳态
+    // ——每次打开都重传一遍。web 容器里有 ffmpeg，补生成才是正解。
+    //
+    // 兜底只对 .thumb.webp 生效：普通文件缺失照常 404，绝不悄悄换成别的文件。
+    const src = await findOriginal(rel, resolve)
+    if (!src) return new Response('不存在', { status: 404 })
+    // 生成失败（图损坏/格式不支持）才退回原图——那种情况本来也没别的办法
+    const ok = await generateOnce(src, makeThumb).catch(() => false)
+    const thumb = ok ? resolve(rel) : null
+    abs = thumb && (await isFile(thumb)) ? thumb : src
+  }
+
+  const stat = await fsp.stat(abs)
   const size = stat.size
   const type = MIME[path.extname(abs).toLowerCase()] ?? 'application/octet-stream'
   const download = req.nextUrl.searchParams.get('download')

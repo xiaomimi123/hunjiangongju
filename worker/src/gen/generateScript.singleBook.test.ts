@@ -45,7 +45,7 @@ describe('buildSingleBookPrompt', () => {
     const p = buildSingleBookPrompt({ book, framework, openTitleText: '今天分享的是' })
     expect(p).toContain('以「今天分享的是」开头')
     expect(p).toContain('整段不得出现书名')
-    expect(p).toContain('第二段必须以「《被讨厌的勇气》」这个书名开头')
+    expect(p).toContain('第 2 段必须以「《被讨厌的勇气》」这个书名开头')
     // 「今天分享的是《书名》」这个旧写法必须彻底消失，否则模型照旧在开场就报书名
     expect(p).not.toContain('今天分享的是《被讨厌的勇气》')
     expect(p).toContain('开场白')
@@ -53,6 +53,48 @@ describe('buildSingleBookPrompt', () => {
     // 再说「开场白之后的第一句…不要先介绍书」会和上面那条互相打架。
     expect(p).toContain('报出书名之后立刻直击情绪')
     expect(p).not.toContain('开篇第一句直击情绪')
+  })
+
+  // ── 文案口径（templateParams.script）───────────────────────────────
+  // 这些规则原先写死在提示词里，「开场白能不能报书名」每变一次都要改代码。
+  // 现在由框架配置；缺省 = 现行行为（上面那条测试就是缺省口径的回归守卫）。
+
+  it('policy.titleInOpening=true：开场白直接带书名，不再有"不得出现书名"', () => {
+    const p = buildSingleBookPrompt({
+      book, framework, openTitleText: '今天分享的是',
+      policy: { titleInOpening: true, titleSegment: 2, extraRules: '' },
+    })
+    expect(p).toContain('今天分享的是《被讨厌的勇气》')
+    expect(p).not.toContain('整段不得出现书名')
+    // 书名已在开场白里，"第 N 段以书名开头"这条不应再出现
+    expect(p).not.toContain('这个书名开头')
+  })
+
+  it('policy.titleSegment=3：书名改在第 3 段开头报出', () => {
+    const p = buildSingleBookPrompt({
+      book, framework, openTitleText: '今天分享的是',
+      policy: { titleInOpening: false, titleSegment: 3, extraRules: '' },
+    })
+    expect(p).toContain('第 3 段必须以「《被讨厌的勇气》」这个书名开头')
+  })
+
+  it('titleSegment 超过段数时按段数封顶（不产出"第 9 段"这种不存在的段）', () => {
+    const p = buildSingleBookPrompt({
+      book, framework, openTitleText: '今天分享的是',
+      policy: { titleInOpening: false, titleSegment: 9, extraRules: '' },
+    })
+    expect(p).toContain(`第 ${framework.segCount} 段必须以「《被讨厌的勇气》」`)
+  })
+
+  it('extraRules 逐行进编号要求清单', () => {
+    const p = buildSingleBookPrompt({
+      book, framework, openTitleText: '今天分享的是',
+      policy: { titleInOpening: false, titleSegment: 2, extraRules: '结尾必须用反问收束\n不要出现任何数字' },
+    })
+    expect(p).toContain('结尾必须用反问收束')
+    expect(p).toContain('不要出现任何数字')
+    // 进的是编号清单（"N. 规则"），不是散落在结尾——编号项的遵守率更稳
+    expect(p).toMatch(/\d+\. 结尾必须用反问收束/)
   })
 
   it('不传 openTitleText 时风格准则用原文首条', () => {

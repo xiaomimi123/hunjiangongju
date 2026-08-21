@@ -193,10 +193,10 @@ export function slotDurationsForSegments(
  */
 export const SPEECH_CHARS_PER_SEC = 5.5
 
-/** 按实测语速，一段时长最多装得下多少字 */
-export function charsForSpeechMs(ms: number): number {
+/** 按语速折算一段时长最多装得下多少字。语速缺省用 SPEECH_CHARS_PER_SEC（框架可覆盖） */
+export function charsForSpeechMs(ms: number, charsPerSec = SPEECH_CHARS_PER_SEC): number {
   if (!Number.isFinite(ms) || ms <= 0) return 0
-  return Math.round((ms / 1000) * SPEECH_CHARS_PER_SEC)
+  return Math.round((ms / 1000) * charsPerSec)
 }
 
 /** 正片第 1 段念出书名之前的留白：快闪结束后先静一下，书名才落下来 */

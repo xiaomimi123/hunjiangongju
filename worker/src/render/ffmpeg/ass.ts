@@ -51,6 +51,16 @@ export interface AssStyleOpts {
   openTitleSizePx?: number
   openTitleColor?: string
   openTitlePosY?: number
+  /**
+   * 描边宽度（px）。配图明暗不可控，浅色图上没有描边的字会糊掉。
+   * 缺省 3 —— 与把这个参数放开之前的写死值一致。
+   */
+  outlinePx?: number
+  /**
+   * 常驻大标题「加粗层」的同色描边宽度。缺省 1.6，见 TITLE_BOLD_BORD。
+   * 设为 0 即不加粗（自带字体只有 Regular 字面，libass 不合成假粗体）。
+   */
+  boldBordPx?: number
 }
 
 export interface AssOpts {
@@ -160,6 +170,9 @@ export function buildAss(o: AssOpts): string {
   // 正文字幕：底部居中(an2)。posY 给的是「基线在画面高度的哪个位置」，
   // an2 的锚点在底边，所以边距 = 画面高 - 基线位置。
   const capMarginV = Math.max(0, Math.round(o.height * (1 - st.captionPosY)))
+  // 描边宽度：缺省 3 = 把它放开之前写死的值，老调用逐字节不变
+  const bord = Math.max(0, st.outlinePx ?? 3)
+  const boldBord = Math.max(0, st.boldBordPx ?? TITLE_BOLD_BORD)
 
   const header = [
     '[Script Info]',
@@ -173,18 +186,19 @@ export function buildAss(o: AssOpts): string {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // 描边 + 阴影：配图明暗不可控，没有描边的字幕在浅色图上会糊掉
-    `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},0,0,0,0,100,100,0,0,1,3,2,2,60,60,${capMarginV},1`,
+    // 描边 + 阴影：配图明暗不可控，没有描边的字幕在浅色图上会糊掉。
+    // 描边宽度改为可配（outlinePx，缺省 3 = 原写死值），浅底图多、字看不清时调大它。
+    `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},0,0,0,0,100,100,0,0,1,${bord},2,2,60,60,${capMarginV},1`,
     // an5(正中) + \pos：位置由草稿的 titlePosY 决定，不再贴死在顶边
-    `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,3,2,5,40,40,0,1`,
+    `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`,
     ...(st.openTitleSizePx
-      ? [`Style: ot,${st.fontName},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,3,2,5,40,40,0,1`]
+      ? [`Style: ot,${st.fontName},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`]
       : []),
     `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},0,0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
     // 快闪卡：an5(正中) + \pos 精确定位。只在给了尺寸时产出，老调用零回归。
     ...(st.flashTitleSizePx
       ? [
-          `Style: ft,${st.fontName},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,3,3,5,40,40,0,1`,
+          `Style: ft,${st.fontName},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,${bord},3,5,40,40,0,1`,
           `Style: fa,${st.fontName},${st.flashAuthorSizePx ?? 28},${toAssColor(st.flashAuthorColor ?? '#ffcc88')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,2,2,5,40,40,0,1`,
         ]
       : []),
@@ -239,11 +253,11 @@ export function buildAss(o: AssOpts): string {
     if (!escapeAssText(head)) continue
     const body = parts.join('\\N')
     ev.push(`Dialogue: 0,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,{\\pos(${cx},${ty})}${body}`)
-    // 加粗层：同色细描边把笔画撑粗（见 TITLE_BOLD_BORD）。
+    // 加粗层：同色细描边把笔画撑粗（见 TITLE_BOLD_BORD）。宽度可配，0 即不加粗。
     // 关掉阴影，否则阴影会被画两遍、显得脏。
-    ev.push(
+    if (boldBord > 0) ev.push(
       `Dialogue: 1,${toAssTime(c.startMs)},${toAssTime(c.endMs)},title,,0,0,0,,` +
-      `{\\pos(${cx},${ty})\\bord${TITLE_BOLD_BORD}\\shad0\\3c${inlineColor(st.titleColor)}}${body}`,
+      `{\\pos(${cx},${ty})\\bord${boldBord}\\shad0\\3c${inlineColor(st.titleColor)}}${body}`,
     )
   }
   for (const c of o.captions) line(1, c, 'cap')

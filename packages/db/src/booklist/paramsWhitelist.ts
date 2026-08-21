@@ -124,7 +124,8 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
     if (Object.keys(a).length) out.audio = a
   }
 
-  // ── 文字层位置与相对字号 ──
+  // ── 文字层：位置、相对字号、锚点字号、描边、加粗、颜色 ──
+  const HEX = /^#[0-9a-fA-F]{6}$/
   const text = obj(r.text)
   if (text) {
     const t: Record<string, unknown> = {}
@@ -136,7 +137,45 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
       const v = clampNum(text[k], 0.2, 5)
       if (v !== undefined) t[k] = v
     }
+    // 锚点字号：全片各层字号都由它派生。20~120px 之外在 720 宽画布上必是误输入
+    const cap = clampNum(text.captionSizePx, 20, 120)
+    if (cap !== undefined) t.captionSizePx = Math.round(cap)
+    const boost = clampNum(text.bookTitleBoost, 0.5, 3)
+    if (boost !== undefined) t.bookTitleBoost = boost
+    const outl = clampNum(text.outlinePx, 0, 10)
+    if (outl !== undefined) t.outlinePx = outl
+    const bb = clampNum(text.boldBordPx, 0, 5)
+    if (bb !== undefined) t.boldBordPx = bb
+    for (const k of ['bookTitleColor', 'flashTitleColor', 'flashAuthorColor', 'openTitleColor'] as const) {
+      if (typeof text[k] === 'string' && HEX.test(text[k] as string)) t[k] = text[k]
+    }
     if (Object.keys(t).length) out.text = t
+  }
+
+  // ── 节奏留白与语速 ──
+  const pace = obj(r.pace)
+  if (pace) {
+    const pc: Record<string, unknown> = {}
+    const lead = clampNum(pace.bookTitleLeadMs, 0, 3000)
+    if (lead !== undefined) pc.bookTitleLeadMs = Math.round(lead)
+    const rate = clampNum(pace.speechCharsPerSec, 2, 12)
+    if (rate !== undefined) pc.speechCharsPerSec = rate
+    const tempo = clampNum(pace.maxTempo, 1, 2)
+    if (tempo !== undefined) pc.maxTempo = tempo
+    if (Object.keys(pc).length) out.pace = pc
+  }
+
+  // ── 文案口径 ──
+  const script = obj(r.script)
+  if (script) {
+    const sc: Record<string, unknown> = {}
+    if (typeof script.titleInOpening === 'boolean') sc.titleInOpening = script.titleInOpening
+    const seg = clampNum(script.titleSegment, 1, 9)
+    if (seg !== undefined) sc.titleSegment = Math.round(seg)
+    if (typeof script.chineseTitlesOnly === 'boolean') sc.chineseTitlesOnly = script.chineseTitlesOnly
+    // 附加规则封顶 2000 字（parseTemplateParams 同样会截断，这里先拦一道给出确定行为）
+    if (typeof script.extraRules === 'string') sc.extraRules = script.extraRules.slice(0, 2000)
+    if (Object.keys(sc).length) out.script = sc
   }
 
   return Object.keys(out).length ? out : null

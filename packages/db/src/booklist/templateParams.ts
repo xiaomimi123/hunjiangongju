@@ -36,6 +36,30 @@ export interface TemplateParams {
   // bgmStartMs / bgmFadeInMs / bgmFadeOutMs：默认全 0 = 从头播、不淡入淡出，与加这三个字段
   // 之前的行为逐字节一致。BGM 输入带 -stream_loop -1，所以 bgmStartMs 落在循环后的时间轴上，
   // 取值超过曲长也不会取空（会取到下一轮的对应位置）。
+  // script：文案口径。这些规则原先写死在 generateScript.ts 的提示词里——
+  // 「开场白不得出现书名」「第二段以《书名》开头」这类要求每变一次都要改代码。
+  // 现在做成结构化开关 + 自由规则文本；默认值 = 现行提示词的口径，老框架零回归。
+  script?: {
+    /** 开场白里允许出现书名（false = 书名留到 titleSegment 段才报出，对齐快闪揭晓的节奏） */
+    titleInOpening: boolean
+    /** 书名在第几段开头报出（1 起数；仅 titleInOpening=false 时生效） */
+    titleSegment: number
+    /** 只推荐中文书名的书（关掉则允许外文书） */
+    chineseTitlesOnly: boolean
+    /** 附加规则：逐行写给 AI 的额外要求（如"结尾必须反问""不要出现数字"），原样进提示词 */
+    extraRules: string
+  }
+  // pace：节奏留白与语速。原先是代码常量（draftCharBudget.ts / generateTts.ts），
+  // 「开场白说完停顿」「书名前留白 0.4 秒」「换音色后语速标定」这些反馈都落在它们身上。
+  // 默认值 = 原常量值，老框架零回归。
+  pace?: {
+    /** 正片第 1 段报书名前的留白（ms）。0 = 书名紧贴快闪出口 */
+    bookTitleLeadMs: number
+    /** 配音语速（字/秒），用来推字数预算。换音色后要重新标定（看 worker 日志里的逐段时长） */
+    speechCharsPerSec: number
+    /** 配音超槽位时保音高变速的上限。1 = 不许变速（超出就让画面变长） */
+    maxTempo: number
+  }
   audio: {
     bgmVolume: number
     bgmStartMs: number
@@ -64,6 +88,9 @@ export interface TemplateParams {
    * 可逆换算（这一条在迁移设计里就写明了），但同一份草稿内各文字层的相对大小是可靠的：
    * 有效字号 = size × clip.scale。实测常驻大标题是正文的 1.85 倍，而我们是 1.09 倍。
    */
+  // 下面这批原先写死在渲染层（fromBodyData.ts / ass.ts 的常量），线上反馈
+  // 「字太小」「标题要加粗放大」「描边看不清」全落在它们身上——每次都要改代码。
+  // 现在收进参数，默认值 = 原写死值，老框架逐字节不变。
   text?: {
     openTitlePosY: number
     openTitleScale: number
@@ -71,6 +98,19 @@ export interface TemplateParams {
     flashTitleScale: number
     bookTitlePosY: number
     bookTitleScale: number
+    /** 正文字幕基准字号（px）。其余各层字号 = 它 × 各自的 Scale */
+    captionSizePx: number
+    /** 常驻大标题在 bookTitleScale 之上再放大的系数（产品要求"再大一些"时调它） */
+    bookTitleBoost: number
+    /** 所有文字层的描边宽度（px）。浅底图上字看不清时调大 */
+    outlinePx: number
+    /** 常驻大标题加粗层的同色描边宽度。0 = 不加粗 */
+    boldBordPx: number
+    /** 各层颜色（#rrggbb） */
+    bookTitleColor: string
+    flashTitleColor: string
+    flashAuthorColor: string
+    openTitleColor: string
   }
 }
 
@@ -83,6 +123,8 @@ export const DEFAULT_PARAMS: TemplateParams = {
   flash: { perClipMs: 200, minClipMs: 120, bounceIn: true, titleFontFamily: 'flash-title' },
   transition: { type: 'dissolve', durationMs: 400 },
   body: { subtitleFontFamily: 'subtitle', subtitleColor: '#ffffff', subtitlePosY: 0.78, kenBurns: 'subtle' },
+  script: { titleInOpening: false, titleSegment: 2, chineseTitlesOnly: true, extraRules: '' },
+  pace: { bookTitleLeadMs: 400, speechCharsPerSec: 5.5, maxTempo: 1.25 },
   audio: { bgmVolume: 0.69, bgmStartMs: 0, bgmFadeInMs: 0, bgmFadeOutMs: 0, sfx: { openGear: true, transitionDrop: true } },
   // 按客户样例草稿实测标定（今天分享的是/draft_content.json，720×960）。
   // 给默认值而不是留空：库里已有的框架是在这个字段存在之前导入的，留空它们会继续用
@@ -91,6 +133,10 @@ export const DEFAULT_PARAMS: TemplateParams = {
     openTitlePosY: 0.811, openTitleScale: 1.13,
     flashTitlePosY: 0.169, flashTitleScale: 1.96,
     bookTitlePosY: 0.218, bookTitleScale: 1.85,
+    // 与原渲染层写死值一致（fromBodyData.ts 的 CAPTION_PX/TITLE_BOOST、ass.ts 的描边）
+    captionSizePx: 54, bookTitleBoost: 1.3, outlinePx: 3, boldBordPx: 1.6,
+    bookTitleColor: '#ffe9c0', flashTitleColor: '#ffffff',
+    flashAuthorColor: '#ffcc88', openTitleColor: '#ffffff',
   },
 }
 
@@ -166,6 +212,32 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
           }
         : {}),
     },
+    script: (() => {
+      const sc = obj(r.script)
+      const DS = D.script!
+      const seg = num(sc.titleSegment, DS.titleSegment)
+      return {
+        titleInOpening: bool(sc.titleInOpening, DS.titleInOpening),
+        // 夹在 1~9：0/负数没有意义，超过段数时调用方按"最后一段"处理
+        titleSegment: Math.min(9, Math.max(1, Math.round(seg))),
+        chineseTitlesOnly: bool(sc.chineseTitlesOnly, DS.chineseTitlesOnly),
+        // 规则文本封顶 2000 字：提示词不是垃圾场，写超说明该去改框架文案本体
+        extraRules: str(sc.extraRules, DS.extraRules).slice(0, 2000),
+      }
+    })(),
+    pace: (() => {
+      const pc = obj(r.pace)
+      const DP = D.pace!
+      const rate = num(pc.speechCharsPerSec, DP.speechCharsPerSec)
+      const tempo = num(pc.maxTempo, DP.maxTempo)
+      return {
+        bookTitleLeadMs: Math.max(0, num(pc.bookTitleLeadMs, DP.bookTitleLeadMs)),
+        // 语速夹在 2~12：离谱值宁可回默认，也不让字数预算被脏数据带跑
+        speechCharsPerSec: rate >= 2 && rate <= 12 ? rate : DP.speechCharsPerSec,
+        // 变速上限夹在 1~2：低于 1 会变成拉长（那是补静音的事），高于 2 是机关枪
+        maxTempo: Math.min(2, Math.max(1, tempo)),
+      }
+    })(),
     audio: {
       bgmVolume: num(audio.bgmVolume, D.audio.bgmVolume),
       // 负值一律归零：负的起点/淡化时长会让 ffmpeg 的 atrim/afade 产出空流或整段静音，
@@ -187,6 +259,14 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
         flashTitleScale: num(t.flashTitleScale, DT.flashTitleScale),
         bookTitlePosY: num(t.bookTitlePosY, DT.bookTitlePosY),
         bookTitleScale: num(t.bookTitleScale, DT.bookTitleScale),
+        captionSizePx: num(t.captionSizePx, DT.captionSizePx),
+        bookTitleBoost: num(t.bookTitleBoost, DT.bookTitleBoost),
+        outlinePx: num(t.outlinePx, DT.outlinePx),
+        boldBordPx: num(t.boldBordPx, DT.boldBordPx),
+        bookTitleColor: str(t.bookTitleColor, DT.bookTitleColor),
+        flashTitleColor: str(t.flashTitleColor, DT.flashTitleColor),
+        flashAuthorColor: str(t.flashAuthorColor, DT.flashAuthorColor),
+        openTitleColor: str(t.openTitleColor, DT.openTitleColor),
       }
     })(),
     ...(r.grade && typeof r.grade === 'object' && !Array.isArray(r.grade)

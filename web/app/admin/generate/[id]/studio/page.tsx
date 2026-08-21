@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import {
-  SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, fmtSec,
-  type Cycle, type Keyframe, type AudioParams,
+  SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows,
+  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams,
 } from '@/components/admin/paramControls'
 
 // 剪辑工作台：调这一条片子的节奏、字幕样式、配乐，然后重渲。
@@ -23,7 +23,8 @@ type Effective = {
   body: { slotDurationsMs?: number[]; subtitleColor: string; subtitlePosY: number }
   audio: AudioParams
   motion?: { keyframes?: Keyframe[] }
-  text?: Record<string, number>
+  text?: TextParams & Record<string, number | string>
+  pace?: PaceParams
 }
 type Info = {
   effective: Effective
@@ -52,6 +53,8 @@ export default function StudioPage() {
   const [audio, setAudio] = useState<AudioParams | null>(null)
   const [capColor, setCapColor] = useState('#ffffff')
   const [capPosY, setCapPosY] = useState(0.78)
+  const [text, setText] = useState<TextParams | null>(null)
+  const [pace, setPace] = useState<PaceParams | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -67,6 +70,8 @@ export default function StudioPage() {
       setAudio({ ...e.audio })
       setCapColor(e.body.subtitleColor)
       setCapPosY(e.body.subtitlePosY)
+      if (e.text) setText(e.text as TextParams)
+      if (e.pace) setPace({ ...e.pace })
     } catch (e) { setErr((e as Error).message) }
   }, [id])
 
@@ -208,6 +213,36 @@ export default function StudioPage() {
         </div>
         <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} disabled={locked} />
       </section>
+
+      {/* ── 文字层 ── */}
+      {text && (
+        <section className="card space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">文字层 · 字号 / 描边 / 加粗 / 颜色</p>
+            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+              onClick={() => save({ text }, '文字层')}>
+              {busy === '文字层' ? '保存中…' : '保存文字层'}
+            </button>
+          </div>
+          <TextRows text={text} onChange={setText} disabled={locked} />
+        </section>
+      )}
+
+      {/* ── 节奏留白 ──
+          语速与留白影响的是**配音**，保存后要走「保存并重新配音对齐」或整条重渲才可闻。 */}
+      {pace && (
+        <section className="card space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">节奏留白与语速</p>
+            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+              onClick={() => save({ pace }, '节奏留白')}>
+              {busy === '节奏留白' ? '保存中…' : '保存节奏留白'}
+            </button>
+          </div>
+          <p className="text-xs text-ink3">这些改的是**配音**（留白插在音轨里）。保存后需「保存并重新配音对齐」才生效，只重渲画面听不出变化。</p>
+          <PaceRows pace={pace} onChange={setPace} disabled={locked} />
+        </section>
+      )}
 
       {/* ── 配乐 ── */}
       {audio && (

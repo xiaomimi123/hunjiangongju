@@ -41,11 +41,11 @@ afterAll(async () => {
   }
 })
 
-async function makeFramework(bookCount?: number) {
+async function makeFramework(bookCount?: number, overlayExtra?: Record<string, unknown>) {
   const fw = await prisma.copyFramework.create({
     data: {
       frameworkText: '测试框架文本',
-      overlayTemplate: bookCount !== undefined ? { __bookCount: bookCount } : {},
+      overlayTemplate: { ...(bookCount !== undefined ? { __bookCount: bookCount } : {}), ...(overlayExtra ?? {}) },
     },
   })
   frameworkIds.push(fw.id)
@@ -498,6 +498,26 @@ describe('selectBooks：学员书作者三级兜底', () => {
     // 正对照：中文那本走完了推荐→校验→沉淀的完整链路，证明这条路径真的跑到了
     expect(titles).toContain('中文推荐书')
     expect(await prisma.bookLibrary.count({ where: { title: '中文推荐书' } })).toBe(1)
+  })
+
+  // 框架关掉 script.chineseTitlesOnly 时放行外文书——项目方就要外文书单时用。
+  // 这条与上面「外文召回测试」互为对照：同样的库存，开关不同，结果相反。
+  it('框架关掉 chineseTitlesOnly → 外文书名照常召回', async () => {
+    const subject = '外文放行测试书'
+    const theme = '外文放行主题'
+    trackTheme(theme)
+    await upsertBook({ title: 'Educated', author: 'Tara Westover', theme })
+    await upsertBook({ title: '中文放行候选', author: '候选作者', theme })
+
+    const fw = await makeFramework(3, { __templateParams: { script: { chineseTitlesOnly: false } } })
+    const task = await makeTask(subject, fw.id)
+    mockLlmComplete.mockResolvedValueOnce(`查证作者|${theme}`)
+
+    await selectBooks(task.id)
+
+    const fresh = await prisma.generationTask.findUniqueOrThrow({ where: { id: task.id } })
+    const titles = (fresh.variables as { books: { title: string }[] }).books.map((b) => b.title)
+    expect(titles, `开关关了外文书仍被剔除: ${titles.join('、')}`).toContain('Educated')
   })
 
   it('查证只返回作者（无主题词）→ theme 回退为 subject，不硬失败', async () => {

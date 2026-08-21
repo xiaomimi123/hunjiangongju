@@ -151,7 +151,7 @@ export function CaptionStyleRows(props: {
       <NumRow label="正文字幕竖直位置" value={props.posY} disabled={props.disabled}
         min={0} max={1} step={0.01} hint="0 = 顶端，1 = 底端" onChange={props.onPosY} />
       <p className="text-xs text-ink3">
-        字号与字体暂不可调：正文字号是渲染层的锚点常量，字体固定用自带的 Noto Sans SC。
+        字号在「文字层」分区调（正文字号锚点）；字体固定用自带的 Noto Sans SC。
       </p>
     </>
   )
@@ -172,6 +172,127 @@ export function AudioRows(props: {
         min={0} max={30000} step={100} unit="ms" onChange={(v) => set({ bgmFadeInMs: v })} />
       <NumRow label="淡出" value={props.audio.bgmFadeOutMs} disabled={props.disabled}
         min={0} max={30000} step={100} unit="ms" onChange={(v) => set({ bgmFadeOutMs: v })} />
+    </>
+  )
+}
+
+export type TextParams = {
+  captionSizePx: number
+  bookTitleBoost: number
+  outlinePx: number
+  boldBordPx: number
+  bookTitleColor: string
+  flashTitleColor: string
+  flashAuthorColor: string
+  openTitleColor: string
+  bookTitleScale: number
+  flashTitleScale: number
+  openTitleScale: number
+}
+export type PaceParams = { bookTitleLeadMs: number; speechCharsPerSec: number; maxTempo: number }
+export type ScriptParams = { titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string }
+
+function ColorRow(props: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  return (
+    <label className="flex items-center gap-3 py-1">
+      <span className="w-40 shrink-0 text-xs text-ink3">{props.label}</span>
+      <input type="color" className="h-8 w-14 rounded border border-line" disabled={props.disabled}
+        value={props.value} onChange={(e) => props.onChange(e.target.value)} />
+      <span className="num text-xs text-ink3">{props.value}</span>
+    </label>
+  )
+}
+
+/** 文字层全套：字号锚点、各层放大倍数、描边、加粗、颜色。线上「字太小/要加粗/看不清」的反馈全在这里解决。 */
+export function TextRows(props: {
+  text: TextParams; onChange: (v: TextParams) => void; disabled?: boolean
+}) {
+  const set = (patch: Partial<TextParams>) => props.onChange({ ...props.text, ...patch })
+  const t = props.text
+  return (
+    <>
+      <NumRow label="正文字号（锚点）" value={t.captionSizePx} disabled={props.disabled}
+        min={20} max={120} step={2} unit="px" hint="其余各层字号都按它的倍数派生"
+        onChange={(v) => set({ captionSizePx: v })} />
+      <NumRow label="书名标题倍数" value={t.bookTitleScale} disabled={props.disabled}
+        min={0.2} max={5} step={0.05} hint="相对正文" onChange={(v) => set({ bookTitleScale: v })} />
+      <NumRow label="书名标题再放大" value={t.bookTitleBoost} disabled={props.disabled}
+        min={0.5} max={3} step={0.05} hint="嫌书名还不够大就调它" onChange={(v) => set({ bookTitleBoost: v })} />
+      <NumRow label="快闪书名倍数" value={t.flashTitleScale} disabled={props.disabled}
+        min={0.2} max={5} step={0.05} onChange={(v) => set({ flashTitleScale: v })} />
+      <NumRow label="开场标题倍数" value={t.openTitleScale} disabled={props.disabled}
+        min={0.2} max={5} step={0.05} onChange={(v) => set({ openTitleScale: v })} />
+      <NumRow label="描边宽度" value={t.outlinePx} disabled={props.disabled}
+        min={0} max={10} step={0.5} unit="px" hint="浅底图上字看不清就调大"
+        onChange={(v) => set({ outlinePx: v })} />
+      <NumRow label="书名加粗" value={t.boldBordPx} disabled={props.disabled}
+        min={0} max={5} step={0.2} unit="px" hint="0 = 不加粗（字体无粗体字面，加粗靠同色描边撑粗）"
+        onChange={(v) => set({ boldBordPx: v })} />
+      <ColorRow label="书名标题颜色" value={t.bookTitleColor} disabled={props.disabled}
+        onChange={(v) => set({ bookTitleColor: v })} />
+      <ColorRow label="快闪书名颜色" value={t.flashTitleColor} disabled={props.disabled}
+        onChange={(v) => set({ flashTitleColor: v })} />
+      <ColorRow label="快闪作者颜色" value={t.flashAuthorColor} disabled={props.disabled}
+        onChange={(v) => set({ flashAuthorColor: v })} />
+      <ColorRow label="开场标题颜色" value={t.openTitleColor} disabled={props.disabled}
+        onChange={(v) => set({ openTitleColor: v })} />
+    </>
+  )
+}
+
+export function PaceRows(props: {
+  pace: PaceParams; onChange: (v: PaceParams) => void; disabled?: boolean
+}) {
+  const set = (patch: Partial<PaceParams>) => props.onChange({ ...props.pace, ...patch })
+  return (
+    <>
+      <NumRow label="书名前留白" value={props.pace.bookTitleLeadMs} disabled={props.disabled}
+        min={0} max={3000} step={100} unit="ms" hint="快闪结束后停顿多久再报书名"
+        onChange={(v) => set({ bookTitleLeadMs: v })} />
+      <NumRow label="配音语速" value={props.pace.speechCharsPerSec} disabled={props.disabled}
+        min={2} max={12} step={0.1} unit="字/秒" hint="换音色后要重新标定（看 worker 日志）"
+        onChange={(v) => set({ speechCharsPerSec: v })} />
+      <NumRow label="变速上限" value={props.pace.maxTempo} disabled={props.disabled}
+        min={1} max={2} step={0.05} unit="×" hint="1 = 禁止变速；话太长时超出部分让画面变长"
+        onChange={(v) => set({ maxTempo: v })} />
+    </>
+  )
+}
+
+/** 文案口径：结构化开关 + 自由规则文本。改的是**给 AI 的提示词**，只影响以后生成的文案。 */
+export function ScriptRows(props: {
+  script: ScriptParams; onChange: (v: ScriptParams) => void; disabled?: boolean
+}) {
+  const set = (patch: Partial<ScriptParams>) => props.onChange({ ...props.script, ...patch })
+  const s = props.script
+  return (
+    <>
+      <label className="flex items-center gap-3 py-1">
+        <span className="w-40 shrink-0 text-xs text-ink3">书名什么时候报出</span>
+        <select className="field w-56 text-sm" disabled={props.disabled}
+          value={s.titleInOpening ? 'opening' : 'later'}
+          onChange={(e) => set({ titleInOpening: e.target.value === 'opening' })}>
+          <option value="later">开场白不报，留到正片（对齐快闪揭晓）</option>
+          <option value="opening">开场白里直接报出</option>
+        </select>
+      </label>
+      {!s.titleInOpening && (
+        <NumRow label="书名在第几段报出" value={s.titleSegment} disabled={props.disabled}
+          min={1} max={9} step={1} hint="1 起数；超过段数按最后一段" onChange={(v) => set({ titleSegment: v })} />
+      )}
+      <label className="flex items-center gap-3 py-1">
+        <span className="w-40 shrink-0 text-xs text-ink3">只推荐中文书名</span>
+        <input type="checkbox" checked={s.chineseTitlesOnly} disabled={props.disabled}
+          onChange={(e) => set({ chineseTitlesOnly: e.target.checked })} />
+        <span className="text-xs text-ink3">关掉则允许外文书出现在快闪卡</span>
+      </label>
+      <label className="block py-1">
+        <span className="text-xs text-ink3">附加规则（逐行写给 AI 的额外要求，原样进提示词）</span>
+        <textarea className="field mt-1 w-full text-xs" rows={4} disabled={props.disabled}
+          placeholder={'每行一条，例如：\n结尾必须用反问收束\n不要出现任何数字'}
+          value={s.extraRules} onChange={(e) => set({ extraRules: e.target.value })} />
+      </label>
+      <p className="text-xs text-ink3">改文案口径只影响**以后生成**的文案；已生成的片子要用新口径需整条重新生成。</p>
     </>
   )
 }

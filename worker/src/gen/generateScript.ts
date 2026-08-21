@@ -359,13 +359,21 @@ export function buildImitatePrompt(args: {
  * 全篇只讲一本书，因此不需要「书序号|文案」标记（只有一本，标记没有意义，多一条格式
  * 指令只会增加模型出错面）。调性由 frameworkText 决定，不在此写死风格词。
  */
+export interface ScriptPolicy {
+  titleInOpening: boolean
+  titleSegment: number
+  extraRules: string
+}
+
 export function buildSingleBookPrompt(args: {
   book: BookInput
   framework: ScriptFrameworkInput
   angle?: string
   openTitleText?: string
+  /** 文案口径（templateParams.script）。缺省 = 现行行为：书名留到第二段 */
+  policy?: ScriptPolicy
 }): string {
-  const { book, framework, angle, openTitleText } = args
+  const { book, framework, angle, openTitleText, policy } = args
   const { frameworkText, segCount, maxLines, maxTotalChars } = framework
   const openTitle = (openTitleText ?? '').trim()
 
@@ -373,14 +381,23 @@ export function buildSingleBookPrompt(args: {
   if (book.author) bookLine.push(`作者：${book.author}`)
   if (book.points) bookLine.push(`要点：${book.points}`)
 
+  // 文案口径可由框架配置（剪辑工作台的「文案口径」分区）。
+  // 缺省 = 现行行为：开场白不含书名、书名在第二段开头报出（对齐快闪揭晓的节奏）。
+  const titleInOpening = policy?.titleInOpening ?? false
+  const titleSeg = Math.min(policy?.titleSegment ?? 2, segCount)
+  const extraRules = (policy?.extraRules ?? '').trim()
+
   const items = [
-    // 成片结构：碎裂开场念开场白 → 书封快闪（无旁白）→ 正片第一句才报书名。
-    // 书名塞进开场白的话，画面还在碎裂时书名就念出来了，与快闪揭晓的节奏对不上。
+    // 成片结构：碎裂开场念开场白 → 书封快闪（无旁白）→ 正片才报书名。
+    // 书名塞进开场白的话，画面还在碎裂时书名就念出来了，与快闪揭晓的节奏对不上
+    // ——但项目方要不同节奏时可以在框架里改（titleInOpening / titleSegment）。
     ...(openTitle
-      ? [
-          `第一段是开场白：以「${openTitle}」开头，用一句话点出这条视频要解决的问题，**整段不得出现书名**。`,
-          `第二段必须以「《${book.title}》」这个书名开头，报出书名后再展开。`,
-        ]
+      ? titleInOpening
+        ? [`第一段是开场白：以「${openTitle}《${book.title}》」开头，一句话点出这条视频要解决的问题。`]
+        : [
+            `第一段是开场白：以「${openTitle}」开头，用一句话点出这条视频要解决的问题，**整段不得出现书名**。`,
+            `第 ${titleSeg} 段必须以「《${book.title}》」这个书名开头，报出书名后再展开。`,
+          ]
       : []),
     `分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
     // 核心约束：模型写书评时天然爱旁征博引，不明说必犯。
@@ -394,6 +411,9 @@ export function buildSingleBookPrompt(args: {
     // 书单号要的是「这本书打中了我哪里」，不是「这本书讲了什么故事」。
     '不要复述书里的情节、人物姓名或结局，不做剧情简介；写这本书带给读者的感受与共鸣，用普通人日常里的具体场景来承载。',
     ...(angle ? [`本条整体采用「${angle}」的切入角度展开，与其它角度明显区分。`] : []),
+    // 运营写的附加规则原样追加。放在编号清单里而不是拼在结尾——
+    // 编号项的遵守率明显高于尾部散文（模型对"要求列表"的注意力更稳定）。
+    ...(extraRules ? extraRules.split('\n').map((l) => l.trim()).filter(Boolean) : []),
   ]
 
   return [
@@ -405,8 +425,8 @@ export function buildSingleBookPrompt(args: {
     '要求：',
     ...items.map((s, i) => `${i + 1}. ${s}`),
     '',
-    // 单本模式：第二段以书名开头，styleRules 的「不要先介绍书」要让路
-    styleRules(Boolean(openTitle), Boolean(openTitle)),
+    // 单本模式：书名在指定段开头报出时，styleRules 的「不要先介绍书」要让路
+    styleRules(Boolean(openTitle), Boolean(openTitle) && !titleInOpening),
   ].join('\n')
 }
 
@@ -497,13 +517,13 @@ export async function generateScript(genTaskId: string): Promise<void> {
   const timelineMs = slotDurationsForSegments(openFlashWindowMs(tp), tp.body.slotDurationsMs, segCount)
   // 分字数要按「能说话的时长」而不是「占位时长」：快闪期间与书名前的留白
   // 是节奏的一部分，不是可以拿来塞字的空间（见 speechCapacities）。
-  const speechCap = speechCapacities(timelineMs, tp.open.durationMs)
+  const speechCap = speechCapacities(timelineMs, tp.open.durationMs, tp.pace?.bookTitleLeadMs)
   // ★ 总量再按**实测语速**兜一道。
   // 框架里存的 maxTotalChars 是导入时按 CHARS_PER_SEC=6 推的，而那个常数是换成
   // 豆包声音复刻 2.0 **之前**测的；实测这条克隆音色只有 5.56 字/秒，按 6 推的预算
   // 系统性偏松约 8%。改导入期的常数对**存量框架**无效（值已经落库），所以在这里
   // 按语音容量重算一次上界，取两者较小的。
-  const capTotal = charsForSpeechMs(speechCap.reduce((a, b) => a + b, 0))
+  const capTotal = charsForSpeechMs(speechCap.reduce((a, b) => a + b, 0), tp.pace?.speechCharsPerSec)
   const budgetChars = capTotal > 0 ? Math.min(maxTotalChars, capTotal) : maxTotalChars
   const slotChars = speechCap.length ? charBudgetsFromWeights(speechCap, budgetChars) : undefined
   if (slotChars) {
@@ -541,7 +561,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
     const basePrompt = scriptMode === 'imitate'
       ? buildImitatePrompt({ reference: readCustomScript(task.variables), subject: task.subject, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, openTitleText })
       : themeBook
-        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, angle, openTitleText })
+        ? buildSingleBookPrompt({ book: themeBook, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, angle, openTitleText, ...(tp.script ? { policy: tp.script } : {}) })
         : buildScriptPrompt({ mode, subject: task.subject, books, framework: { frameworkText: fw.frameworkText, segCount, maxLines, maxTotalChars: budgetChars, ...(slotChars ? { slotChars } : {}) }, variablesText, angle, openTitleText })
 
     let prompt = basePrompt

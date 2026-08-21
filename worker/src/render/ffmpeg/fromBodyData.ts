@@ -44,20 +44,13 @@ function abs(hfDir: string, rel: string): string {
  * 1.09 倍，而草稿实测是 1.85 倍——成片里大标题明显偏小。
  *
  * 正文锚点从 46 提到 54：实测 46px 在 720 宽画布上偏小，浅色配图上更吃亏。
- * 要整体调大调小，只动这一个数，各层比例自动跟着走。
- */
-const CAPTION_PX = 54
-
-/**
- * 常驻大标题在草稿实测比例之上再放大的系数。
  *
- * 草稿实测是正文的 1.85 倍，但客户要求成片里的书名标题「再大一些」——
- * 这是**有意偏离原工程**的产品选择，不是提取错了。
- * 单独一个系数而不是改 text.bookTitleScale：那个值来自草稿解析，
- * 重新导入工程时会被覆盖回 1.85，改在那里等于白改。
+ * ★ 锚点、放大系数、描边、各层颜色现在都从 templateParams.text 取
+ *（DEFAULT_CAPTION_PX 等只是兜底，值与原写死值一致）。线上反馈「字太小」
+ * 「标题要加粗放大」「描边看不清」全落在这批数上，原先每次都要改代码重部署，
+ * 现在运营在剪辑工作台里就能调。
  */
-const TITLE_BOOST = 1.3
-
+const DEFAULT_CAPTION_PX = 54
 const FS = { watermark: 22, flashAuthorRatio: 0.48 }
 
 export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts {
@@ -100,7 +93,8 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
   }))
 
   const tx = p?.text
-  const px = (ratio: number) => Math.round(CAPTION_PX * ratio)
+  const capPx = tx?.captionSizePx ?? DEFAULT_CAPTION_PX
+  const px = (ratio: number) => Math.round(capPx * ratio)
   // 开场标题：第 0 段是「开场 + 快闪」的时间窗，它的字幕就是这行开场白。
   // ffmpeg 迁移时 segs.slice(1) 把第 0 段整个丢掉了，成片开头一直没有这行字。
   const openTitleText = p?.open.titleText?.trim() || segs[0]?.subtitle?.trim() || ''
@@ -128,19 +122,21 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
       fontName: DEFAULT_FONT_NAME,
       captionColor: p?.body.subtitleColor ?? '#ffffff',
       captionPosY: p?.body.subtitlePosY ?? 0.78,
-      captionSizePx: CAPTION_PX,
-      titleSizePx: Math.round(px(tx?.bookTitleScale ?? 1.85) * TITLE_BOOST),
-      titleColor: '#ffe9c0',
+      captionSizePx: capPx,
+      titleSizePx: Math.round(px(tx?.bookTitleScale ?? 1.85) * (tx?.bookTitleBoost ?? 1.3)),
+      titleColor: tx?.bookTitleColor ?? '#ffe9c0',
       ...(tx?.bookTitlePosY !== undefined ? { titlePosY: tx.bookTitlePosY } : {}),
       watermarkSizePx: FS.watermark,
       flashTitleSizePx: px(tx?.flashTitleScale ?? 1.96),
-      flashTitleColor: '#ffffff',
+      flashTitleColor: tx?.flashTitleColor ?? '#ffffff',
       ...(tx?.flashTitlePosY !== undefined ? { flashTitlePosY: tx.flashTitlePosY } : {}),
-      flashAuthorSizePx: Math.round(CAPTION_PX * (tx?.flashTitleScale ?? 1.96) * FS.flashAuthorRatio),
-      flashAuthorColor: '#ffcc88',
+      flashAuthorSizePx: Math.round(capPx * (tx?.flashTitleScale ?? 1.96) * FS.flashAuthorRatio),
+      flashAuthorColor: tx?.flashAuthorColor ?? '#ffcc88',
       openTitleSizePx: px(tx?.openTitleScale ?? 1.13),
-      openTitleColor: '#ffffff',
+      openTitleColor: tx?.openTitleColor ?? '#ffffff',
       ...(tx?.openTitlePosY !== undefined ? { openTitlePosY: tx.openTitlePosY } : {}),
+      ...(tx?.outlinePx !== undefined ? { outlinePx: tx.outlinePx } : {}),
+      ...(tx?.boldBordPx !== undefined ? { boldBordPx: tx.boldBordPx } : {}),
     },
     decor: {
       // 与 HyperFrames 模板的 .scrim（340px 高、底部最深 0.85）对齐

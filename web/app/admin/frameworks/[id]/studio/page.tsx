@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import {
-  SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows,
-  type Cycle, type Keyframe, type AudioParams,
+  SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows, ScriptRows,
+  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type ScriptParams,
 } from '@/components/admin/paramControls'
 
 // 框架级剪辑工作台：调**这个模板以后所有片子**的节奏、转场、运镜、字幕、配乐。
@@ -22,6 +22,9 @@ type Effective = {
   body: { slotDurationsMs?: number[]; subtitleColor: string; subtitlePosY: number }
   audio: AudioParams
   motion?: { keyframes?: Keyframe[] }
+  text?: TextParams & Record<string, number | string>
+  pace?: PaceParams
+  script?: ScriptParams
 }
 type Info = { name: string | null; effective: Effective; hasDraftParams: boolean }
 
@@ -38,6 +41,9 @@ export default function FrameworkStudioPage() {
   const [audio, setAudio] = useState<AudioParams | null>(null)
   const [capColor, setCapColor] = useState('#ffffff')
   const [capPosY, setCapPosY] = useState(0.78)
+  const [text, setText] = useState<TextParams | null>(null)
+  const [pace, setPace] = useState<PaceParams | null>(null)
+  const [script, setScript] = useState<ScriptParams | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +55,9 @@ export default function FrameworkStudioPage() {
       setAudio({ ...d.effective.audio })
       setCapColor(d.effective.body.subtitleColor)
       setCapPosY(d.effective.body.subtitlePosY)
+      if (d.effective.text) setText(d.effective.text as TextParams)
+      if (d.effective.pace) setPace({ ...d.effective.pace })
+      if (d.effective.script) setScript({ ...d.effective.script })
     } catch (e) { setErr((e as Error).message) }
   }, [id])
 
@@ -129,6 +138,27 @@ export default function FrameworkStudioPage() {
         patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY } })}>
         <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} />
       </Section>
+
+      {text && (
+        <Section title="文字层 · 字号 / 描边 / 加粗 / 颜色" what="文字层"
+          patch={() => ({ text })}>
+          <TextRows text={text} onChange={setText} />
+        </Section>
+      )}
+
+      {pace && (
+        <Section title="节奏留白与语速" what="节奏留白"
+          patch={() => ({ pace })}>
+          <PaceRows pace={pace} onChange={setPace} />
+        </Section>
+      )}
+
+      {script && (
+        <Section title="文案口径（给 AI 的规则）" what="文案口径"
+          patch={() => ({ script })}>
+          <ScriptRows script={script} onChange={setScript} />
+        </Section>
+      )}
 
       {audio && (
         <Section title="配乐" what="配乐" patch={() => ({ audio })}>

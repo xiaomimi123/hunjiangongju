@@ -101,6 +101,46 @@ describe('sanitizeParamsOverride —— 白名单', () => {
     })
   })
 
+  describe('文字层扩展（字号锚点/描边/加粗/各层颜色）', () => {
+    it('锚点字号取整并夹在 20~120', () => {
+      expect(sanitizeParamsOverride({ text: { captionSizePx: 300 } })).toEqual({ text: { captionSizePx: 120 } })
+      expect(sanitizeParamsOverride({ text: { captionSizePx: 64.6 } })).toEqual({ text: { captionSizePx: 65 } })
+    })
+    it('描边 0 是合法值（无描边），加粗 0 是合法值（不加粗）', () => {
+      expect(sanitizeParamsOverride({ text: { outlinePx: 0, boldBordPx: 0 } }))
+        .toEqual({ text: { outlinePx: 0, boldBordPx: 0 } })
+    })
+    it('各层颜色只收 #RRGGBB', () => {
+      expect(sanitizeParamsOverride({ text: { bookTitleColor: '#FFE9C0', flashTitleColor: 'red' } }))
+        .toEqual({ text: { bookTitleColor: '#FFE9C0' } })
+    })
+  })
+
+  describe('节奏留白与语速', () => {
+    it('留白取整、语速与变速夹区间', () => {
+      expect(sanitizeParamsOverride({ pace: { bookTitleLeadMs: 400.4, speechCharsPerSec: 99, maxTempo: 0.5 } }))
+        .toEqual({ pace: { bookTitleLeadMs: 400, speechCharsPerSec: 12, maxTempo: 1 } })
+    })
+    it('留白 0 合法（书名紧贴快闪出口）', () => {
+      expect(sanitizeParamsOverride({ pace: { bookTitleLeadMs: 0 } })).toEqual({ pace: { bookTitleLeadMs: 0 } })
+    })
+  })
+
+  describe('文案口径', () => {
+    it('开关与段号放行，段号取整', () => {
+      expect(sanitizeParamsOverride({ script: { titleInOpening: true, titleSegment: 3.4, chineseTitlesOnly: false } }))
+        .toEqual({ script: { titleInOpening: true, titleSegment: 3, chineseTitlesOnly: false } })
+    })
+    it('附加规则文本放行并封顶 2000 字', () => {
+      const long = '规'.repeat(3000)
+      const out = sanitizeParamsOverride({ script: { extraRules: long } })
+      expect((out!.script as Record<string, unknown>).extraRules).toHaveLength(2000)
+    })
+    it('开关必须是布尔，字符串 "true" 不收', () => {
+      expect(sanitizeParamsOverride({ script: { titleInOpening: 'true' } })).toBeNull()
+    })
+  })
+
   it('颜色必须是 #RRGGBB，其它写法丢弃', () => {
     expect(sanitizeParamsOverride({ body: { subtitleColor: '#fff' } })).toBeNull()
     expect(sanitizeParamsOverride({ body: { subtitleColor: 'red' } })).toBeNull()

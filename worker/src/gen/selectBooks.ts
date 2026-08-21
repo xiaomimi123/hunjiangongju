@@ -26,6 +26,7 @@ import {
   findBooksByTheme,
   upsertBook,
   looksChineseTitle,
+  parseTemplateParams,
   pickSubset,
   parseBookList,
   dedupeBooks,
@@ -250,15 +251,18 @@ async function resolveStudentBook(subject: string, candidates: PickedBook[]): Pr
   }
 }
 
-/** 候选池（陪衬书）：书库同主题召回 + 不足时联网推荐并二次校验；学员那本始终被排除在外（外层负责固定排末位） */
-async function collectCandidates(theme: string, studentBook: BookOut, n: number): Promise<PickedBook[]> {
+/**
+ * 候选池（陪衬书）：书库同主题召回 + 不足时联网推荐并二次校验；学员那本始终被排除在外（外层负责固定排末位）。
+ * @param zhOnly 只要中文书名（框架 script.chineseTitlesOnly，默认开）
+ */
+async function collectCandidates(theme: string, studentBook: BookOut, n: number, zhOnly = true): Promise<PickedBook[]> {
   let pool: PickedBook[] = []
   try {
     const rows = await findBooksByTheme(theme, n * 2)
     // ★ 召回侧要挡：那几本英文书是在「书名必须是中文」这条约束加上去**之前**
     // 沉淀进书库的，不挡的话每次都被原样召回 —— 提示词修好了、脏数据还在。
     // 线上成片的快闪卡上整屏英文书名就是这么来的。
-    const zh = rows.filter((r) => looksChineseTitle(r.title))
+    const zh = zhOnly ? rows.filter((r) => looksChineseTitle(r.title)) : rows
     if (zh.length < rows.length) {
       console.warn(`[gen] select-books: 书库召回里剔除 ${rows.length - zh.length} 本外文书名（${rows.filter((r) => !looksChineseTitle(r.title)).map((r) => r.title).join('、')}）`)
     }
@@ -274,7 +278,7 @@ async function collectCandidates(theme: string, studentBook: BookOut, n: number)
       const raw = await llmComplete({ prompt: buildRecommendPrompt(theme, need), enableSearch: true, maxTokens: 800 })
       // 写入侧也要挡：模型偶尔无视「必须中文」这条，放进去就会污染书库、
       // 之后被召回侧反复取到。挡在这里，脏数据既进不来也传不下去。
-      const recommended = dedupeBooks(parseBookList(raw)).filter((b) => looksChineseTitle(b.title))
+      const recommended = dedupeBooks(parseBookList(raw)).filter((b) => !zhOnly || looksChineseTitle(b.title))
       const verified: PickedBook[] = []
       for (const b of recommended) {
         let ok = false
@@ -369,7 +373,10 @@ export async function selectBooks(genTaskId: string): Promise<void> {
   // 快闪按 variables.books 顺序出卡，主题书排末位 = 最后一张定格在它。
   let books: BookOut[] = [studentBook]
   if (n > 1) {
-    const pool = await collectCandidates(theme, studentBook, n)
+    const zhOnly = parseTemplateParams(
+      (task.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams,
+    ).script?.chineseTitlesOnly ?? true
+    const pool = await collectCandidates(theme, studentBook, n, zhOnly)
     const picked = pickSubset(pool, n - 1, genTaskId)
     books = [...picked, studentBook]
   }

@@ -5,6 +5,7 @@ import { getSession } from '@/lib/auth'
 import { DATA_DIR } from '@/lib/paths'
 import { verifyAssetToken } from '@mixcut/db'
 import { contentDispositionAttachment } from '@/lib/contentDisposition'
+import { fallbackOriginal } from '@/lib/thumbFallback'
 
 const MIME: Record<string, string> = {
   '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.srt': 'text/plain; charset=utf-8',
@@ -23,10 +24,24 @@ export async function GET(req: NextRequest, { params }: { params: { path: string
   } else if (!(await getSession())) {
     return new Response('未登录', { status: 401 })
   }
-  const abs = path.normalize(path.join(DATA_DIR, rel))
   const root = path.resolve(DATA_DIR)
-  if (abs !== root && !abs.startsWith(root + path.sep)) return new Response('非法路径', { status: 400 })
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return new Response('不存在', { status: 404 })
+  const resolve = (r: string) => path.normalize(path.join(DATA_DIR, r))
+  const inRoot = (a: string) => a === root || a.startsWith(root + path.sep)
+  const isFile = (a: string) => fs.existsSync(a) && fs.statSync(a).isFile()
+
+  let abs = resolve(rel)
+  if (!inRoot(abs)) return new Response('非法路径', { status: 400 })
+  if (!isFile(abs)) {
+    // 缩略图缺失时回退原图：缩略图是「锦上添花」的产物（批量导入时 makeThumb 失败
+    // 只记 warning，老素材更是在这个功能之前入的库），缺了不该让页面显示裂图。
+    // 兜底只对 .thumb.webp 生效——普通文件缺失照常 404，绝不悄悄换成别的文件。
+    const alt = fallbackOriginal(rel, (r) => {
+      const a = resolve(r)
+      return inRoot(a) && isFile(a)
+    })
+    if (!alt) return new Response('不存在', { status: 404 })
+    abs = resolve(alt)
+  }
 
   const stat = fs.statSync(abs)
   const size = stat.size

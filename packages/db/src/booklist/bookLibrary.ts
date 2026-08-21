@@ -9,6 +9,10 @@ export interface BookRow {
   theme: string | null
   points: string | null
   source: string
+  /** 书封（/api/files/... 相对 URL）。为空表示还没有，生图时现做并回写。 */
+  coverUrl: string | null
+  /** 'upload'=运营上传的真实封面 / 'ai'=按框架画风生成的底图 */
+  coverSource: string | null
 }
 
 /** 规范化书名：去掉书名号《》与首尾空白，用于统一存储与查询。
@@ -17,8 +21,56 @@ export function normalizeTitle(title: string): string {
   return title.replace(/[《》]/g, '').trim()
 }
 
-function toRow(b: { id: string; title: string; author: string; theme: string | null; points: string | null; source: string }): BookRow {
-  return { id: b.id, title: b.title, author: b.author, theme: b.theme, points: b.points, source: b.source }
+function toRow(b: {
+  id: string; title: string; author: string; theme: string | null; points: string | null; source: string
+  coverUrl?: string | null; coverSource?: string | null
+}): BookRow {
+  return {
+    id: b.id, title: b.title, author: b.author, theme: b.theme, points: b.points, source: b.source,
+    coverUrl: b.coverUrl ?? null, coverSource: b.coverSource ?? null,
+  }
+}
+
+/**
+ * 按 (书名, 作者) 批量取已有书封。
+ *
+ * 作者可能缺失或与库里写法不一致（「余华」vs「余华 著」），所以**先按书名精确匹配**，
+ * 作者只在有多行同名时用来消歧。宁可少命中一次多生一张图，也不能张冠李戴——
+ * 给《活着》配上另一本书的封面比重新生成糟糕得多。
+ */
+export async function findCoversByTitles(
+  books: { title: string; author?: string }[],
+): Promise<Map<string, { url: string; source: string | null }>> {
+  const titles = Array.from(new Set(books.map((b) => normalizeTitle(b.title)).filter(Boolean)))
+  if (titles.length === 0) return new Map()
+  const rows = await prisma.bookLibrary.findMany({
+    where: { title: { in: titles }, coverUrl: { not: null } },
+    select: { title: true, author: true, coverUrl: true, coverSource: true },
+  })
+  const out = new Map<string, { url: string; source: string | null }>()
+  for (const b of books) {
+    const t = normalizeTitle(b.title)
+    const same = rows.filter((r) => r.title === t)
+    if (same.length === 0) continue
+    const a = (b.author ?? '').trim()
+    // 多行同名时优先作者也对得上的那行；对不上就不取——见上面的注释
+    const hit = same.length === 1 ? same[0] : same.find((r) => r.author === a)
+    if (hit?.coverUrl) out.set(t, { url: hit.coverUrl, source: hit.coverSource })
+  }
+  return out
+}
+
+/** 回写书封。生图时现做的封面存回书库，下一条片子直接复用。 */
+export async function setBookCover(
+  title: string, author: string | undefined, coverUrl: string, coverSource: 'upload' | 'ai',
+): Promise<void> {
+  const t = normalizeTitle(title)
+  const a = (author ?? '').trim()
+  // 作者对不上时按书名更新第一行：作者写法不一致很常见，而封面只跟书走
+  const where = a ? { title: t, author: a } : { title: t }
+  const row = await prisma.bookLibrary.findFirst({ where, select: { id: true } })
+  if (!row) return
+  await prisma.bookLibrary.update({ where: { id: row.id }, data: { coverUrl, coverSource } })
 }
 
 /** 精确命中（书名 trim 后完全相同，忽略书名号）；命中返回该条，否则 null */

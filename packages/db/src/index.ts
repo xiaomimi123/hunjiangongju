@@ -45,7 +45,9 @@ export { extractSubtitleEntrance } from './booklist/draftTextAnim'
 export type { EntranceId } from './booklist/draftTextAnim'
 export { detectUnsupported, buildFidelityReport, isFidelityReport } from './booklist/draftProvenance'
 export type { ProvenanceStatus, ProvenanceEntry, DraftFidelityReport } from './booklist/draftProvenance'
-export { findBookByTitle, findBooksByTheme, upsertBook, normalizeTitle } from './booklist/bookLibrary'
+export { buildBookCoverPrompt } from './booklist/bookCoverPrompt'
+export type { CoverPrompt } from './booklist/bookCoverPrompt'
+export { findBookByTitle, findBooksByTheme, upsertBook, normalizeTitle, findCoversByTitles, setBookCover } from './booklist/bookLibrary'
 export type { BookRow } from './booklist/bookLibrary'
 export {
   seedFrom,

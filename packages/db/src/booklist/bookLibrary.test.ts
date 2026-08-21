@@ -1,5 +1,5 @@
-import { describe, it, expect, afterAll } from 'vitest'
-import { findBookByTitle, findBooksByTheme, upsertBook } from './bookLibrary'
+import { describe, it, expect, afterAll, beforeAll } from 'vitest'
+import { findBookByTitle, findBooksByTheme, upsertBook , findCoversByTitles, setBookCover } from './bookLibrary'
 import { prisma } from '../client'
 
 const ids: string[] = []
@@ -52,5 +52,54 @@ describe('bookLibrary', () => {
     expect(
       await prisma.bookLibrary.count({ where: { title: book.title, author: book.author } })
     ).toBe(1)
+  })
+})
+
+// ★ 书封只跟「这本书」有关，跟这条片子的文案毫无关系。
+// 原先每条片子都为每本书重生成一张——9 本书就是 9 次生图调用，
+// 而其中绝大多数是同样那几本常见书。存进书库后一次做完、永久复用。
+describe('书封复用', () => {
+  const mk = (title: string, author: string, coverUrl: string | null) =>
+    prisma.bookLibrary.create({ data: { title, author, coverUrl, ...(coverUrl ? { coverSource: 'ai' } : {}) } })
+
+  beforeAll(async () => {
+    await prisma.bookLibrary.deleteMany({ where: { title: { startsWith: '封面测试' } } })
+    await mk('封面测试A', '甲', '/api/files/covers/a.png')
+    await mk('封面测试B', '乙', null)
+    await mk('封面测试C', '丙一', '/api/files/covers/c1.png')
+    await mk('封面测试C', '丙二', '/api/files/covers/c2.png')
+  })
+  afterAll(async () => {
+    await prisma.bookLibrary.deleteMany({ where: { title: { startsWith: '封面测试' } } })
+  })
+
+  it('有封面的取到，没封面的不出现在结果里', async () => {
+    const m = await findCoversByTitles([{ title: '封面测试A' }, { title: '封面测试B' }])
+    expect(m.get('封面测试A')?.url).toBe('/api/files/covers/a.png')
+    expect(m.has('封面测试B'), '没有封面的书不该出现').toBe(false)
+  })
+
+  it('书名带《》也能命中（与入库时同一套规范化）', async () => {
+    const m = await findCoversByTitles([{ title: '《封面测试A》' }])
+    expect(m.get('封面测试A')?.url).toBe('/api/files/covers/a.png')
+  })
+
+  // ★ 同名不同作者时必须靠作者消歧。张冠李戴地给《活着》配上另一本书的封面，
+  // 比重新生成一张糟糕得多——所以对不上就宁可不取。
+  it('同名多本时按作者消歧', async () => {
+    const m1 = await findCoversByTitles([{ title: '封面测试C', author: '丙二' }])
+    expect(m1.get('封面测试C')?.url).toBe('/api/files/covers/c2.png')
+    const m2 = await findCoversByTitles([{ title: '封面测试C', author: '查无此人' }])
+    expect(m2.has('封面测试C'), '作者对不上时宁可不取，也不能配错封面').toBe(false)
+  })
+
+  it('回写后能被取到', async () => {
+    await setBookCover('封面测试B', '乙', '/api/files/covers/b.png', 'ai')
+    const m = await findCoversByTitles([{ title: '封面测试B', author: '乙' }])
+    expect(m.get('封面测试B')).toEqual({ url: '/api/files/covers/b.png', source: 'ai' })
+  })
+
+  it('书目不存在时回写不抛错（生图流程不该因此中断）', async () => {
+    await expect(setBookCover('查无此书', '某某', '/x.png', 'ai')).resolves.toBeUndefined()
   })
 })

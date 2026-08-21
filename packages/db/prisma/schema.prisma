@@ -230,6 +230,12 @@ model BookLibrary {
   theme     String?
   points    String?
   source    String   @default("ai")
+  // 书封：同一本书的封面只做一次，之后所有片子复用。
+  // 原先每条片子都为每本书重生成一张底图——9 本书就是 9 次生图调用，
+  // 而书封只跟「这本书」有关、跟这条片子的文案毫无关系。
+  coverUrl    String?  @map("cover_url")
+  // 'upload'=运营上传的真实封面（与原工程一致，最准）/ 'ai'=按框架画风生成的底图
+  coverSource String?  @map("cover_source")
   createdAt DateTime @default(now()) @map("created_at")
   @@unique([title, author])
   @@map("book_library")

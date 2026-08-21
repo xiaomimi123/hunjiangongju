@@ -1,9 +1,9 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage, publicAssetUrl } from '@mixcut/db'
+import { randomUUID } from 'crypto'
+import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage, publicAssetUrl, findCoversByTitles, setBookCover, normalizeTitle, buildBookCoverPrompt } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
-import { buildBookCoverPrompt } from '../../templates/booklist/bookCoverPrompt'
 import { pickAssetsForSegments, readAssetSource, poolForFolder, resolveSlotFolders } from './stockAssets'
 import { pickArtScenes, buildFreeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
 import { makeThumb } from '../thumb'
@@ -183,15 +183,45 @@ export async function generateImage(genTaskId: string): Promise<void> {
     await fs.mkdir(coversDir, { recursive: true })
     // || + trim:画风被清成空字符串时也回退 buildBookCoverPrompt 的默认(?? 只兜 null)
     const styleHint = (task.framework.imageStylePrompt || '').trim() || undefined
+    // ★ 书封只跟「这本书」有关，跟这条片子的文案毫无关系——所以做一次就够了。
+    // 原先每条片子都为每本书重生成一张，9 本书就是 9 次生图调用；
+    // 一天几千条时这是成本大头，而其中绝大多数是同样那几本常见书。
+    const cached = await findCoversByTitles(books)
+    let reused = 0
     for (const [i, book] of books.entries()) {
+      const dst = path.join(coversDir, `${String(i + 1).padStart(2, '0')}.png`)
+      const hit = cached.get(normalizeTitle(book.title))
+      if (hit) {
+        try {
+          await fs.copyFile(urlToAbs(hit.url), dst)
+          reused++
+          continue
+        } catch (err) {
+          // 库里登记了封面但文件没了（手工删过 data/、或换过机器）：
+          // 不能让整批出片失败，退回现做一张
+          console.warn(`[gen] book-cover ${genTaskId} #${i} 复用失败(${hit.url})，改为现做: ${(err as Error).message?.slice(0, 80)}`)
+        }
+      }
       const { prompt, negativePrompt } = buildBookCoverPrompt(book, styleHint)
       const png = await withRetry(() => imageGenerate({ prompt, size: '720x960', negativePrompt }), {
         attempts: 3, delayMs: 3000,
         onRetry: (err, n) => console.warn(`[gen] book-cover ${genTaskId} #${i} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),
       })
-      await fs.writeFile(path.join(coversDir, `${String(i + 1).padStart(2, '0')}.png`), png)
+      await fs.writeFile(dst, png)
+      // 回写书库：存到公共目录而不是任务目录——任务目录会被清理，
+      // 而书封要长期复用。回写失败只记 warning，不影响本条出片。
+      try {
+        const rel = `covers/${randomUUID()}.png`
+        const abs = path.join(DATA_DIR, rel)
+        await fs.mkdir(path.dirname(abs), { recursive: true })
+        await fs.writeFile(abs, png)
+        await makeThumbSafely(abs)
+        await setBookCover(book.title, book.author, `/api/files/${rel}`, 'ai')
+      } catch (err) {
+        console.warn(`[gen] book-cover ${genTaskId} #${i} 回写书库失败(不影响出片): ${(err as Error).message?.slice(0, 80)}`)
+      }
     }
-    console.log(`[gen] generate-image ${genTaskId}: flash 书封 ${books.length} 张`)
+    console.log(`[gen] generate-image ${genTaskId}: flash 书封 ${books.length} 张（复用 ${reused}，新生成 ${books.length - reused}）`)
   }
 
   await setGenerationStatus(genTaskId, 'TTS_GENERATING')

@@ -1,12 +1,15 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { api } from '@/lib/fetcher'
+import { thumbUrl } from '@/lib/thumbUrl'
 import PageHeader from '@/components/admin/PageHeader'
 
 type Book = {
   id: string
   title: string
   author: string
+  coverUrl: string | null
+  coverSource: string | null
   theme: string | null
   points: string | null
   source: string
@@ -15,6 +18,78 @@ type Book = {
 type ListResp = { books: Book[]; themes: string[] }
 
 const emptyForm = { title: '', author: '', theme: '', points: '' }
+
+/**
+ * 书库里的封面单元格：上传真实封面 / AI 生成 / 清除。
+ *
+ * 为什么把封面放在书库而不是每条片子现做：书封只跟「这本书」有关，
+ * 跟这条片子的文案毫无关系。原先每条片子都为每本书重生成一张——
+ * 9 本书就是 9 次生图调用，而其中绝大多数是同样那几本常见书。
+ *
+ * 上传真实封面与原工程一致（客户草稿里的快闪图本来就是真实书封），也最准；
+ * AI 生成的是「无文字的封面底图」，书名由渲染层叠字。
+ */
+function BookCover({ book, onChange }: { book: Book; onChange: () => void }) {
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const id = useId()
+
+  async function call(init: RequestInit, tag: string) {
+    setBusy(tag); setErr('')
+    try {
+      const res = await fetch(`/api/admin/books/${book.id}/cover`, init)
+      if (!res.ok) {
+        const j = await res.json().catch(() => null)
+        throw new Error(j?.error ?? `HTTP ${res.status}`)
+      }
+      onChange()
+    } catch (e) { setErr((e as Error).message) } finally { setBusy('') }
+  }
+
+  return (
+    <div className="w-24">
+      {book.coverUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={thumbUrl(book.coverUrl)} alt={book.title} className="h-20 w-full rounded border border-line object-cover" />
+      ) : (
+        <div className="flex h-20 w-full items-center justify-center rounded border border-dashed border-line text-[11px] text-ink3">无封面</div>
+      )}
+      <div className="mt-1 flex flex-wrap gap-1">
+        <label htmlFor={id} className={`btn-ghost px-1.5 py-0.5 text-[11px] ${busy ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}>
+          {busy === 'up' ? '上传中…' : '上传'}
+        </label>
+        <input
+          id={id}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (!f) return
+            const fd = new FormData()
+            fd.append('file', f)
+            void call({ method: 'POST', body: fd }, 'up')
+          }}
+        />
+        <button
+          className="btn-ghost px-1.5 py-0.5 text-[11px]"
+          disabled={!!busy}
+          onClick={() => call({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{}' }, 'ai')}
+        >
+          {busy === 'ai' ? '生成中…' : 'AI 生成'}
+        </button>
+        {book.coverUrl && (
+          <button className="btn-ghost px-1.5 py-0.5 text-[11px]" disabled={!!busy} onClick={() => call({ method: 'DELETE' }, 'del')}>
+            清除
+          </button>
+        )}
+      </div>
+      {book.coverSource && <p className="mt-0.5 text-[10px] text-ink3">{book.coverSource === 'upload' ? '上传' : 'AI'}</p>}
+      {err && <p className="mt-0.5 break-all text-[10px] text-red-500">{err}</p>}
+    </div>
+  )
+}
 
 export default function BooksPage() {
   const [books, setBooks] = useState<Book[] | null>(null)
@@ -154,6 +229,7 @@ export default function BooksPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-ink3">
+                  <th className="py-2 pr-3">封面</th>
                   <th className="py-2 pr-3">书名</th>
                   <th className="py-2 pr-3">作者</th>
                   <th className="py-2 pr-3">主题</th>
@@ -167,6 +243,7 @@ export default function BooksPage() {
                   <tr key={b.id} className="border-b border-line/60">
                     {editingId === b.id ? (
                       <>
+                        <td className="py-2 pr-3 text-ink3">—</td>
                         <td className="py-2 pr-3"><input className="field w-full text-xs" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="书名" /></td>
                         <td className="py-2 pr-3"><input className="field w-full text-xs" value={editAuthor} onChange={(e) => setEditAuthor(e.target.value)} placeholder="作者" /></td>
                         <td className="py-2 pr-3"><input className="field w-full text-xs" value={editTheme} onChange={(e) => setEditTheme(e.target.value)} placeholder="主题" /></td>
@@ -181,6 +258,7 @@ export default function BooksPage() {
                       </>
                     ) : (
                       <>
+                        <td className="py-2 pr-3"><BookCover book={b} onChange={() => load(filterTheme)} /></td>
                         <td className="py-2 pr-3 font-medium">{b.title}</td>
                         <td className="py-2 pr-3">{b.author}</td>
                         <td className="py-2 pr-3 text-ink3">{b.theme || '—'}</td>

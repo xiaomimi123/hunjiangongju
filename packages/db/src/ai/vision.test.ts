@@ -91,10 +91,14 @@ describe('parseStylePrompt —— 参考图反推画风', () => {
     expect(parseStylePrompt(dash('厚涂油画,暖褐色调\n\n这种风格常见于古典肖像。'))).toBe('厚涂油画,暖褐色调')
   })
 
-  // 反推失败不能抛错：这是后台的一个辅助按钮，模型抽风不该让运营看到 500
-  it('响应形状不对/为空 → 回退兜底，不抛错', () => {
-    expect(parseStylePrompt(null)).toBe(MOCK_STYLE_PROMPT)
-    expect(parseStylePrompt({})).toBe(MOCK_STYLE_PROMPT)
-    expect(parseStylePrompt(dash('   '))).toBe(MOCK_STYLE_PROMPT)
+  // ★ 解析不出来必须返回 null，**不能**兜一句通用画风。
+  // 第一版兜的是「厚涂油画质感,浓郁色彩…」——看起来完全像一次正常的反推结果，
+  // 运营传一张动漫头像却拿回一句厚涂油画，根本分不清是模型读错了还是这步悄悄失败了。
+  // 让它可见（调用方抛错并把原始响应带出来）比给个像样的假答案好排查得多。
+  it('响应形状不对/为空 → 返回 null，不伪装成一次正常结果', () => {
+    expect(parseStylePrompt(null)).toBeNull()
+    expect(parseStylePrompt({})).toBeNull()
+    expect(parseStylePrompt(dash('   '))).toBeNull()
+    expect(parseStylePrompt(dash('')), '空串不该被当成有效提示词').toBeNull()
   })
 })

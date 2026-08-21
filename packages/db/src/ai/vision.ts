@@ -190,20 +190,35 @@ export async function describeBooksFromImages(imageUrls: string[]): Promise<{ ti
 // 目标是把参考图的风格描述到足以复现——媒介、笔触、色调、光线、构图、情绪都要有。
 // 一句话概括喂给文生图模型是出不来对应风格的。
 
-/** 反推失败/mock 时的兜底。故意保守：宁可回退到通用描述，也不编造一个具体流派。 */
+/**
+ * **只在 mock 模式**用的固定返回值。
+ *
+ * 它不再兼作「解析失败兜底」：兜底一句「厚涂油画质感,浓郁色彩…」看起来完全像一次
+ * 正常的反推结果，运营拿到手分不清是模型真读了图、还是这一步悄悄失败了。
+ * 传一张动漫头像回来一句厚涂油画，比直接报错更难排查。解析不出来就抛，让它可见。
+ */
 export const MOCK_STYLE_PROMPT = '厚涂油画质感,浓郁色彩,可见笔触,柔和光线,古典氛围'
 
 const STYLE_PROMPT_INSTRUCTION =
-  '你是一名 AI 绘画提示词工程师。请观察这张参考图的**画风**（不是画的内容），' +
-  '输出一句可直接用于文生图模型的中文画风提示词。' +
-  '要覆盖：艺术媒介或流派、笔触与质感、主色调与配色关系、光线特征、构图特点、整体情绪。' +
-  '用逗号分隔的短语，不超过 60 字。' +
-  '**只描述风格，不要描述画面里的具体物体、人物或场景**——' +
-  '这句提示词会被复用到完全不同的题材上。' +
-  '直接输出提示词本身，不要任何解释、前缀或引号。'
+  '你是一名 AI 绘画提示词工程师。请观察这张参考图，输出一句可直接用于文生图的中文提示词，' +
+  '目标是让文生图模型画出**同样风格**的图。' +
+  '要覆盖：艺术媒介或流派、笔触与质感、主色调与配色关系、光线特征、整体情绪。' +
+  // 人物图必须带上主体与景别。第一版写的是「只描述风格，不要描述人物」，
+  // 结果动漫头像反推回来是一句纯风格词，拿去生图会被带偏成风景——
+  // 对头像类参考图来说「是人物、什么性别、什么景别」本身就是要复现的东西。
+  '若参考图的主体是人物，必须写明**性别**与**景别**（如「男性少年面部特写」「女性半身像」）；' +
+  '只写「动漫头像」而不写性别时，模型默认产出女性角色。' +
+  '若主体是风景或静物，则不要写具体物体，只描述风格。' +
+  // 但仍然不能带具体情节：这句提示词会被复用到别的片子上
+  '任何情况下都不要描述具体场景、道具或情节（如「躲在被子里」「手里拿着书」）。' +
+  '用逗号分隔的短语，不超过 60 字。直接输出提示词本身，不要任何解释、前缀或引号。'
 
-/** 从模型返回里取出提示词并做清洗。绝不抛错——反推失败退回兜底，不该让后台报 500。 */
-export function parseStylePrompt(raw: any): string {
+/**
+ * 从模型返回里取出提示词并做清洗。
+ * @returns 提取不到可用内容时返回 null —— 由调用方决定怎么报。
+ *   **不要**在这里兜一句通用画风：那会让「这一步失败了」伪装成一次正常结果。
+ */
+export function parseStylePrompt(raw: any): string | null {
   try {
     const message = raw?.output?.choices?.[0]?.message
     const content = message?.content
@@ -220,9 +235,9 @@ export function parseStylePrompt(raw: any): string {
     text = text.replace(/^["'「『“]/, '').replace(/["'」』”]$/, '').trim()
     // 只取第一段：偶尔会追加一段解释
     text = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)[0] ?? ''
-    return text || MOCK_STYLE_PROMPT
+    return text || null
   } catch {
-    return MOCK_STYLE_PROMPT
+    return null
   }
 }
 
@@ -243,7 +258,9 @@ export async function describeStyleForPrompt(imageUrls: string[]): Promise<strin
       input: { messages: [{ role: 'user', content }] },
       parameters: {},
     })
-    return parseStylePrompt(data)
+    const out = parseStylePrompt(data)
+    if (!out) throw new Error(`vision 未返回可用的画风提示词（响应：${JSON.stringify(data).slice(0, 300)}）`)
+    return out
   }
 
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -261,5 +278,8 @@ export async function describeStyleForPrompt(imageUrls: string[]): Promise<strin
     }),
   })
   if (!res.ok) throw new Error(`vision 反推画风失败 ${res.status}: ${(await res.text()).slice(0, 200)}`)
-  return parseStylePrompt(await res.json())
+  const json = await res.json()
+  const out = parseStylePrompt(json)
+  if (!out) throw new Error(`vision 未返回可用的画风提示词（响应：${JSON.stringify(json).slice(0, 300)}）`)
+  return out
 }

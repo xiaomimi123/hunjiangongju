@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
+import { isPhoneAccount } from '@/lib/security'
 import { handler } from '@/lib/api'
 import { assertPassword } from '@/lib/security'
 
@@ -59,10 +60,16 @@ export const POST = handler(async (req) => {
   await requireRole('operator')
   const { email, nickname, password, role } = await req.json()
   const em = String(email ?? '').trim().toLowerCase()
-  if (!em || !/^\S+@\S+\.\S+$/.test(em)) throw new HttpError(400, '邮箱格式不正确')
   if (role !== 'student' && role !== 'operator') throw new HttpError(400, '角色只能是学员或运营')
+  // 账号体系（用户拍板）：学员一律 11 位手机号；运营保留邮箱（管理员由 ADMIN_EMAIL 初始化）
+  // 或同样用手机号。users.email 列当「账号」用，列名是历史遗留。
+  if (role === 'student') {
+    if (!isPhoneAccount(em)) throw new HttpError(400, '学员账号须为 11 位手机号')
+  } else if (!isPhoneAccount(em) && !/^\S+@\S+\.\S+$/.test(em)) {
+    throw new HttpError(400, '运营账号须为 11 位手机号或邮箱')
+  }
   assertPassword(password)
-  if (await prisma.user.findUnique({ where: { email: em } })) throw new HttpError(409, '该邮箱已存在')
+  if (await prisma.user.findUnique({ where: { email: em } })) throw new HttpError(409, '该账号已存在')
   try {
     const u = await prisma.user.create({
       data: { email: em, nickname: String(nickname ?? '').trim() || null, passwordHash: await bcrypt.hash(password, 10), role },
@@ -70,7 +77,7 @@ export const POST = handler(async (req) => {
     })
     return NextResponse.json(u, { status: 201 })
   } catch (e) {
-    if (e && typeof e === 'object' && (e as { code?: string }).code === 'P2002') throw new HttpError(409, '该邮箱已存在')
+    if (e && typeof e === 'object' && (e as { code?: string }).code === 'P2002') throw new HttpError(409, '该账号已存在')
     throw e
   }
 })

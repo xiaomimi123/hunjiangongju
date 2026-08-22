@@ -31,9 +31,9 @@ const cleanupEmails: string[] = []
 function track(email: string) { cleanupEmails.push(email); return email }
 
 describe('POST /api/admin/students', () => {
-  it('创建学员', async () => {
+  it('创建学员（账号 = 11 位手机号）', async () => {
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
-    const email = track(`new-student-${Date.now()}@example.com`)
+    const email = track(`139${String(Date.now()).slice(-8)}`)
     const res = await POST(postReq({ email, nickname: '小明', password: 'password123', role: 'student' }), { params: {} })
     expect(res.status).toBe(201)
     const json = await res.json()
@@ -59,9 +59,16 @@ describe('POST /api/admin/students', () => {
     await prisma.user.update({ where: { email }, data: { disabled: true } })
   })
 
-  it('重复 email → 409', async () => {
+  // ★ 账号体系（用户拍板）：学员一律 11 位手机号；旧的邮箱格式学员不再允许创建
+  it('学员账号不是 11 位手机号 → 400', async () => {
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
-    const email = track(`dup-${Date.now()}@example.com`)
+    const res = await POST(postReq({ email: track(`stu-${Date.now()}@example.com`), password: 'password123', role: 'student' }), { params: {} })
+    expect(res.status).toBe(400)
+  })
+
+  it('重复账号 → 409', async () => {
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
+    const email = track(`138${String(Date.now()).slice(-8)}`)
     await POST(postReq({ email, password: 'password123', role: 'student' }), { params: {} })
     requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
     const res = await POST(postReq({ email, password: 'password123', role: 'student' }), { params: {} })

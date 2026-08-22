@@ -22,3 +22,8 @@ export function nicknameFromEmail(email: string): string {
   const local = String(email).split('@')[0] || '学员'
   return local.slice(0, 20)
 }
+
+/** 学员账号：11 位手机号（纯数字）。运营账号仍允许邮箱（管理员由 ADMIN_EMAIL 初始化）。 */
+export function isPhoneAccount(v: unknown): v is string {
+  return typeof v === 'string' && /^\d{11}$/.test(v.trim())
+}

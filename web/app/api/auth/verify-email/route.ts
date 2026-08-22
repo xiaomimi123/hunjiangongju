@@ -9,7 +9,12 @@ import { setSessionCookie } from '@/lib/session'
 import { checkRate } from '@/lib/ratelimit'
 import { assertPassword, nicknameFromEmail } from '@/lib/security'
 
-export const POST = handler(async (req) => {
+// 注册已改为手机号 + 密码：邮箱验证码建号的旁路显式关闭（理由见 send-code）。
+export const POST = handler(async () => {
+  throw new HttpError(410, '注册已改为手机号 + 密码，无需验证码')
+})
+
+const _legacy = handler(async (req) => {
   const { email, code, password } = await req.json()
   checkRate('verify', String(email ?? '').toLowerCase(), 10)
   if (!isEmail(email)) throw new HttpError(400, '参数不完整')

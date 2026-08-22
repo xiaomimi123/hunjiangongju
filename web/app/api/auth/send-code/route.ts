@@ -9,8 +9,14 @@ import { sendCode } from '@/lib/emailflow'
 import { checkRate } from '@/lib/ratelimit'
 import { clientIp } from '@/lib/security'
 
-// 注册页「获取验证码」：给邮箱发一封注册验证码（与 register 解耦）——仅用于注册场景，注册未开放时禁止
-export const POST = handler(async (req) => {
+// 注册页「获取验证码」：注册已改为手机号 + 密码，不再有邮箱验证码环节。
+// 这个端点必须显式关闭而不是留着——留着等于给「11 位手机号」的账号规则开了
+// 一条邮箱建号的旁路（直接调 API 就能绕过）。
+export const POST = handler(async () => {
+  throw new HttpError(410, '注册已改为手机号 + 密码，无需验证码')
+})
+
+const _legacy = handler(async (req) => {
   const { email } = await req.json()
   checkRate('send-code-ip', clientIp(req), 20, 3600_000) // IP 级：每小时 20 封，防邮件轰炸
   checkRate('send-code', String(email ?? '').toLowerCase(), 4)

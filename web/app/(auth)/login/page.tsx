@@ -152,15 +152,12 @@ export default function LoginPage() {
   async function register() {
     clear()
     if (password !== password2) { setErr('两次输入的密码不一致'); return }
+    if (!/^\d{11}$/.test(email.trim())) { setErr('请输入 11 位手机号'); return }
     setBusy(true)
     try {
-      if (emailEnabled) {
-        const r = await api<{ role: string }>('/api/auth/verify-email', { body: { email, code, password } })
-        go(r.role)
-      } else {
-        const r = await api<{ role: string }>('/api/auth/register', { body: { email, password } })
-        go(r.role)
-      }
+      // 注册 = 手机号 + 密码，无验证码环节（手机号没有邮箱可发；短信通道未接）
+      const r = await api<{ role: string }>('/api/auth/register', { body: { email: email.trim(), password } })
+      go(r.role)
     } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
 
@@ -195,7 +192,7 @@ export default function LoginPage() {
 
       {view === 'login' && (
         <div className="space-y-3">
-          <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="邮箱" autoCapitalize="none" />
+          <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="手机号（运营账号可用邮箱）" autoCapitalize="none" inputMode="tel" />
           <PwField value={password} onChange={setPassword} placeholder="密码" />
           {err && <p className="pill pill-bad">{err}</p>}
           {msg && <p className="pill pill-ok">{msg}</p>}
@@ -208,8 +205,7 @@ export default function LoginPage() {
 
       {view === 'register' && (
         <div className="space-y-3">
-          <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="邮箱" autoCapitalize="none" />
-          {emailEnabled && <CodeRow code={code} onCode={setCode} cd={cd} email={email} busy={busy} onGet={() => getCode('register')} />}
+          <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="11 位手机号" autoCapitalize="none" inputMode="tel" maxLength={11} />
           <PwField value={password} onChange={setPassword} placeholder="密码（至少 8 位）" />
           <PwField value={password2} onChange={setPassword2} placeholder="确认密码" />
           {err && <p className="pill pill-bad">{err}</p>}
@@ -220,6 +216,7 @@ export default function LoginPage() {
 
       {view === 'reset' && (
         <div className="space-y-3">
+          <p className="text-xs text-ink3">手机号账号无法接收邮件验证码，请联系管理员在后台重置密码；以下仅适用于邮箱账号（运营）。</p>
           <input className="field" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="注册邮箱" autoCapitalize="none" />
           <CodeRow code={code} onCode={setCode} cd={cd} email={email} busy={busy} onGet={() => getCode('reset')} />
           <PwField value={password} onChange={setPassword} placeholder="新密码（至少 8 位）" />

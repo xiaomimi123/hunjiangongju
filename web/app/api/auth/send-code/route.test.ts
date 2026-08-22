@@ -16,21 +16,17 @@ function req(body: unknown) {
 }
 
 describe('POST /api/auth/send-code 注册开关门控', () => {
-  it('registrationOpen()=false → 403 注册未开放（不发码）', async () => {
+  // ★ 注册已改为手机号 + 密码：这个端点显式关闭（留着 = 邮箱建号旁路）
+  it('端点已关闭 → 恒 410，与注册开关无关', async () => {
     registrationOpenMock.mockResolvedValue(false)
     const res = await POST(req({ email: 'send-code-closed@example.com' }), { params: {} })
-    expect(res.status).toBe(403)
-    const json = await res.json()
-    expect(json.error).toBe('注册未开放')
+    expect(res.status).toBe(410)
   })
 
-  it('registrationOpen()=true → 放行进入后续校验（未开邮件服务时给 400，而非 403）', async () => {
+  it('注册开关打开也一样 410（不发任何邮件）', async () => {
     registrationOpenMock.mockResolvedValue(true)
     const res = await POST(req({ email: 'send-code-open@example.com' }), { params: {} })
-    // 测试库默认未开启 SMTP，走到 emailEnabled() 校验即止——证明 403 门控已放行
-    expect(res.status).toBe(400)
-    const json = await res.json()
-    expect(json.error).toBe('未开启邮件服务')
+    expect(res.status).toBe(410)
   })
 })
 

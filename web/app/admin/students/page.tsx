@@ -94,7 +94,8 @@ export default function StudentsPage() {
 
   async function createAccount() {
     setAddErr('')
-    if (!newEmail.trim()) { setAddErr('请填写邮箱'); return }
+    if (!newEmail.trim()) { setAddErr(newRole === 'student' ? '请填写 11 位手机号' : '请填写手机号或邮箱'); return }
+    if (newRole === 'student' && !/^\d{11}$/.test(newEmail.trim())) { setAddErr('学员账号须为 11 位手机号'); return }
     setAddBusy(true)
     try {
       await api('/api/admin/students', { body: { email: newEmail.trim(), nickname: newNickname.trim(), password: newPassword, role: newRole } })
@@ -153,14 +154,14 @@ export default function StudentsPage() {
       </div>
 
       <div className="flex items-center gap-3">
-        <input className="field max-w-xs" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value) }} placeholder="搜索邮箱 / 昵称" autoCapitalize="none" />
+        <input className="field max-w-xs" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value) }} placeholder="搜索手机号 / 昵称" autoCapitalize="none" />
       </div>
 
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface2 text-left text-ink3">
             <tr>
-              <th className="px-4 py-3 font-medium">邮箱</th>
+              <th className="px-4 py-3 font-medium">账号（手机号）</th>
               <th className="px-4 py-3 font-medium">昵称</th>
               <th className="px-4 py-3 font-medium">注册时间</th>
               <th className="px-4 py-3 text-right font-medium">任务</th>
@@ -263,8 +264,8 @@ export default function StudentsPage() {
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs text-ink3">邮箱</span>
-                <input className="field" type="text" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="name@example.com" autoCapitalize="none" autoFocus />
+                <span className="mb-1 block text-xs text-ink3">账号（学员填 11 位手机号；运营可用邮箱）</span>
+                <input className="field" type="text" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="13800000000" autoCapitalize="none" inputMode="tel" autoFocus />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs text-ink3">昵称（可选）</span>

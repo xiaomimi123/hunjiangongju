@@ -47,15 +47,41 @@ export const POST = handler(async (req) => {
     const voice = await prisma.clonedVoice.findUnique({ where: { voiceId: normalizedVariables.voiceId } })
     if (!voice) throw new HttpError(400, '所选音色不存在')
   }
-  const task = await prisma.generationTask.create({
-    data: {
-      frameworkId,
-      subject: finalSubject,
-      variables: (normalizedVariables as Prisma.InputJsonValue | undefined) ?? undefined,
-      status: 'SCRIPT_GENERATING',
-      createdBy: s.userId,
-      autoRender,
-    },
+  // ★ 学员配额：genLimit 非空且已用满 → 拒绝。占坑（genUsed+1）与建任务放在
+  // 同一个事务里：中途失败不能白扣额度。updateMany 带 genUsed 条件做乐观并发闸——
+  // 两个请求同时挤最后一个名额时只有一个能占到坑。
+  if (s.role !== 'operator') {
+    const me = await prisma.user.findUnique({ where: { id: s.userId }, select: { genLimit: true, genUsed: true } })
+    if (me?.genLimit != null && me.genUsed >= me.genLimit) {
+      throw new HttpError(403, `生成次数已用完（${me.genUsed}/${me.genLimit}），请联系管理员增加额度`)
+    }
+  }
+  const task = await prisma.$transaction(async (tx) => {
+    if (s.role !== 'operator') {
+      const me = await tx.user.findUnique({ where: { id: s.userId }, select: { genLimit: true, genUsed: true } })
+      if (me?.genLimit != null) {
+        const claimed = await tx.user.updateMany({
+          where: { id: s.userId, genUsed: { lt: me.genLimit } },
+          data: { genUsed: { increment: 1 } },
+        })
+        if (claimed.count === 0) throw new HttpError(403, '生成次数已用完，请联系管理员增加额度')
+      } else {
+        // 不限额也记账，方便以后设上限时知道已用多少。
+        // updateMany 而不是 update：user 行可能不存在（学员被删号但会话 cookie 还活着），
+        // update 会抛 P2025 把整个创建打成 500——任务照建、账记不上即可，不值得炸。
+        await tx.user.updateMany({ where: { id: s.userId }, data: { genUsed: { increment: 1 } } })
+      }
+    }
+    return tx.generationTask.create({
+      data: {
+        frameworkId,
+        subject: finalSubject,
+        variables: (normalizedVariables as Prisma.InputJsonValue | undefined) ?? undefined,
+        status: 'SCRIPT_GENERATING',
+        createdBy: s.userId,
+        autoRender,
+      },
+    })
   })
   await enqueueGen('select-books', { genTaskId: task.id })
   return NextResponse.json({ id: task.id })

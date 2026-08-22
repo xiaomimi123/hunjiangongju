@@ -4,7 +4,7 @@ import { api } from '@/lib/fetcher'
 import { StatusPill } from '@/components/ui'
 import PageHeader from '@/components/admin/PageHeader'
 
-type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number }
+type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number; genLimit: number | null; genUsed: number }
 type Resp = { stats: { totalStudents: number; todayNew: number; totalTasks: number; totalExported: number }; students: Row[]; total: number }
 type Task = { id: string; status: string; subject: string; createdAt: string; framework: { name: string | null } | null }
 // 重置密码弹窗共用（学员/运营账号字段一致，仅需 id/email/nickname）
@@ -153,8 +153,24 @@ export default function StudentsPage() {
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <input className="field max-w-xs" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value) }} placeholder="搜索手机号 / 昵称" autoCapitalize="none" />
+        <button
+          className="btn-ghost text-xs"
+          onClick={async () => {
+            const v = prompt('给全部学员统一设置生成额度（条数）。填 0 = 全部禁止生成；留空/取消 = 不改；填 -1 = 全部改为不限')
+            if (v === null || v.trim() === '') return
+            const n = Number(v.trim())
+            if (!Number.isInteger(n) || n < -1) { alert('请输入 -1、0 或正整数'); return }
+            try {
+              const r = await api<{ updated: number }>('/api/admin/students/gen-limit', { method: 'POST', body: { limit: n === -1 ? null : n } })
+              alert(`已更新 ${r.updated} 名学员的额度`)
+              await load()
+            } catch (e) { alert((e as Error).message) }
+          }}
+        >
+          一键设置全部额度
+        </button>
       </div>
 
       <div className="card overflow-x-auto">
@@ -164,6 +180,7 @@ export default function StudentsPage() {
               <th className="px-4 py-3 font-medium">账号（手机号）</th>
               <th className="px-4 py-3 font-medium">昵称</th>
               <th className="px-4 py-3 font-medium">注册时间</th>
+              <th className="px-4 py-3 text-right font-medium">生成额度</th>
               <th className="px-4 py-3 text-right font-medium">任务</th>
               <th className="px-4 py-3 text-right font-medium">已完成</th>
               <th className="px-4 py-3 text-right font-medium">操作</th>
@@ -181,6 +198,25 @@ export default function StudentsPage() {
                   </td>
                   <td className="px-4 py-3">{s.nickname ?? '—'}</td>
                   <td className="num px-4 py-3 text-ink2">{new Date(s.createdAt).toLocaleString('zh-CN')}</td>
+                  <td className="num px-4 py-3 text-right">
+                    <button
+                      className="hover:text-flame"
+                      title="点击修改该学员的生成额度"
+                      onClick={async () => {
+                        const v = prompt(`「${s.nickname ?? s.email}」的生成额度（当前 ${s.genLimit ?? '不限'}，已用 ${s.genUsed}）。填条数；-1 = 不限`, String(s.genLimit ?? -1))
+                        if (v === null || v.trim() === '') return
+                        const n = Number(v.trim())
+                        if (!Number.isInteger(n) || n < -1) { alert('请输入 -1、0 或正整数'); return }
+                        const reset = s.genUsed > 0 && n !== -1 ? confirm('同时把已用次数清零吗？（续费场景选"确定"）') : false
+                        try {
+                          await api(`/api/admin/students/${s.id}`, { method: 'PATCH', body: { action: 'set-gen-limit', limit: n === -1 ? null : n, resetUsed: reset } })
+                          await load()
+                        } catch (e) { alert((e as Error).message) }
+                      }}
+                    >
+                      {s.genLimit == null ? `不限（已用 ${s.genUsed}）` : `${s.genUsed}/${s.genLimit}`}
+                    </button>
+                  </td>
                   <td className="num px-4 py-3 text-right">{s.taskCount}</td>
                   <td className="num px-4 py-3 text-right text-ok">{s.doneCount}</td>
                   <td className="px-4 py-3">
@@ -194,7 +230,7 @@ export default function StudentsPage() {
                 </tr>
                 {expanded === s.id && (
                   <tr>
-                    <td colSpan={6} className="bg-surface2 px-4 py-3">
+                    <td colSpan={7} className="bg-surface2 px-4 py-3">
                       {works === null ? <p className="text-ink3">加载中…</p>
                         : works.length === 0 ? <p className="text-ink3">该学员暂无作品</p>
                         : (

@@ -31,7 +31,7 @@ export const GET = handler(async (req) => {
     role === 'student' ? prisma.generationTask.count({ where: { status: 'EXPORTED' } }) : Promise.resolve(0),
     prisma.user.findMany({
       where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true },
+      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true, genLimit: true, genUsed: true },
     }),
   ])
 

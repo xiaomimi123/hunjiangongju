@@ -20,9 +20,15 @@ const COVER_NEG_TEXT_ONLY =
 /**
  * @param styleHint 画风词，套进固定的「文艺封面底图」外壳（历史行为）
  * @param customPrompt 框架单独配置的**完整画面描述**（overlayTemplate.__coverPrompt）。
- *   **原样直发，正向提示词一个字不追加**——留白、构图这些由运营自己写
- *  （用户拍板：管理员通过提示词自己做限制）。只保留负向词的禁文字兜底：
- *   它不与任何画面描述冲突，而书名标题要叠在封面上，底图带字必然糊成一团。
+ *   留白、构图这些由运营自己写（用户拍板：管理员通过提示词自己做限制）。
+ *   只保留负向词的禁文字兜底：它不与任何画面描述冲突，而书名标题要叠在封面上，
+ *   底图带字必然糊成一团。
+ *
+ *   **书籍信息注入**（用户要求书封要对得上这本书）：
+ *   - 提示词里写了 {{书名}} / {{作者}} 占位符 → 逐本替换，位置由运营控制；
+ *   - 没写占位符 → 自动在结尾补「以《书名》（作者）的主题与意象为灵感」。
+ *   把书名放进提示词有让模型把字画进图里的风险（原设计因此不放），
+ *   靠负向词的禁文字压制；运营自己的提示词里再加一道禁文字更稳。
  */
 export function buildBookCoverPrompt(
   book: { title: string; author?: string },
@@ -31,7 +37,16 @@ export function buildBookCoverPrompt(
 ): CoverPrompt {
   const custom = (customPrompt ?? '').trim()
   if (custom) {
-    return { prompt: custom, negativePrompt: COVER_NEG_TEXT_ONLY }
+    const author = (book.author ?? '').trim()
+    let prompt: string
+    if (/\{\{\s*(书名|title)\s*\}\}|\{\{\s*(作者|author)\s*\}\}/.test(custom)) {
+      prompt = custom
+        .replace(/\{\{\s*(书名|title)\s*\}\}/g, `《${book.title}》`)
+        .replace(/\{\{\s*(作者|author)\s*\}\}/g, author)
+    } else {
+      prompt = `${custom}。以《${book.title}》${author ? `（${author}）` : ''}的主题与意象为灵感`
+    }
+    return { prompt, negativePrompt: COVER_NEG_TEXT_ONLY }
   }
   const style = (styleHint ?? '厚涂油画文艺').trim()
   const prompt = [

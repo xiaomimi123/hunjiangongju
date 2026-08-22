@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readImageSlots, slotAt , readOpenImage } from './imageSlots'
+import { readImageSlots, slotAt, readOpenImage, readCoverPrompt } from './imageSlots'
 
 describe('readImageSlots', () => {
   it('未配置 → null（调用方维持现状）', () => {
@@ -128,5 +128,18 @@ describe('参考图配置', () => {
     expect(slotAt(cfg, 0)?.refImage).toBeUndefined()
     expect(slotAt(cfg, 1)?.refImage).toBeUndefined()
     expect(readOpenImage({ __openImage: { refImage: '   ' } })).toBeNull()
+  })
+})
+
+
+describe('readCoverPrompt', () => {
+  it('取 __coverPrompt 并去空白', () => {
+    expect(readCoverPrompt({ __coverPrompt: ' 水墨山水 ' })).toBe('水墨山水')
+  })
+  it('没配 / 空串 / 非字符串 → null（书封回退历史行为）', () => {
+    expect(readCoverPrompt({})).toBeNull()
+    expect(readCoverPrompt({ __coverPrompt: '  ' })).toBeNull()
+    expect(readCoverPrompt({ __coverPrompt: 42 })).toBeNull()
+    expect(readCoverPrompt(null)).toBeNull()
   })
 })

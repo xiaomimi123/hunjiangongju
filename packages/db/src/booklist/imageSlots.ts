@@ -89,6 +89,16 @@ export interface OpenImageConfig {
   refImage?: string
 }
 
+/**
+ * 快闪书封的专属提示词（overlayTemplate.__coverPrompt）。
+ * 没配 / 空串 → null，书封回退「全局画风词 + 文艺封面外壳」的历史行为。
+ */
+export function readCoverPrompt(overlayTemplate: unknown): string | null {
+  const raw = obj(overlayTemplate).__coverPrompt
+  const v = typeof raw === 'string' ? raw.trim() : ''
+  return v || null
+}
+
 export function readOpenImage(overlayTemplate: unknown): OpenImageConfig | null {
   const raw = obj(obj(overlayTemplate).__openImage)
   const prompt = typeof raw.prompt === 'string' ? raw.prompt.trim() : ''

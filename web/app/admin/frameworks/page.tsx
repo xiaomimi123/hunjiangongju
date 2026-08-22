@@ -382,6 +382,25 @@ export default function FrameworksPage() {
                     ))}
                   </div>
 
+                  <span className="eyebrow mt-4 block">快闪书封提示词（书单封面底图）</span>
+                  <p className="mt-1 text-xs text-ink3">
+                    留空 = 用上面的「图片风格提示词」套进内置的文艺封面外壳。填了就按这里的
+                    完整画面描述生成书封（系统会自动追加「中央留白 + 禁文字」——书名标题要叠在上面）。
+                    注意：填写后书封走本框架的专属缓存，不再复用书库里按默认风格生成的封面。
+                  </p>
+                  <textarea
+                    className="field mt-2 w-full text-xs"
+                    rows={2}
+                    value={typeof ot.__coverPrompt === 'string' ? (ot.__coverPrompt as string) : ''}
+                    onChange={(e) => {
+                      const next = { ...ot } as Record<string, unknown>
+                      if (e.target.value.trim()) next.__coverPrompt = e.target.value
+                      else delete next.__coverPrompt
+                      setF({ overlayTemplate: JSON.stringify(next, null, 2) })
+                    }}
+                    placeholder="例：水墨山水意境，宣纸质感，大面积留白，一抹朱红点缀"
+                  />
+
                   <span className="eyebrow mt-4 block">开场图（碎裂那一张）</span>
                   <p className="mt-1 text-xs text-ink3">
                     留空则沿用正片第 1 张。填了就单独生成一张，正片第 1 张不受影响

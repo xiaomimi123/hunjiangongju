@@ -224,6 +224,25 @@ export default function ModelsPage() {
 
   function upd(cap: string, patch: Partial<Cap>) { setList((l) => l.map((c) => (c.capability === cap ? { ...c, ...patch } : c))) }
 
+  // 生图提速的专属控件（并发数 / 追加 Key）底层仍写 extra JSON——
+  // 读时优先取文本框里正在编辑的值（合法 JSON 才认），写回时同步刷新文本框，
+  // 两边永远是同一份数据，不会出现"控件改了、JSON 还是旧的"。
+  function effExtra(c: Cap): Record<string, unknown> {
+    const raw = extraText[c.capability]
+    if (raw !== undefined) {
+      try {
+        const p = JSON.parse(raw)
+        if (p && typeof p === 'object' && !Array.isArray(p)) return p as Record<string, unknown>
+      } catch { /* 正在编辑的半截 JSON，退回已保存值 */ }
+    }
+    return c.extra ?? {}
+  }
+  function patchExtra(c: Cap, patch: Record<string, unknown>) {
+    const next: Record<string, unknown> = { ...effExtra(c), ...patch }
+    for (const k of Object.keys(patch)) if (patch[k] === undefined) delete next[k]
+    setExtraText((t) => ({ ...t, [c.capability]: JSON.stringify(next, null, 2) }))
+  }
+
   async function save(c: Cap) {
     setBusy(c.capability + ':save'); setErr(''); setMsg('')
     try {
@@ -284,6 +303,34 @@ export default function ModelsPage() {
               <input className="field mt-1" value={c.model} onChange={(e) => upd(c.capability, { model: e.target.value })} /></label>
             <label className="block text-sm text-ink2">密钥 {c.hasKey && <span className="text-ink3">（已设置，留空不改）</span>}
               <input className="field mt-1" type="password" value={keyInput[c.capability] ?? ''} onChange={(e) => setKeyInput((k) => ({ ...k, [c.capability]: e.target.value }))} placeholder={c.hasKey ? '••••••••' : ''} autoCapitalize="none" /></label>
+            {c.capability === 'image' && (
+              <div className="space-y-2 rounded-xl border border-line p-3">
+                <p className="eyebrow">生图提速</p>
+                <label className="block text-sm text-ink2">并发数（同时生成几张图）
+                  <input
+                    type="number" min={1} max={16} step={1} className="field mt-1 w-28"
+                    value={Number(effExtra(c).concurrency ?? 4)}
+                    onChange={(e) => patchExtra(c, { concurrency: Number(e.target.value) })}
+                  />
+                  <span className="ml-2 text-xs text-ink3">单账号经验值 4；多账号 Key 后约 4 × 账号数</span>
+                </label>
+                <label className="block text-sm text-ink2">追加 API Key（每行一个，与上面的主密钥轮询分摊）
+                  <textarea
+                    className="field mt-1 font-mono text-xs" rows={3} spellCheck={false}
+                    placeholder={'sk-第二个账号的Key\nsk-第三个账号的Key'}
+                    value={Array.isArray(effExtra(c).apiKeys) ? (effExtra(c).apiKeys as string[]).join('\n') : ''}
+                    onChange={(e) => {
+                      const keys = e.target.value.split('\n').map((x) => x.trim()).filter(Boolean)
+                      patchExtra(c, { apiKeys: keys.length ? keys : undefined })
+                    }}
+                  />
+                </label>
+                <p className="text-xs text-ink3">
+                  ⚠️ 百炼的限额按**账号**算：同一账号多建 Key 不扩容，追加的 Key 要来自不同的阿里云账号。
+                  改完点保存即生效，无需重新部署。
+                </p>
+              </div>
+            )}
             <label className="block text-sm text-ink2">高级参数（JSON，留空为 {}）
               <textarea
                 className="field mt-1 font-mono text-xs"

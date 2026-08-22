@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { randomUUID, createHash } from 'crypto'
+import { randomUUID } from 'crypto'
 import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage, readCoverPrompt, publicAssetUrl, findCoversByTitles, setBookCover, normalizeTitle, buildBookCoverPrompt } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
@@ -40,16 +40,6 @@ const COVER_CONCURRENCY = 4
  * 同一份文案要什么画派，由运营在框架里显式填，或用「参考图反推」。
  */
 export const DEFAULT_IMAGE_STYLE = '写实摄影质感,柔和自然光,低饱和统一色调,浅景深,电影感构图'
-
-/**
- * 纯函数：框架专属书封的缓存路径——按「提示词哈希 / 规范化书名」分层。
- * 同一份提示词下同一本书只生成一次；提示词一改哈希就变，自动落到新目录重新生成，
- * 旧目录的文件留着（改回去还能复用），不需要任何失效逻辑。
- */
-export function coverCustomRelPath(coverPrompt: string, title: string): string {
-  const hash = createHash('sha256').update(coverPrompt).digest('hex').slice(0, 12)
-  return `covers-custom/${hash}/${normalizeTitle(title)}.png`
-}
 
 // 取书单：variables.books 优先，回退 overlayTemplate.books；过滤无 title 的脏项。
 // 顺序在此**必须原样保留**——快闪书封按该顺序出卡，主题书排在末位即「最后一张定格」。
@@ -219,12 +209,15 @@ export async function generateImage(genTaskId: string): Promise<void> {
     await fs.mkdir(coversDir, { recursive: true })
     // || + trim:画风被清成空字符串时也回退 buildBookCoverPrompt 的默认(?? 只兜 null)
     const styleHint = (task.framework.imageStylePrompt || '').trim() || undefined
-    // 框架专属的书封提示词。配了它就**换一套缓存**：
-    // - 不能吃公共书库的封面缓存——那些是按默认外壳生成的，风格改了等于白改；
-    // - 也不能把专属风格写回公共书库——会污染其它框架复用的封面。
-    // 按提示词哈希分目录做文件级缓存：同框架同书只生成一次，改提示词自动换新目录。
+    // 框架专属的书封提示词。配了它就**完全不走缓存**（用户拍板）：
+    // - 不吃公共书库的封面缓存——那些按默认外壳生成，风格对不上；
+    // - 不写回公共书库——会污染其它框架复用的封面；
+    // - 也不做专属缓存——每条任务每本书都全新生成一次。运营的提示词是
+    //   开放式的（「某一本著名文学名著的封面」），缓存会把第一次的随机结果
+    //   永久钉死，此后条条片子长一样，与提示词的意图相反。
+    // 代价明说：每条任务 N 本书 N 次生图调用（约 50s/张、并发 4）。
     const coverPrompt = readCoverPrompt(task.framework.overlayTemplate)
-    if (coverPrompt) console.log(`[gen] generate-image ${genTaskId}: 书封用框架专属提示词「${coverPrompt.slice(0, 40)}…」`)
+    if (coverPrompt) console.log(`[gen] generate-image ${genTaskId}: 书封用框架专属提示词，全新生成不走缓存「${coverPrompt.slice(0, 40)}…」`)
     // ★ 书封只跟「这本书」有关，跟这条片子的文案毫无关系——所以做一次就够了。
     // 原先每条片子都为每本书重生成一张，9 本书就是 9 次生图调用；
     // 一天几千条时这是成本大头，而其中绝大多数是同样那几本常见书。
@@ -237,13 +230,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
     await mapLimited(books, COVER_CONCURRENCY, async (book, i) => {
       const dst = path.join(coversDir, `${String(i + 1).padStart(2, '0')}.png`)
       if (coverPrompt) {
-        const rel = coverCustomRelPath(coverPrompt, book.title)
-        const abs = path.join(DATA_DIR, rel)
-        try {
-          await fs.copyFile(abs, dst)
-          reused++
-          return
-        } catch { /* 未缓存过，现做 */ }
+        // 全新生成，不读不写任何缓存（理由见上）
         const { prompt, negativePrompt } = buildBookCoverPrompt(book, styleHint, coverPrompt)
         if (i === 0) console.log(`[gen] book-cover ${genTaskId}: 最终提示词「${prompt}」 负向「${negativePrompt.slice(0, 40)}…」`)
         const png = await withRetry(() => imageGenerate({ prompt, size: '720x960', negativePrompt }), {
@@ -251,12 +238,6 @@ export async function generateImage(genTaskId: string): Promise<void> {
           onRetry: (err, n) => console.warn(`[gen] book-cover ${genTaskId} #${i} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),
         })
         await fs.writeFile(dst, png)
-        try {
-          await fs.mkdir(path.dirname(abs), { recursive: true })
-          await fs.writeFile(abs, png)
-        } catch (err) {
-          console.warn(`[gen] book-cover ${genTaskId} #${i} 专属封面缓存写入失败(不影响出片): ${(err as Error).message?.slice(0, 80)}`)
-        }
         return
       }
       const hit = cached.get(normalizeTitle(book.title))

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveBooks, DEFAULT_IMAGE_STYLE, coverCustomRelPath } from './generateImage'
+import { resolveBooks, DEFAULT_IMAGE_STYLE } from './generateImage'
 
 describe('DEFAULT_IMAGE_STYLE', () => {
   // ★ 兜底画风**不得带流派签名**。
@@ -66,18 +66,3 @@ describe('resolveBooks —— variables.books 优先', () => {
 })
 
 
-describe('coverCustomRelPath —— 框架专属书封的缓存路径', () => {
-  // 配了专属提示词就不能吃公共书库的封面缓存（风格改了等于白改），
-  // 也不能写回公共书库（污染其它框架）。按提示词哈希分目录：
-  it('同提示词同书 → 同路径（缓存命中）', () => {
-    expect(coverCustomRelPath('水墨山水', '活着')).toBe(coverCustomRelPath('水墨山水', '活着'))
-  })
-  it('提示词一改 → 目录就变（自动失效，不需要清理逻辑）', () => {
-    const a = coverCustomRelPath('水墨山水', '活着')
-    const b = coverCustomRelPath('赛博朋克', '活着')
-    expect(a).not.toBe(b)
-  })
-  it('路径在 covers-custom 下、按规范化书名命名', () => {
-    expect(coverCustomRelPath('x', '《活着》')).toMatch(/^covers-custom\/[0-9a-f]{12}\/活着\.png$/)
-  })
-})

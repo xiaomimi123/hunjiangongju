@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@mixcut/db'
+import { effStatus, summarizeGenTasks } from '@/lib/effStatus'
 import { requireRole } from '@/lib/auth'
 import { handler } from '@/lib/api'
 
@@ -12,8 +13,8 @@ export const GET = handler(async () => {
     totalStudents, todayNew,
     sourceVideos, sourceFailed,
     frameworks, publishedFrameworks,
-    generationTasks, exportedWorks, publishedWorks,
-    genByStatus, genPreviewPending, genFailed, renderFailed,
+    generationTasks, allTasksEff, publishedWorks,
+    renderFailed,
     recent,
   ] = await Promise.all([
     prisma.user.count({ where: { role: 'student' } }),
@@ -23,15 +24,21 @@ export const GET = handler(async () => {
     prisma.copyFramework.count(),
     prisma.copyFramework.count({ where: { published: true } }),
     prisma.generationTask.count(),
-    prisma.generationTask.count({ where: { status: 'EXPORTED' } }),
+    // ★ 全部任务的「有效状态」汇总。不能按 generationTask.status 统计——
+    // 渲染排队后它停在 VISUAL_RENDERING 不再前进，真实进度在最新 RenderTask 上：
+    // 按它查 EXPORTED 的「已完成」恒为 0，仪表盘从上线起就是错的。
+    prisma.generationTask.findMany({
+      select: { status: true, renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } } },
+    }),
     prisma.generationTask.count({ where: { published: true } }),
-    prisma.generationTask.groupBy({ by: ['status'], _count: { _all: true } }),
-    prisma.generationTask.count({ where: { status: 'PREVIEW_PENDING' } }),
-    prisma.generationTask.count({ where: { status: 'FAILED' } }),
     prisma.renderTask.count({ where: { status: 'FAILED' } }),
     prisma.generationTask.findMany({
       orderBy: { createdAt: 'desc' }, take: 6,
-      select: { id: true, subject: true, status: true, createdAt: true, createdBy: true, framework: { select: { name: true } } },
+      select: {
+        id: true, subject: true, status: true, createdAt: true, createdBy: true,
+        framework: { select: { name: true } },
+        renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
+      },
     }),
   ])
 
@@ -42,30 +49,23 @@ export const GET = handler(async () => {
     : []
   const creatorMap = new Map(creators.map((u) => [u.id, u.nickname || u.email]))
 
-  const statusCount: Record<string, number> = {}
-  for (const g of genByStatus) statusCount[g.status] = g._count._all
-  const sum = (keys: string[]) => keys.reduce((n, k) => n + (statusCount[k] ?? 0), 0)
+  const eff = summarizeGenTasks(allTasksEff)
 
   return NextResponse.json({
     stats: {
       totalStudents, todayNew,
       sourceVideos, frameworks, publishedFrameworks,
-      generationTasks, exportedWorks, publishedWorks,
+      generationTasks, exportedWorks: eff.exported, publishedWorks,
     },
     attention: {
       sourceFailed,
-      genPreviewPending,
-      genFailed,
+      genPreviewPending: eff.previewPending,
+      genFailed: eff.failed,
       renderFailed,
     },
-    funnel: {
-      processing: sum(['GEN_CREATED', 'SCRIPT_GENERATING', 'IMAGE_GENERATING', 'TTS_GENERATING', 'CAPTION_ALIGNING', 'VISUAL_RENDERING', 'RENDERING', 'QC_RUNNING', 'QC_PASSED']),
-      waiting: sum(['ASSET_READY', 'PREVIEW_PENDING', 'QC_FAILED']),
-      done: statusCount['EXPORTED'] ?? 0,
-      failed: statusCount['FAILED'] ?? 0,
-    },
+    funnel: eff.funnel,
     recent: recent.map((t) => ({
-      id: t.id, status: t.status, createdAt: t.createdAt,
+      id: t.id, status: effStatus(t), createdAt: t.createdAt,
       title: t.subject || t.framework?.name || '未命名生成',
       who: (t.createdBy && creatorMap.get(t.createdBy)) || '—',
     })),

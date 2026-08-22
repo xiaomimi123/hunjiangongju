@@ -17,3 +17,37 @@ export interface HasRenderTasks {
 export function effStatus(t: HasRenderTasks): string {
   return t.renderTasks[0]?.status ?? t.status
 }
+
+/** 漏斗分桶用的状态集合。渲染态与生成态混在同一张漏斗里，口径必须一处定义 */
+const PROCESSING = ['GEN_CREATED', 'SCRIPT_GENERATING', 'IMAGE_GENERATING', 'TTS_GENERATING', 'CAPTION_ALIGNING', 'VISUAL_RENDERING', 'RENDERING', 'QC_RUNNING', 'QC_PASSED']
+const WAITING = ['ASSET_READY', 'PREVIEW_PENDING', 'QC_FAILED']
+
+/**
+ * 仪表盘的任务统计——一律按**有效状态**（effStatus）汇总。
+ *
+ * 原实现按 generationTask.status 统计：「已完成」查 status='EXPORTED'，
+ * 而生成任务的状态**永远不会**是 EXPORTED（那是 RenderTask 的状态，
+ * 生成任务停在 VISUAL_RENDERING 不再前进）——已完成计数恒为 0、
+ * 处理中虚高，仪表盘从上线起就是错的。
+ */
+export function summarizeGenTasks(tasks: HasRenderTasks[]): {
+  exported: number
+  previewPending: number
+  failed: number
+  funnel: { processing: number; waiting: number; done: number; failed: number }
+} {
+  let exported = 0
+  let previewPending = 0
+  let failed = 0
+  let processing = 0
+  let waiting = 0
+  for (const t of tasks) {
+    const s = effStatus(t)
+    if (s === 'EXPORTED') exported++
+    else if (s === 'FAILED') failed++
+    if (s === 'PREVIEW_PENDING') previewPending++
+    if (PROCESSING.includes(s)) processing++
+    else if (WAITING.includes(s)) waiting++
+  }
+  return { exported, previewPending, failed, funnel: { processing, waiting, done: exported, failed } }
+}

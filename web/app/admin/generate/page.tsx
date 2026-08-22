@@ -9,10 +9,11 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
 import { GenPill } from './genStatus'
+import { effStatus } from '@/lib/effStatus'
 
 type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string; defaultAssetFolder: string | null }
 type Creator = { nickname: string | null; email: string; role: string }
-type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null; creator?: Creator | null }
+type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null; creator?: Creator | null; renderTasks?: { status: string }[] }
 type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
 type Voice = { id: string; voiceId: string; name: string }
@@ -203,7 +204,9 @@ export default function GeneratePage() {
                     ? <span title={t.creator.email}>{t.creator.nickname || t.creator.email}{t.creator.role === 'student' && <span className="ml-1 text-ink3">(学员)</span>}</span>
                     : <span className="text-ink3">—</span>}
                 </td>
-                <td className="px-4 py-3"><GenPill status={t.status} /></td>
+                {/* 有效状态：渲染排队后 genTask.status 停在 VISUAL_RENDERING 不再前进，
+                    真实进度在最新 RenderTask 上（effStatus 的老坑，第四个页面也中过） */}
+                <td className="px-4 py-3"><GenPill status={effStatus({ status: t.status, renderTasks: t.renderTasks ?? [] })} /></td>
                 <td className="num px-4 py-3 text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</td>
                 <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                   <button onClick={() => del(t.id, t.subject)} disabled={deleting === t.id}

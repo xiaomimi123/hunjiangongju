@@ -6,7 +6,7 @@ import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { pickAssetsForSegments, readAssetSource, poolForFolder, resolveSlotFolders } from './stockAssets'
 import { mapLimited } from './mapLimited'
-import { pickArtScenes, buildFreeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
+import { pickArtScenes, composeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
 import { makeThumb } from '../thumb'
 
 // 缩略图是锦上添花，绝不能因它失败拖垮生成/上传主流程：ffmpeg 缺失、损坏输入等一律吞掉只记 warning。
@@ -151,7 +151,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
       // 槽位配了 prompt 就用它当主体，否则回退场景池方向。
       // 画风优先用槽位自己的 style（支持「开场卡通头像、后面达芬奇」这种同片多画风），
       // 未配则沿用框架的 imageStylePrompt。
-      const prompt = buildFreeArtPrompt(slot?.style ?? stylePrompt, slot?.prompt ?? scenes[i])
+      const prompt = composeArtPrompt({ slotPrompt: slot?.prompt, slotStyle: slot?.style, globalStyle: stylePrompt, scene: scenes[i] })
       // 打印**最终**提示词：运营在控制台直接测的是裸提示词，走流水线会经过
       // 「画风 + 画什么 + 竖屏尾巴」的拼接——效果对不上时先看这行，别猜。
       console.log(`[gen] generate-image ${genTaskId}: 正片#${i + 1} 提示词「${prompt}」`)
@@ -195,7 +195,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
   if (params.mode === 'flash' && openCfg) {
     // 主体缺省给「人物特写」：开场碎裂是整屏一张脸，给风景会碎得没有焦点。
     // 真正画成什么样由 style 决定（如「日系动漫男头像」）。
-    const prompt = buildFreeArtPrompt(openCfg.style ?? stylePrompt, openCfg.prompt ?? '人物特写')
+    const prompt = composeArtPrompt({ slotPrompt: openCfg.prompt, slotStyle: openCfg.style, globalStyle: stylePrompt, scene: '人物特写' })
     const openRef = openCfg.refImage ? publicAssetUrl(openCfg.refImage) : undefined
     const png = await withRetry(
       () => imageGenerate({

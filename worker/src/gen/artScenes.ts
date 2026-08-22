@@ -57,6 +57,30 @@ export function pickArtScenes(seed: string, n: number): string[] {
  * 纯函数：拼单张配图的提示词。
  * 禁文字约束在此保底——文案绝不能被画进图里，否则会和字幕层叠字、糊成乱码。
  */
+/**
+ * 纯函数：一张配图的最终提示词——**槽位提示词优先、原样直发**。
+ *
+ * 规则（按运营的心智模型定：槽位提示词就是完整提示词）：
+ * 1. 槽位只填了提示词 → 原样直发，只追加竖屏禁文字尾巴。**全局画风不掺入**——
+ *    线上实测运营写的是完整画面，系统再拼画风/场景就是两个指令互相打架，
+ *    「直接调模型效果好、走后台差很多」的主因。
+ * 2. 槽位同时填了画风 → [画风, 提示词, 尾巴]（显式拆分是刻意的，保留）。
+ * 3. 槽位没填提示词 → 旧行为：[槽位画风或全局画风, 轮换场景方向, 尾巴]，
+ *    没配置过槽位的老框架逐字节不变。
+ */
+export function composeArtPrompt(opts: {
+  slotPrompt?: string
+  slotStyle?: string
+  globalStyle?: string
+  scene: string
+}): string {
+  const p = (opts.slotPrompt ?? '').trim()
+  const st = (opts.slotStyle ?? '').trim()
+  if (p && !st) return buildFreeArtPrompt('', p)
+  if (p && st) return buildFreeArtPrompt(st, p)
+  return buildFreeArtPrompt(st || (opts.globalStyle ?? '').trim(), opts.scene)
+}
+
 export function buildFreeArtPrompt(stylePrompt: string, scene: string): string {
   // 尾巴从「竖屏背景，纯画面，…」改成「竖屏构图，…」：
   // 「背景」把每张图都框死成背景板，人物特写这类槽位说不通；

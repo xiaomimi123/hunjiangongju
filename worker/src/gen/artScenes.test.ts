@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ART_SCENES, pickArtScenes, buildFreeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
+import { ART_SCENES, pickArtScenes, buildFreeArtPrompt, composeArtPrompt, IMAGE_NEGATIVE_PROMPT } from './artScenes'
 
 describe('pickArtScenes', () => {
   it('同一 seed 结果稳定（同任务重跑一致）', () => {
@@ -80,5 +80,39 @@ describe('IMAGE_NEGATIVE_PROMPT', () => {
     for (const kw of ['人物', '人脸', '人像', 'person', 'people', 'face', 'portrait', 'human']) {
       expect(IMAGE_NEGATIVE_PROMPT).not.toContain(kw)
     }
+  })
+})
+
+
+describe('composeArtPrompt —— 槽位提示词即完整提示词', () => {
+  // ★ 核心规则：槽位只填提示词 → 原样直发，全局画风**不掺入**。
+  // 运营写的是完整画面，系统再拼画风/场景就是两个指令打架——
+  // 「直接调模型效果好、走后台差很多」的主因。
+  it('只填槽位提示词 → 原样直发 + 尾巴，全局画风不掺入', () => {
+    const p = composeArtPrompt({ slotPrompt: '雪山之巅的孤灯，油画质感', globalStyle: '梵高风格', scene: '雨后的街道' })
+    expect(p).toBe('雪山之巅的孤灯，油画质感，竖屏构图，不出现任何文字、字幕或水印')
+    expect(p).not.toContain('梵高')
+    expect(p).not.toContain('雨后的街道')
+  })
+  it('槽位同时填画风 → 显式拆分，两者拼接', () => {
+    const p = composeArtPrompt({ slotPrompt: '人物特写', slotStyle: '日系动漫男头像', globalStyle: '梵高风格', scene: 'x' })
+    expect(p).toContain('日系动漫男头像')
+    expect(p).toContain('人物特写')
+    expect(p).not.toContain('梵高')
+  })
+  // 零回归：没配槽位的老框架照旧走「全局画风 + 轮换场景」
+  it('槽位没填提示词 → 旧行为（全局画风 + 场景方向）', () => {
+    const p = composeArtPrompt({ globalStyle: '梵高风格', scene: '雨后的街道' })
+    expect(p).toBe(buildFreeArtPrompt('梵高风格', '雨后的街道'))
+  })
+  it('槽位只填画风 → 画风 + 场景方向', () => {
+    const p = composeArtPrompt({ slotStyle: '水墨', globalStyle: '梵高风格', scene: '远山' })
+    expect(p).toContain('水墨')
+    expect(p).toContain('远山')
+    expect(p).not.toContain('梵高')
+  })
+  it('空白提示词视同没填', () => {
+    expect(composeArtPrompt({ slotPrompt: '  ', globalStyle: 'G', scene: 'S' }))
+      .toBe(buildFreeArtPrompt('G', 'S'))
   })
 })

@@ -11,6 +11,22 @@ export default function BgmPage() {
   const [list, setList] = useState<Bgm[]>([])
   const [styleTag, setStyleTag] = useState('')
   const [uploadFolder, setUploadFolder] = useState('')
+  const [newFolder, setNewFolder] = useState('')
+  // 分组选项 = 曲库已有分组 ∪ 框架库的模板名。
+  // 分组的实际用途是「框架绑定 BGM 分组随机配乐」，所以模板名就是最常用的分组名——
+  // 直接列出来选，不用运营手打（手打一个错字就对不上框架绑定）。
+  const [fwNames, setFwNames] = useState<string[]>([])
+  useEffect(() => {
+    fetch('/api/frameworks')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!Array.isArray(j)) return
+        const names = new Set<string>()
+        for (const f of j) if (typeof f?.name === 'string' && f.name.trim()) names.add(f.name.trim())
+        setFwNames(Array.from(names).sort())
+      })
+      .catch(() => { /* 拉不到就只显示已有分组 */ })
+  }, [])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -32,7 +48,8 @@ export default function BgmPage() {
       const fd = new FormData()
       Array.from(files).forEach((f) => fd.append('files', f))
       fd.append('styleTag', styleTag.trim())
-      if (uploadFolder.trim()) fd.append('folder', uploadFolder.trim())
+      const folder = uploadFolder === '__new__' ? newFolder.trim() : uploadFolder.trim()
+      if (folder) fd.append('folder', folder)
       await api('/api/bgm', { form: fd })
       setStyleTag('')
       await load()
@@ -83,6 +100,11 @@ export default function BgmPage() {
     } catch (e) { setErr((e as Error).message) }
   }
 
+  const folderOptions = Array.from(new Set([
+    ...list.map((b) => b.folder).filter((f): f is string => !!f),
+    ...fwNames,
+  ])).sort()
+
   const groups = new Map<string, Bgm[]>()
   for (const b of list) {
     const key = b.folder || UNGROUPED
@@ -109,10 +131,21 @@ export default function BgmPage() {
               className="field w-48" />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs text-ink3">文件夹（可选，用于分类）</span>
-            <input value={uploadFolder} onChange={(e) => setUploadFolder(e.target.value)} placeholder="如 抒情 / 快节奏"
-              className="field w-48" />
+            <span className="mb-1 block text-xs text-ink3">分组（模板名 = 分组名，供框架绑定随机配乐）</span>
+            <select className="field w-56" value={uploadFolder}
+              onChange={(e) => { setUploadFolder(e.target.value); if (e.target.value !== '__new__') setNewFolder('') }}>
+              <option value="">不分组</option>
+              {folderOptions.map((f) => <option key={f} value={f}>{f}</option>)}
+              <option value="__new__">＋ 新建分组…</option>
+            </select>
           </label>
+          {uploadFolder === '__new__' && (
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink3">新分组名</span>
+              <input value={newFolder} onChange={(e) => setNewFolder(e.target.value)} placeholder="输入新分组名"
+                className="field w-48" />
+            </label>
+          )}
           <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.m4a" multiple hidden
             onChange={(e) => { const fs = e.target.files; if (fs && fs.length) upload(fs); e.target.value = '' }} />
           <button onClick={() => fileRef.current?.click()} disabled={busy} className="btn-primary">
@@ -155,7 +188,12 @@ export default function BgmPage() {
                     {editingId === b.id ? (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <input className="field w-40 text-xs" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="名称" />
-                        <input className="field w-40 text-xs" value={editFolder} onChange={(e) => setEditFolder(e.target.value)} placeholder="文件夹（留空则移出）" />
+                        <select className="field w-40 text-xs" value={folderOptions.includes(editFolder) || editFolder === '' ? editFolder : '__custom__'}
+                          onChange={(e) => { if (e.target.value !== '__custom__') setEditFolder(e.target.value) }}>
+                          <option value="">（移出分组）</option>
+                          {folderOptions.map((f) => <option key={f} value={f}>{f}</option>)}
+                          {!folderOptions.includes(editFolder) && editFolder !== '' && <option value="__custom__">{editFolder}</option>}
+                        </select>
                         <button onClick={() => saveEdit(b.id)} className="btn-primary px-2 py-1 text-xs">保存</button>
                         <button onClick={cancelEdit} className="btn-ghost px-2 py-1 text-xs">取消</button>
                       </div>

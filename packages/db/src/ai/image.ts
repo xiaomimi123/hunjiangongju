@@ -49,6 +49,35 @@ export interface ImageOverride {
   model?: string
 }
 
+/**
+ * 生图的 API Key 池：主 Key + extra.apiKeys 里追加的 Key，去重去空。
+ *
+ * 用途：百炼的 QPS 限额按账号算，单 Key 顶到 4 并发就开始 429。
+ * 运营准备多个账号的 Key 填进 extra.apiKeys，逐请求轮询分摊——
+ * Key 数 ×N，可用并发也 ×N。
+ */
+export function imageKeyPool(apiKey: string, extra: Record<string, unknown>): string[] {
+  const raw = Array.isArray(extra.apiKeys) ? extra.apiKeys : []
+  const keys = [apiKey, ...raw.map((k) => (typeof k === 'string' ? k.trim() : ''))]
+  const out = Array.from(new Set(keys.filter(Boolean)))
+  return out.length ? out : [apiKey]
+}
+
+/**
+ * 生图并发数：extra.concurrency，夹在 1~16，缺省 4。
+ * 4 是单 Key 单账号的经验值（再高 429 的退避重试让总时长不降反升）；
+ * 加了 Key 池后按「4 × Key 数」左右调升。
+ */
+export function imageConcurrency(extra: Record<string, unknown>): number {
+  const v = extra.concurrency
+  const n = typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : 4
+  return Math.min(16, Math.max(1, n))
+}
+
+// 逐请求轮询计数器。确定性递增（本仓禁 Math.random）；多进程各自计数即可——
+// 目的只是把请求摊到各 Key 上，不需要全局精确均衡。
+let keyCursor = 0
+
 export async function imageGenerate(opts: ImageOpts, override?: ImageOverride): Promise<Buffer> {
   const base = await getCapabilityConfig('image')
   const cfg = override
@@ -65,12 +94,20 @@ export async function imageGenerate(opts: ImageOpts, override?: ImageOverride): 
     : base
   if (isMockMode(cfg)) return mockImagePng()
 
+  // 逐请求从 Key 池轮询取一把（override 试生成除外：试的就是指定那把 Key）
+  const apiKey = override?.apiKey
+    ? cfg.apiKey
+    : (() => {
+        const pool = imageKeyPool(cfg.apiKey, cfg.extra)
+        return pool[keyCursor++ % pool.length]
+      })()
+
   // 百炼 qwen-image：DashScope 原生 multimodal-generation，返回图片 URL
   if (isDashScope(cfg.baseUrl)) {
     // extra.size 优先（个别模型只接受固定档位，需要手工指定）；
     // 否则按调用方要的**比例**换算，不再写死正方形。
     const size = (cfg.extra.size as string) || toDashSize(opts.size)
-    const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
+    const data = await dashPost(cfg.baseUrl, apiKey, {
       model: cfg.model,
       // 参考图在前、文字在后：文档给的 content 顺序就是 {image} + {text}。
       // 给了参考图即「参照这张图生成」，模型会沿用它的画风/构图。
@@ -102,7 +139,7 @@ export async function imageGenerate(opts: ImageOpts, override?: ImageOverride): 
   }
   const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/images/generations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: cfg.model, prompt: opts.prompt, size: opts.size ?? '1024x1792', response_format: 'b64_json' }),
   })
   if (!res.ok) throw new Error(`文生图请求失败 ${res.status}: ${await res.text().catch(() => '')}`)

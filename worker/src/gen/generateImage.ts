@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { prisma, imageGenerate, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage, readCoverPrompt, publicAssetUrl, findCoversByTitles, setBookCover, normalizeTitle, buildBookCoverPrompt } from '@mixcut/db'
+import { prisma, imageGenerate, imageConcurrency, getCapabilityConfig, setGenerationStatus, enqueueGen, withRetry, readImageSlots, slotAt, readOpenImage, readCoverPrompt, publicAssetUrl, findCoversByTitles, setBookCover, normalizeTitle, buildBookCoverPrompt } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { pickAssetsForSegments, readAssetSource, poolForFolder, resolveSlotFolders } from './stockAssets'
@@ -19,13 +19,6 @@ async function makeThumbSafely(abs: string): Promise<void> {
 }
 
 // 画风提示词留空时的默认兜底：厚涂油画质感，避免生成画面过于平淡。
-/**
- * 书封生成的并发度。
- *
- * 线上实测串行 8 张用 422 秒（52.8s/张）。并发 4 约 106 秒。
- * 不取更高是因为百炼有 QPS 限制：429 之后的退避重试会让总时长不降反升。
- */
-const COVER_CONCURRENCY = 4
 
 /**
  * 框架没填画风时用的兜底。
@@ -121,7 +114,14 @@ export async function generateImage(genTaskId: string): Promise<void> {
   // （那样必然逐句配插画：说碗画碗、说台阶画台阶）。同任务重跑一致，不同任务必然不同。
   const scenes = pickArtScenes(genTaskId, segments.length)
 
-  for (const [i, seg] of segments.entries()) {
+  // 并发数从 image 能力的 extra.concurrency 读（模型配置页可调，不用重新部署）。
+  // 单 Key 账号的经验值是 4；配了多 Key（extra.apiKeys 轮询）后按 4×Key 数调升。
+  const conc = imageConcurrency((await getCapabilityConfig('image')).extra)
+  console.log(`[gen] generate-image ${genTaskId}: 生图并发 ${conc}`)
+
+  // ★ 正片配图并行化。此前是纯串行——书封那边早就并行了（占全片 71% 的教训），
+  // 正片 4~8 张一直串行跑，同样是纯网络等待，一张 50 秒就是 200~400 秒白排队。
+  await mapLimited(segments, conc, async (seg, i) => {
     const slot = slotAt(slotCfg, i)
     // 走不走素材库已经在 resolveSlotFolders 里定了（槽位显式来源优先于全局来源）；
     // 池子空时 assignedAssets[i] 为 null，该槽位自然回退 AI 生图。
@@ -174,7 +174,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
       where: { id: seg.id },
       data: { imageUrl },
     })
-  }
+  })
 
   const params = parseTemplateParams((task.framework.overlayTemplate as { __templateParams?: unknown } | null)?.__templateParams)
 
@@ -227,7 +227,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
     // 而这些调用之间毫无依赖、纯粹在等网络。
     // 并发取 4 而不是全量：百炼有 QPS 限制，一次打太多会 429，重试反而更慢。
     // 4 已经把 422 秒压到约 106 秒，再往上边际收益递减、被限流的风险上升。
-    await mapLimited(books, COVER_CONCURRENCY, async (book, i) => {
+    await mapLimited(books, conc, async (book, i) => {
       const dst = path.join(coversDir, `${String(i + 1).padStart(2, '0')}.png`)
       if (coverPrompt) {
         // 全新生成，不读不写任何缓存（理由见上）

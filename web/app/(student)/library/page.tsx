@@ -15,10 +15,12 @@ export default function LibraryPage() {
   const [works, setWorks] = useState<Work[]>([])
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   useEffect(() => {
-    api<Work[]>('/api/library/works')
-      .then(setWorks)
+    api<{ works: Work[]; nextCursor?: string }>('/api/library/works')
+      .then((d) => { setWorks(d.works); setNextCursor(d.nextCursor ?? null) })
       .catch((e) => setErr((e as Error).message))
       .finally(() => setLoaded(true))
   }, [])
@@ -53,6 +55,20 @@ export default function LibraryPage() {
             </div>
           </div>
         ))}
+        {nextCursor && (
+          <button className="btn-ghost w-full text-sm" disabled={loadingMore}
+            onClick={async () => {
+              setLoadingMore(true)
+              try {
+                const d = await api<{ works: Work[]; nextCursor?: string }>(`/api/library/works?cursor=${nextCursor}`)
+                setWorks((prev) => [...prev, ...d.works])
+                setNextCursor(d.nextCursor ?? null)
+              } catch (e) { setErr((e as Error).message) }
+              finally { setLoadingMore(false) }
+            }}>
+            {loadingMore ? '加载中…' : '加载更多'}
+          </button>
+        )}
         {loaded && works.length === 0 && !err && (
           <div className="card grid place-items-center gap-1 py-14 text-center">
             <span className="text-3xl">🎞️</span>

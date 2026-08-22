@@ -61,21 +61,24 @@ export const POST = handler(async (req) => {
   return NextResponse.json({ id: task.id })
 })
 
-// 运营列表的返回上限。运营看的是全量任务，随学员使用量增长会无界膨胀，故设上限；
-// 但不做静默截断——命中上限时前端会提示「仅显示最近 N 条」，避免运营误以为看到了全部。
-// 注意不要 export：Next.js route 文件只允许导出 GET/POST/dynamic 等约定名，
-// 多导出一个常量会导致构建期类型校验失败（"does not match the required types of a Next.js Route"）。
-const OPERATOR_LIST_LIMIT = 200
+// 每页条数。原先是运营一次最多 200 条的硬上限（超出静默丢弃后面的），
+// 数据多了页面卡、且翻不到旧任务。改为游标分页（沿用素材库的范式）。
+// 注意不要 export：Next.js route 文件只允许导出 GET/POST/dynamic 等约定名。
+const PAGE_SIZE = 50
 
-export const GET = handler(async () => {
+export const GET = handler(async (req) => {
   const s = await requireRole()
+  const cursor = new URL(req.url).searchParams.get('cursor')?.trim() || undefined
   // 学员只看自己的；运营看全部（含学员创建的）。此前无论角色一律按 createdBy 过滤，
   // 导致后台「生成栏」永远看不到学员的任务——任务在库里状态正常流转，后台却是空的。
   const isOperator = s.role === 'operator'
-  const tasks = await prisma.generationTask.findMany({
+  const rows = await prisma.generationTask.findMany({
     ...(isOperator ? {} : { where: { createdBy: s.userId } }),
-    orderBy: { createdAt: 'desc' },
-    ...(isOperator ? { take: OPERATOR_LIST_LIMIT } : {}),
+    // id 兜底定序：同毫秒创建的任务在多次查询间行序稳定，翻页不重不漏
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    // 多取一条判断有没有下一页，比额外 count 便宜
+    take: PAGE_SIZE + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {
       id: true, subject: true, status: true, createdAt: true, updatedAt: true,
       ...(isOperator ? { createdBy: true } : {}),
@@ -85,7 +88,10 @@ export const GET = handler(async () => {
       renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
     },
   })
-  if (!isOperator) return NextResponse.json(tasks)
+  const hasMore = rows.length > PAGE_SIZE
+  const tasks = hasMore ? rows.slice(0, PAGE_SIZE) : rows
+  const nextCursor = hasMore ? tasks[tasks.length - 1]?.id : undefined
+  if (!isOperator) return NextResponse.json({ tasks, ...(nextCursor ? { nextCursor } : {}) })
 
   // GenerationTask.createdBy 是裸字符串、未与 User 建关联，故补一次批量查询把创建人补齐，
   // 让运营能分辨哪条是哪个学员生成的。不建外键关联是为了避免为此单独加一次数据库迁移。
@@ -96,10 +102,11 @@ export const GET = handler(async () => {
     ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, nickname: true, email: true, role: true } })
     : []
   const byId = new Map(users.map((u) => [u.id, u]))
-  return NextResponse.json(
-    tasks.map(({ createdBy, ...t }) => {
+  return NextResponse.json({
+    tasks: tasks.map(({ createdBy, ...t }) => {
       const u = createdBy ? byId.get(createdBy) : undefined
       return { ...t, creator: u ? { nickname: u.nickname, email: u.email, role: u.role } : null }
     }),
-  )
+    ...(nextCursor ? { nextCursor } : {}),
+  })
 })

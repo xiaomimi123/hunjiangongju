@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@mixcut/db'
-import { effStatus, summarizeGenTasks } from '@/lib/effStatus'
+import { effStatus, summarizeEffCounts } from '@/lib/effStatus'
 import { requireRole } from '@/lib/auth'
 import { handler } from '@/lib/api'
 
@@ -24,12 +24,21 @@ export const GET = handler(async () => {
     prisma.copyFramework.count(),
     prisma.copyFramework.count({ where: { published: true } }),
     prisma.generationTask.count(),
-    // ★ 全部任务的「有效状态」汇总。不能按 generationTask.status 统计——
-    // 渲染排队后它停在 VISUAL_RENDERING 不再前进，真实进度在最新 RenderTask 上：
-    // 按它查 EXPORTED 的「已完成」恒为 0，仪表盘从上线起就是错的。
-    prisma.generationTask.findMany({
-      select: { status: true, renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } } },
-    }),
+    // ★ 全部任务的「有效状态」汇总，且**在数据库内聚合**。
+    // 不能按 generationTask.status 统计（渲染排队后它停在 VISUAL_RENDERING，
+    // 真实进度在最新 RenderTask 上——按它查 EXPORTED 恒为 0）；
+    // 也不能把全表拉回进程逐条算——任务上万后仪表盘先卡。
+    // LATERAL 每任务取最新渲染态，COALESCE 回退生成态，GROUP BY 出计数表。
+    prisma.$queryRaw<{ eff: string; n: bigint }[]>`
+      SELECT COALESCE(rt.status, gt.status) AS eff, COUNT(*) AS n
+      FROM generation_tasks gt
+      LEFT JOIN LATERAL (
+        SELECT status FROM render_tasks
+        WHERE generation_task_id = gt.id
+        ORDER BY created_at DESC LIMIT 1
+      ) rt ON TRUE
+      GROUP BY 1
+    `,
     prisma.generationTask.count({ where: { published: true } }),
     prisma.renderTask.count({ where: { status: 'FAILED' } }),
     prisma.generationTask.findMany({
@@ -49,7 +58,9 @@ export const GET = handler(async () => {
     : []
   const creatorMap = new Map(creators.map((u) => [u.id, u.nickname || u.email]))
 
-  const eff = summarizeGenTasks(allTasksEff)
+  const effCounts: Record<string, number> = {}
+  for (const r of allTasksEff) effCounts[r.eff] = Number(r.n)
+  const eff = summarizeEffCounts(effCounts)
 
   return NextResponse.json({
     stats: {

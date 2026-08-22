@@ -46,7 +46,7 @@ export default function WorksPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>('全部')
   const [err, setErr] = useState('')
 
-  useEffect(() => { api<Task[]>('/api/generate').then(setTasks).catch((e) => setErr((e as Error).message)) }, [])
+  useEffect(() => { api<{ tasks: Task[] }>('/api/generate').then((d) => setTasks(d.tasks)).catch((e) => setErr((e as Error).message)) }, [])
   const shown = tasks.filter((t) => tab === '全部' || group(effStatus(t)) === tab)
 
   return (

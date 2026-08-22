@@ -35,8 +35,8 @@ export default function HomePage() {
 
   useEffect(() => {
     api<Me>('/api/auth/me').then(setMe).catch(() => {})
-    api<Gen[]>('/api/generate').then((t) => setRecent(t.slice(0, 3))).catch(() => {})
-    api<Work[]>('/api/library/works').then((w) => setWorks(w.slice(0, 4))).catch(() => {})
+    api<{ tasks: Gen[] }>('/api/generate').then((d) => setRecent(d.tasks.slice(0, 3))).catch(() => {})
+    api<{ works: Work[] }>('/api/library/works').then((d) => setWorks(d.works.slice(0, 4))).catch(() => {})
   }, [])
 
   return (

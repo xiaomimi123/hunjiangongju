@@ -41,6 +41,8 @@ const EMPTY_BOOK_ROW: BookRow = { title: '', author: '', points: '' }
 export default function GeneratePage() {
   const router = useRouter()
   const [tasks, setTasks] = useState<GenTask[] | null>(null)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [err, setErr] = useState('')
 
   const [open, setOpen] = useState(false)
@@ -66,7 +68,11 @@ export default function GeneratePage() {
   const [ttsVoices, setTtsVoices] = useState<TtsVoice[]>(TTS_VOICES)
 
   const load = useCallback(async () => {
-    try { setTasks(await api<GenTask[]>('/api/generate')) }
+    try {
+      const d = await api<{ tasks: GenTask[]; nextCursor?: string }>('/api/generate')
+      setTasks(d.tasks)
+      setNextCursor(d.nextCursor ?? null)
+    }
     catch (e) { setErr((e as Error).message) }
   }, [])
   useEffect(() => { load() }, [load])
@@ -224,6 +230,22 @@ export default function GeneratePage() {
             )}
           </tbody>
         </table>
+        {nextCursor && (
+          <div className="border-t border-line p-3 text-center">
+            <button className="btn-ghost text-xs" disabled={loadingMore}
+              onClick={async () => {
+                setLoadingMore(true)
+                try {
+                  const d = await api<{ tasks: GenTask[]; nextCursor?: string }>(`/api/generate?cursor=${nextCursor}`)
+                  setTasks((prev) => [...(prev ?? []), ...d.tasks])
+                  setNextCursor(d.nextCursor ?? null)
+                } catch (e) { setErr((e as Error).message) }
+                finally { setLoadingMore(false) }
+              }}>
+              {loadingMore ? '加载中…' : '加载更多'}
+            </button>
+          </div>
+        )}
       </div>
 
       <Modal open={open} onClose={() => !busy && setOpen(false)} title="发起生成" wide>

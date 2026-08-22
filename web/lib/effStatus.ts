@@ -30,24 +30,39 @@ const WAITING = ['ASSET_READY', 'PREVIEW_PENDING', 'QC_FAILED']
  * 生成任务停在 VISUAL_RENDERING 不再前进）——已完成计数恒为 0、
  * 处理中虚高，仪表盘从上线起就是错的。
  */
-export function summarizeGenTasks(tasks: HasRenderTasks[]): {
+export interface GenSummary {
   exported: number
   previewPending: number
   failed: number
   funnel: { processing: number; waiting: number; done: number; failed: number }
-} {
+}
+
+/**
+ * 由「有效状态 → 数量」的计数表归桶。
+ * 仪表盘用数据库内聚合（LATERAL 取每任务最新渲染态后 GROUP BY）产出计数表——
+ * 任务上万后不能再把全表拉回进程里逐条算。
+ */
+export function summarizeEffCounts(counts: Record<string, number>): GenSummary {
   let exported = 0
   let previewPending = 0
   let failed = 0
   let processing = 0
   let waiting = 0
-  for (const t of tasks) {
-    const s = effStatus(t)
-    if (s === 'EXPORTED') exported++
-    else if (s === 'FAILED') failed++
-    if (s === 'PREVIEW_PENDING') previewPending++
-    if (PROCESSING.includes(s)) processing++
-    else if (WAITING.includes(s)) waiting++
+  for (const [s, n] of Object.entries(counts)) {
+    if (s === 'EXPORTED') exported += n
+    else if (s === 'FAILED') failed += n
+    if (s === 'PREVIEW_PENDING') previewPending += n
+    if (PROCESSING.includes(s)) processing += n
+    else if (WAITING.includes(s)) waiting += n
   }
   return { exported, previewPending, failed, funnel: { processing, waiting, done: exported, failed } }
+}
+
+export function summarizeGenTasks(tasks: HasRenderTasks[]): GenSummary {
+  const counts: Record<string, number> = {}
+  for (const t of tasks) {
+    const s = effStatus(t)
+    counts[s] = (counts[s] ?? 0) + 1
+  }
+  return summarizeEffCounts(counts)
 }

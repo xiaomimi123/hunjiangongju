@@ -84,6 +84,30 @@ describe('POST /api/generate 限流', () => {
 // GET 列表的可见范围：学员只看自己的；运营要能看到全部（含学员生成的），
 // 否则后台「生成栏」永远看不到学员的任务——任务在库里状态正常流转，后台却是空的。
 describe('GET /api/generate —— 列表可见范围', () => {
+  // ★ 游标分页：翻页不重不漏。原先运营列表 200 条硬上限，超出静默丢弃、翻不到旧任务，
+  // 数据多了整页一次性渲染也卡。
+  it('游标分页：两页拼起来不重不漏、按时间倒序', async () => {
+    const fw = await makeFramework()
+    const created: string[] = []
+    for (let i = 0; i < 55; i++) {
+      const t = await prisma.generationTask.create({
+        data: { frameworkId: fw.id, subject: `分页任务${i}`, createdBy: 'page-stu' },
+      })
+      created.push(t.id)
+      taskIds.push(t.id)
+    }
+    requireRoleMock.mockResolvedValue({ userId: 'page-stu', role: 'student' })
+    const p1 = (await (await GET(new NextRequest('http://localhost/api/generate'), { params: {} })).json()) as
+      { tasks: { id: string }[]; nextCursor?: string }
+    expect(p1.tasks.length).toBe(50)
+    expect(p1.nextCursor, '55 条应有下一页').toBeTruthy()
+    const p2 = (await (await GET(new NextRequest(`http://localhost/api/generate?cursor=${p1.nextCursor}`), { params: {} })).json()) as
+      { tasks: { id: string }[]; nextCursor?: string }
+    const all = [...p1.tasks, ...p2.tasks].map((t) => t.id)
+    expect(new Set(all).size, '两页之间有重复').toBe(all.length)
+    for (const id of created) expect(all, '有任务被分页漏掉').toContain(id)
+  })
+
   it('学员只看得到自己创建的任务', async () => {
     const fw = await makeFramework()
     const mine = await prisma.generationTask.create({ data: { frameworkId: fw.id, subject: '学员甲的选题', createdBy: 'stu-a' } })
@@ -92,7 +116,7 @@ describe('GET /api/generate —— 列表可见范围', () => {
 
     requireRoleMock.mockResolvedValueOnce({ userId: 'stu-a', role: 'student' })
     const res = await GET(new NextRequest('http://localhost/api/generate'), { params: {} })
-    const list = (await res.json()) as { id: string }[]
+    const list = ((await res.json()) as { tasks: { id: string }[] }).tasks
     const ids = list.map((t) => t.id)
     expect(ids).toContain(mine.id)
     expect(ids).not.toContain(others.id)
@@ -109,7 +133,7 @@ describe('GET /api/generate —— 列表可见范围', () => {
 
     requireRoleMock.mockResolvedValueOnce({ userId: 'op-1', role: 'operator' })
     const res = await GET(new NextRequest('http://localhost/api/generate'), { params: {} })
-    const list = (await res.json()) as { id: string; creator?: { nickname: string | null } | null }[]
+    const list = ((await res.json()) as { tasks: { id: string; creator?: { nickname: string | null } | null }[] }).tasks
     const found = list.find((x) => x.id === t.id)
     expect(found).toBeTruthy()
     expect(found?.creator?.nickname).toBe('学员小王')

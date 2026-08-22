@@ -146,6 +146,10 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
     if (outl !== undefined) t.outlinePx = outl
     const bb = clampNum(text.boldBordPx, 0, 5)
     if (bb !== undefined) t.boldBordPx = bb
+    const fin = clampNum(text.captionFadeInMs, 0, 1000)
+    if (fin !== undefined) t.captionFadeInMs = Math.round(fin)
+    const fout = clampNum(text.captionFadeOutMs, 0, 1000)
+    if (fout !== undefined) t.captionFadeOutMs = Math.round(fout)
     for (const k of ['bookTitleColor', 'flashTitleColor', 'flashAuthorColor', 'openTitleColor'] as const) {
       if (typeof text[k] === 'string' && HEX.test(text[k] as string)) t[k] = text[k]
     }

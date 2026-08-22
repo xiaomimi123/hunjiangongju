@@ -128,6 +128,9 @@ export interface TemplateParams {
     outlinePx: number
     /** 常驻大标题加粗层的同色描边宽度。0 = 不加粗 */
     boldBordPx: number
+    /** 正文字幕渐入/渐出时长（ms）。0 = 瞬间出现（旧行为） */
+    captionFadeInMs: number
+    captionFadeOutMs: number
     /** 各层颜色（#rrggbb） */
     bookTitleColor: string
     flashTitleColor: string
@@ -157,6 +160,7 @@ export const DEFAULT_PARAMS: TemplateParams = {
     bookTitlePosY: 0.218, bookTitleScale: 1.85,
     // 与原渲染层写死值一致（fromBodyData.ts 的 CAPTION_PX/TITLE_BOOST、ass.ts 的描边）
     captionSizePx: 54, bookTitleBoost: 1.3, outlinePx: 3, boldBordPx: 1.6,
+    captionFadeInMs: 200, captionFadeOutMs: 120,
     bookTitleColor: '#ffe9c0', flashTitleColor: '#ffffff',
     flashAuthorColor: '#ffcc88', openTitleColor: '#ffffff',
   },
@@ -289,6 +293,8 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
         bookTitleBoost: num(t.bookTitleBoost, DT.bookTitleBoost),
         outlinePx: num(t.outlinePx, DT.outlinePx),
         boldBordPx: num(t.boldBordPx, DT.boldBordPx),
+        captionFadeInMs: Math.max(0, num(t.captionFadeInMs, DT.captionFadeInMs)),
+        captionFadeOutMs: Math.max(0, num(t.captionFadeOutMs, DT.captionFadeOutMs)),
         bookTitleColor: str(t.bookTitleColor, DT.bookTitleColor),
         flashTitleColor: str(t.flashTitleColor, DT.flashTitleColor),
         flashAuthorColor: str(t.flashAuthorColor, DT.flashAuthorColor),

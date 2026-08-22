@@ -227,3 +227,34 @@ describe('subtitlesFilter', () => {
     expect(subtitlesFilter('/x.ass', '/fonts')).toBe("subtitles='/x.ass':fontsdir='/fonts'")
   })
 })
+
+
+describe('字幕渐入渐出（\\fad）', () => {
+  const style = {
+    fontName: 'F', captionColor: '#ffffff', captionPosY: 0.78, captionSizePx: 54,
+    titleSizePx: 100, titleColor: '#ffe9c0', watermarkSizePx: 22,
+  }
+  it('给了渐入渐出 → 正文字幕带 \\fad，标题与水印不带', () => {
+    const a = buildAss({
+      width: 720, height: 960, totalMs: 6000,
+      style: { ...style, captionFadeInMs: 200, captionFadeOutMs: 120 },
+      captions: [{ text: '正文一句', startMs: 1000, endMs: 3000 }],
+      bookTitles: [{ text: '《简爱》', startMs: 0, endMs: 6000 }],
+      watermark: '@读书号',
+    })
+    const cap = a.split('\n').find((l) => l.includes('正文一句'))!
+    expect(cap).toContain('{\\fad(200,120)}')
+    const title = a.split('\n').find((l) => l.includes('《简爱》') && l.startsWith('Dialogue: 0'))!
+    expect(title, '常驻标题不该淡入淡出（会显得画面在闪）').not.toContain('\\fad')
+    const wm = a.split('\n').find((l) => l.includes('@读书号'))!
+    expect(wm).not.toContain('\\fad')
+  })
+  // 零回归红线：不传时一个 \fad 都不出现，与加这个功能之前逐字节一致
+  it('缺省（不传）→ 整份 ASS 无 \\fad', () => {
+    const a = buildAss({
+      width: 720, height: 960, totalMs: 6000, style,
+      captions: [{ text: '正文一句', startMs: 1000, endMs: 3000 }],
+    })
+    expect(a).not.toContain('\\fad')
+  })
+})

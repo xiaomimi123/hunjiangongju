@@ -120,15 +120,20 @@ type Beat = { zh: string; en?: string }
  * 提示词已强制该段以《书名》开头，所以按前缀剥离是确定性的，没有误拆面。
  * 段首没有《…》（AI 彻底没按格式写）时返回 null，整段一次合成。
  */
-export function splitTitleBeat(beats: Beat[]): { title: string; rest: string } | null {
+export function splitTitleBeat(beats: Beat[]): { title: string; rest: string; restBeats: Beat[] } | null {
   if (beats.length === 0) return null
   const m = /^(《[^》]+》)[，。！？、：；]?/.exec(beats[0].zh)
   if (!m) return null
   const firstRest = beats[0].zh.slice(m[0].length).trim()
-  const rest = [firstRest, ...beats.slice(1).map((b) => b.zh)].filter(Boolean).join('，')
+  // restBeats：剥掉书名后的**字幕**节拍。书名不进字幕——画面顶部的常驻大标题
+  // 已经写着《书名》，字幕再带一遍是重复（线上截图点名的问题）。
+  const restBeats: Beat[] = firstRest
+    ? [{ zh: firstRest, ...(beats[0].en ? { en: beats[0].en } : {}) }, ...beats.slice(1)]
+    : beats.slice(1)
+  const rest = restBeats.map((b) => b.zh).join('，')
   // 书名之后一个字都没有（整段只有书名）→ 没有正文可停顿，不拆
   if (!rest) return null
-  return { title: m[1], rest }
+  return { title: m[1], rest, restBeats }
 }
 // 从 captionBeats（Json）取出可朗读的短句；脏数据/空数组时回退整段 scriptText，
 // 保证每段至少有一次配音（否则该段无音频，后面累加的段起止会整体错位）。
@@ -229,6 +234,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
     // 报书名的段：书名与正文分两次合成，中间插 bookTitleTailMs 的停顿——
     // 对齐原工程「书名独立一小段人声、念完停一下再进正文」的剪法。
     const split = i === 1 && titleTailMs > 0 ? splitTitleBeat(beats) : null
+    let titleMs = 0
     if (split) {
       const tA = path.join(clipsDir, `c${i}_title.wav`)
       const tGap = path.join(clipsDir, `c${i}_gap.wav`)
@@ -236,6 +242,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
       await fs.writeFile(tA, await synth(split.title))
       await writeSilence(tGap, titleTailMs)
       await fs.writeFile(tB, await synth(split.rest))
+      titleMs = await probeDurationMs(tA)
       await concatClips([tA, tGap, tB], clipPath)
       console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段书名独立合成，念完停 ${titleTailMs}ms 再进正文`)
     } else {
@@ -290,7 +297,22 @@ export async function generateTts(genTaskId: string): Promise<void> {
     // - 留白把人声整体后移 400ms，字幕不跟着移就会抢先出现在静音里。
     // 也不能按补过静音的窗口分布——否则第 0 段的字幕会被摊到快闪的静音段上。
     const voiceStart = segStart + voiceStartOffsetMs
-    const timedBeats = timeCaptionBeats(beats.map((b) => ({ zh: b.zh, en: b.en })), voiceStart, Math.round(voiceStart + voiceMs))
+    // 书名段：书名节拍标记 hidden——TTS 照念（重新配音时也不丢），但**不进画面**：
+    // 顶部常驻大标题已经写着《书名》，字幕再带一遍是重复。正文字幕从书名念完
+    // + 停顿之后才开始（渐入的时机踩在正文开口上，不与书名的人声抢画面）。
+    // 变速作用在拼接后的整条音频上，书名与停顿的实际时长要按同一比例缩放。
+    let timedBeats: { zh: string; en?: string; startMs: number; endMs: number; hidden?: boolean }[]
+    if (split && titleMs > 0) {
+      const scale = speechMs > 0 ? voiceMs / speechMs : 1
+      const titleEndMs = Math.round(voiceStart + titleMs * scale)
+      const restStartMs = Math.round(voiceStart + (titleMs + titleTailMs) * scale)
+      timedBeats = [
+        { zh: split.title, hidden: true, startMs: voiceStart, endMs: titleEndMs },
+        ...timeCaptionBeats(split.restBeats.map((b) => ({ zh: b.zh, en: b.en })), restStartMs, Math.round(voiceStart + voiceMs)),
+      ]
+    } else {
+      timedBeats = timeCaptionBeats(beats.map((b) => ({ zh: b.zh, en: b.en })), voiceStart, Math.round(voiceStart + voiceMs))
+    }
     await prisma.generatedSegment.update({ where: { id: seg.id }, data: { captionBeats: timedBeats } })
     bodyTimings.push({ seqNo: seg.seqNo, startMs: segStart, endMs: segEnd })
     cursorMs += durMs

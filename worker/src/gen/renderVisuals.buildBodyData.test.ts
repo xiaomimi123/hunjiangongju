@@ -29,3 +29,24 @@ describe('buildBodyData —— style/seed 注入', () => {
     expect(data.style).toBeUndefined()
   })
 })
+
+
+describe('buildBodyData —— hidden 节拍不进画面', () => {
+  // 书名节拍 TTS 照念（留在 DB，重新配音不丢），但字幕不显示：
+  // 顶部常驻大标题已经写着《书名》，字幕再带一遍是重复。过滤只在这一处做。
+  it('hidden 节拍被过滤，其余节拍原样保留', () => {
+    const segs = [
+      { seqNo: 1, scriptText: '开场', imageUrl: '/api/files/gen/x/1.png' },
+      {
+        seqNo: 2, scriptText: '《活着》别人夸你懂事', imageUrl: '/api/files/gen/x/2.png',
+        captionBeats: [
+          { zh: '《活着》', hidden: true, startMs: 2400, endMs: 4000 },
+          { zh: '别人夸你懂事', startMs: 4300, endMs: 6000 },
+        ],
+      },
+    ]
+    const { data } = buildBodyData(task as never, segs as never, 'task-hidden')
+    const beats = data.segments[1].captionBeats!
+    expect(beats.map((b) => b.zh), '书名节拍漏进了画面').toEqual(['别人夸你懂事'])
+  })
+})

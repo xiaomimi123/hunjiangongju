@@ -82,9 +82,11 @@ export function buildBodyData(
     const rel = `media/${nn}.png`
     images.push({ seqNo: seg.seqNo, abs: urlToAbs(seg.imageUrl), rel })
     // 字幕节拍：本段口播短句在段时间窗内快速逐拍切换（图片保持）。缺省则回退整段单条字幕。
+    // hidden 节拍（书名）不进画面：TTS 念、字幕不显示（顶部常驻标题已有《书名》）。
+    // 过滤只在这一处做——DB 里保留完整节拍，重新配音时书名不丢。
     const rawBeats = Array.isArray(seg.captionBeats)
-      ? (seg.captionBeats as { zh?: string; en?: string; startMs?: number; endMs?: number }[]).filter(
-          (b) => b && typeof b.zh === 'string' && b.zh.trim(),
+      ? (seg.captionBeats as { zh?: string; en?: string; startMs?: number; endMs?: number; hidden?: boolean }[]).filter(
+          (b) => b && typeof b.zh === 'string' && b.zh.trim() && !b.hidden,
         )
       : []
     // generateTts 逐句配音已写入精确 startMs/endMs → 直接采用（字幕=真实音频时长，逐句对齐）；

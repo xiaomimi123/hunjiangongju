@@ -151,6 +151,32 @@ d('真跑 TTS 流水线 —— 字幕节拍与实际人声对齐', () => {
     expect(beats[0].startMs, '字幕抢在书名前留白里出现了').toBeGreaterThanOrEqual(win.startMs + 400)
   })
 
+  // ★ 书名不进字幕：顶部常驻大标题已经写着《书名》，字幕再带一遍是重复（线上截图点名）。
+  // TTS 仍要念书名（hidden 节拍留在 DB，重新配音时不丢），显示层过滤。
+  it('书名节拍标记 hidden，可见字幕不含《书名》', async () => {
+    const { segs } = await loadAll()
+    const seg2 = segs.find((s) => s.seqNo === 2)!
+    const beats = seg2.captionBeats as { zh: string; hidden?: boolean; startMs: number; endMs: number }[]
+    expect(beats[0].zh).toBe('《活着》')
+    expect(beats[0].hidden, '书名节拍没标 hidden，会显示在字幕里').toBe(true)
+    for (const b of beats.slice(1)) {
+      expect(b.hidden).toBeUndefined()
+      expect(b.zh, `可见字幕里混进了书名: ${b.zh}`).not.toContain('《活着》')
+    }
+  })
+
+  // 正文字幕要等书名念完 + 停顿之后才出现——渐入的时机踩在正文开口上，
+  // 不与书名的人声抢画面（书名 1.6s + 停顿 0.3s，正文字幕起点 ≥ 人声起点 + 1.9s）
+  it('可见字幕从书名念完 + 停顿之后才开始', async () => {
+    const { timings, segs } = await loadAll()
+    const seg2 = segs.find((s) => s.seqNo === 2)!
+    const win = timings.find((x) => x.seqNo === 2)!
+    const beats = seg2.captionBeats as { hidden?: boolean; startMs: number }[]
+    const firstVisible = beats.find((b) => !b.hidden)!
+    expect(firstVisible.startMs, '正文字幕抢在书名人声里出现了')
+      .toBeGreaterThanOrEqual(win.startMs + 400 + 1600 + 300 - 60)
+  })
+
   it('段时长仍精确落在草稿槽位（回归）', async () => {
     const { timings } = await loadAll()
     const durs = timings.map((t) => t.endMs - t.startMs)

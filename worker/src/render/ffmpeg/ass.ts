@@ -61,6 +61,9 @@ export interface AssStyleOpts {
    * 设为 0 即不加粗（自带字体只有 Regular 字面，libass 不合成假粗体）。
    */
   boldBordPx?: number
+  /** 正文字幕渐入/渐出（ms）。缺省 0 = 瞬间出现（老调用零回归） */
+  captionFadeInMs?: number
+  captionFadeOutMs?: number
 }
 
 export interface AssOpts {
@@ -208,11 +211,13 @@ export function buildAss(o: AssOpts): string {
   ]
 
   const ev: string[] = []
-  const line = (layer: number, c: AssCue, style: string) => {
+  // tag：拼在**转义之后**的覆盖标签（如 \fad）。拼在 c.text 里会被 escapeAssText
+  // 把大括号转义成字面文本——标签原样显示在画面上而不是生效。
+  const line = (layer: number, c: AssCue, style: string, tag = '') => {
     const text = escapeAssText(c.text)
     if (!text) return
     if (!(c.endMs > c.startMs)) return // 零长/负长事件 libass 直接不显示，早点丢掉更清楚
-    ev.push(`Dialogue: ${layer},${toAssTime(c.startMs)},${toAssTime(c.endMs)},${style},,0,0,0,,${text}`)
+    ev.push(`Dialogue: ${layer},${toAssTime(c.startMs)},${toAssTime(c.endMs)},${style},,0,0,0,,${tag}${text}`)
   }
 
   // 快闪卡在最底层：它出现的时段里本来就没有正文字幕与常驻书名
@@ -260,7 +265,12 @@ export function buildAss(o: AssOpts): string {
       `{\\pos(${cx},${ty})\\bord${boldBord}\\shad0\\3c${inlineColor(st.titleColor)}}${body}`,
     )
   }
-  for (const c of o.captions) line(1, c, 'cap')
+  // 正文字幕渐入渐出：\fad 是 ASS 原生标签，libass 直接支持。
+  // 只加在正文字幕上——标题/水印是常驻层，淡入淡出反而显得画面在闪。
+  const fadIn = Math.max(0, Math.round(st.captionFadeInMs ?? 0))
+  const fadOut = Math.max(0, Math.round(st.captionFadeOutMs ?? 0))
+  const fad = fadIn > 0 || fadOut > 0 ? `{\\fad(${fadIn},${fadOut})}` : ''
+  for (const c of o.captions) line(1, c, 'cap', fad)
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {
     line(2, { text: o.watermark, startMs: 0, endMs: o.totalMs }, 'wm')
   }

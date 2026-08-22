@@ -136,6 +136,8 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
       openTitleColor: tx?.openTitleColor ?? '#ffffff',
       ...(tx?.openTitlePosY !== undefined ? { openTitlePosY: tx.openTitlePosY } : {}),
       ...(tx?.outlinePx !== undefined ? { outlinePx: tx.outlinePx } : {}),
+      ...(tx?.captionFadeInMs !== undefined ? { captionFadeInMs: tx.captionFadeInMs } : {}),
+      ...(tx?.captionFadeOutMs !== undefined ? { captionFadeOutMs: tx.captionFadeOutMs } : {}),
       ...(tx?.boldBordPx !== undefined ? { boldBordPx: tx.boldBordPx } : {}),
     },
     decor: {

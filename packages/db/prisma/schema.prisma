@@ -16,10 +16,12 @@ model User {
   passwordHash String   @map("password_hash")
   role         String   @default("student")
   disabled     Boolean  @default(false)
-  // 生成配额（仅学员生效）：genLimit=可生成总条数上限（null=不限），genUsed=已用（只增不减——
-  // 删任务不返还额度，否则生成→下载→删除就能无限薅）
-  genLimit     Int?     @map("gen_limit")
-  genUsed      Int      @default(0) @map("gen_used")
+  // 生成配额（仅学员生效）：genLimit=**每日**可生成条数（null=不限）；
+  // genUsed=当日已用（只增不减，删任务不返还）；genUsedDate=计数属于哪一天（北京时间）。
+  // 跨天后的第一次生成把计数归零重记——不需要定时任务，重置天然精确到 0 点，且不累计。
+  genLimit     Int?      @map("gen_limit")
+  genUsed      Int       @default(0) @map("gen_used")
+  genUsedDate  DateTime? @map("gen_used_date") @db.Date
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("users")

@@ -194,7 +194,7 @@ export default function StudentsPage() {
               <th className="px-4 py-3 font-medium">账号（手机号）</th>
               <th className="px-4 py-3 font-medium">昵称</th>
               <th className="px-4 py-3 font-medium">注册时间</th>
-              <th className="px-4 py-3 text-right font-medium">生成额度</th>
+              <th className="px-4 py-3 text-right font-medium">每日额度</th>
               <th className="px-4 py-3 text-right font-medium">任务</th>
               <th className="px-4 py-3 text-right font-medium">已完成</th>
               <th className="px-4 py-3 text-right font-medium">操作</th>
@@ -214,7 +214,7 @@ export default function StudentsPage() {
                   <td className="num px-4 py-3 text-ink2">{new Date(s.createdAt).toLocaleString('zh-CN')}</td>
                   <td className="num px-4 py-3 text-right">
                     <button className="hover:text-flame" title="点击修改该学员的生成额度" onClick={() => openQuota(s)}>
-                      {s.genLimit == null ? `不限 · 已用 ${s.genUsed ?? 0}` : `${s.genUsed ?? 0}/${s.genLimit}`}
+                      {s.genLimit == null ? `不限 · 今日 ${s.genUsed ?? 0}` : `今日 ${s.genUsed ?? 0}/${s.genLimit}`}
                     </button>
                   </td>
                   <td className="num px-4 py-3 text-right">{s.taskCount}</td>
@@ -336,11 +336,11 @@ export default function StudentsPage() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => { if (!quotaBusy) setQuotaFor(null) }}>
           <div className="card w-full max-w-sm space-y-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div>
-              <h3 className="font-display text-lg font-bold">{quotaFor === 'ALL' ? '一键设置全部额度' : '生成额度'}</h3>
+              <h3 className="font-display text-lg font-bold">{quotaFor === 'ALL' ? '一键设置全部每日额度' : '每日生成额度'}</h3>
               <p className="mt-0.5 text-sm text-ink3">
                 {quotaFor === 'ALL'
-                  ? '统一设定所有学员可生成的视频条数（只改上限，不动各自的已用次数）'
-                  : <>学员「{quotaFor.nickname ?? quotaFor.email}」 · 当前已用 <span className="num">{quotaFor.genUsed ?? 0}</span> 条</>}
+                  ? '统一设定所有学员每天可生成的条数。每天 0 点自动重置，当天没用完不累计到明天。'
+                  : <>学员「{quotaFor.nickname ?? quotaFor.email}」 · 今日已用 <span className="num">{quotaFor.genUsed ?? 0}</span> 条。每天 0 点自动重置，不累计。</>}
               </p>
             </div>
 
@@ -351,7 +351,7 @@ export default function StudentsPage() {
 
             {!quotaUnlimited && (
               <label className="block">
-                <span className="mb-1 block text-xs text-ink3">可生成条数（0 = 禁止生成）</span>
+                <span className="mb-1 block text-xs text-ink3">每日可生成条数（0 = 禁止生成）</span>
                 <input
                   className="field num" type="text" inputMode="numeric" autoFocus
                   value={quotaVal}
@@ -364,7 +364,7 @@ export default function StudentsPage() {
             {quotaFor !== 'ALL' && (quotaFor.genUsed ?? 0) > 0 && !quotaUnlimited && (
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={quotaReset} onChange={(e) => setQuotaReset(e.target.checked)} className="h-4 w-4" />
-                同时把已用次数清零<span className="text-xs text-ink3">（续费/续期时勾选）</span>
+                同时把**今日**已用清零<span className="text-xs text-ink3">（临时给学员当天加量时勾选）</span>
               </label>
             )}
 

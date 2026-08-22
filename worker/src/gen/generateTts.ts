@@ -114,14 +114,21 @@ type Beat = { zh: string; en?: string }
  * 我们把整段 beats 用逗号连成一次合成的话，书名和正文之间只有逗号级的停顿，
  * 听感就是"赶"——用户对照原片点名的「停顿感」问题之一。
  *
- * 只在首拍**恰好是**《书名》时拆（允许尾随一个标点）；
- * 不是的话返回 null，维持整段一次合成（AI 没按格式写时不硬拆，拆错比不拆糟）。
+ * 拆分按**前缀**剥离：段首的「《…》」就是书名。第一版只在首拍恰好是《书名》
+ * （即 AI 在书名后写了标点、切句时书名独立成拍）时才拆，AI 写成
+ * 「《简爱》这本书讲了…」连着的就不拆——线上实测正是这样，书名没有单独念出。
+ * 提示词已强制该段以《书名》开头，所以按前缀剥离是确定性的，没有误拆面。
+ * 段首没有《…》（AI 彻底没按格式写）时返回 null，整段一次合成。
  */
 export function splitTitleBeat(beats: Beat[]): { title: string; rest: string } | null {
-  if (beats.length < 2) return null
-  const first = beats[0].zh.replace(/[，。！？、：；]$/, '')
-  if (!/^《.+》$/.test(first)) return null
-  return { title: first, rest: beats.slice(1).map((b) => b.zh).join('，') }
+  if (beats.length === 0) return null
+  const m = /^(《[^》]+》)[，。！？、：；]?/.exec(beats[0].zh)
+  if (!m) return null
+  const firstRest = beats[0].zh.slice(m[0].length).trim()
+  const rest = [firstRest, ...beats.slice(1).map((b) => b.zh)].filter(Boolean).join('，')
+  // 书名之后一个字都没有（整段只有书名）→ 没有正文可停顿，不拆
+  if (!rest) return null
+  return { title: m[1], rest }
 }
 // 从 captionBeats（Json）取出可朗读的短句；脏数据/空数组时回退整段 scriptText，
 // 保证每段至少有一次配音（否则该段无音频，后面累加的段起止会整体错位）。

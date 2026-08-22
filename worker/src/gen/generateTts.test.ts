@@ -83,12 +83,21 @@ describe('splitTitleBeat —— 书名独立成一次合成', () => {
   it('首拍带尾随标点也认（《简爱》，）', () => {
     expect(splitTitleBeat([{ zh: '《简爱》，' }, { zh: '正文' }])).toEqual({ title: '《简爱》', rest: '正文' })
   })
-  // AI 没按格式写时不硬拆——拆错（比如把半句话当书名）比不拆糟
-  it('首拍不是纯书名（书名后还跟着字）→ null，整段一次合成', () => {
-    expect(splitTitleBeat([{ zh: '《简爱》讲了一个故事' }, { zh: '正文' }])).toBeNull()
+  // ★ 按前缀剥离，书名后连着字也拆。第一版只认「首拍恰好是《书名》」，
+  // AI 写成「《简爱》这本书讲了…」连着的就不拆——线上实测书名因此没有单独念出。
+  // 提示词已强制该段以《书名》开头，前缀剥离是确定性的。
+  it('书名后连着正文 → 从前缀处拆开', () => {
+    expect(splitTitleBeat([{ zh: '《简爱》这本书讲了一个故事' }, { zh: '关于尊严' }]))
+      .toEqual({ title: '《简爱》', rest: '这本书讲了一个故事，关于尊严' })
+  })
+  it('书名后带标点再连正文 → 标点剥掉，不进正文合成', () => {
+    expect(splitTitleBeat([{ zh: '《简爱》：一个关于尊严的故事' }]))
+      .toEqual({ title: '《简爱》', rest: '一个关于尊严的故事' })
+  })
+  it('段首没有《…》（AI 彻底没按格式）→ null，整段一次合成', () => {
     expect(splitTitleBeat([{ zh: '如果你困在过往' }, { zh: '正文' }])).toBeNull()
   })
-  it('只有一拍（没有正文可接）→ null', () => {
+  it('整段只有书名（没有正文可停顿）→ null', () => {
     expect(splitTitleBeat([{ zh: '《简爱》' }])).toBeNull()
   })
 })

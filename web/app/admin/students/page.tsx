@@ -23,7 +23,36 @@ export default function StudentsPage() {
 
   const [expanded, setExpanded] = useState('')          // 展开查看作品的学员 id
   const [works, setWorks] = useState<Task[] | null>(null)
-  const [resetFor, setResetFor] = useState<AccountRef | null>(null) // 重置密码弹窗目标（学员/运营共用）
+  const [resetFor, setResetFor] = useState<AccountRef | null>(null)
+  // 配额弹窗：quotaFor=null 关闭；quotaFor='ALL' 一键全体；否则单人
+  const [quotaFor, setQuotaFor] = useState<Row | 'ALL' | null>(null)
+  const [quotaUnlimited, setQuotaUnlimited] = useState(false)
+  const [quotaVal, setQuotaVal] = useState('')
+  const [quotaReset, setQuotaReset] = useState(false)
+  const [quotaBusy, setQuotaBusy] = useState(false)
+  const [quotaErr, setQuotaErr] = useState('')
+  function openQuota(target: Row | 'ALL') {
+    setQuotaFor(target)
+    setQuotaErr(''); setQuotaReset(false); setQuotaBusy(false)
+    if (target === 'ALL') { setQuotaUnlimited(false); setQuotaVal('') }
+    else { setQuotaUnlimited(target.genLimit == null); setQuotaVal(target.genLimit == null ? '' : String(target.genLimit)) }
+  }
+  async function saveQuota() {
+    if (!quotaFor) return
+    const limit = quotaUnlimited ? null : Number(quotaVal)
+    if (!quotaUnlimited && (!Number.isInteger(limit) || (limit as number) < 0)) { setQuotaErr('请输入 0 或正整数'); return }
+    setQuotaBusy(true); setQuotaErr('')
+    try {
+      if (quotaFor === 'ALL') {
+        await api('/api/admin/students/gen-limit', { method: 'POST', body: { limit } })
+      } else {
+        await api(`/api/admin/students/${quotaFor.id}`, { method: 'PATCH', body: { action: 'set-gen-limit', limit, resetUsed: quotaReset } })
+      }
+      setQuotaFor(null)
+      await load()
+    } catch (e) { setQuotaErr((e as Error).message) }
+    finally { setQuotaBusy(false) }
+  } // 重置密码弹窗目标（学员/运营共用）
   const [newPw, setNewPw] = useState('')
   const [modalErr, setModalErr] = useState('')
   const [modalMsg, setModalMsg] = useState('')
@@ -155,22 +184,7 @@ export default function StudentsPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <input className="field max-w-xs" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value) }} placeholder="搜索手机号 / 昵称" autoCapitalize="none" />
-        <button
-          className="btn-ghost text-xs"
-          onClick={async () => {
-            const v = prompt('给全部学员统一设置生成额度（条数）。填 0 = 全部禁止生成；留空/取消 = 不改；填 -1 = 全部改为不限')
-            if (v === null || v.trim() === '') return
-            const n = Number(v.trim())
-            if (!Number.isInteger(n) || n < -1) { alert('请输入 -1、0 或正整数'); return }
-            try {
-              const r = await api<{ updated: number }>('/api/admin/students/gen-limit', { method: 'POST', body: { limit: n === -1 ? null : n } })
-              alert(`已更新 ${r.updated} 名学员的额度`)
-              await load()
-            } catch (e) { alert((e as Error).message) }
-          }}
-        >
-          一键设置全部额度
-        </button>
+        <button className="btn-ghost text-xs" onClick={() => openQuota('ALL')}>一键设置全部额度</button>
       </div>
 
       <div className="card overflow-x-auto">
@@ -199,22 +213,8 @@ export default function StudentsPage() {
                   <td className="px-4 py-3">{s.nickname ?? '—'}</td>
                   <td className="num px-4 py-3 text-ink2">{new Date(s.createdAt).toLocaleString('zh-CN')}</td>
                   <td className="num px-4 py-3 text-right">
-                    <button
-                      className="hover:text-flame"
-                      title="点击修改该学员的生成额度"
-                      onClick={async () => {
-                        const v = prompt(`「${s.nickname ?? s.email}」的生成额度（当前 ${s.genLimit ?? '不限'}，已用 ${s.genUsed}）。填条数；-1 = 不限`, String(s.genLimit ?? -1))
-                        if (v === null || v.trim() === '') return
-                        const n = Number(v.trim())
-                        if (!Number.isInteger(n) || n < -1) { alert('请输入 -1、0 或正整数'); return }
-                        const reset = s.genUsed > 0 && n !== -1 ? confirm('同时把已用次数清零吗？（续费场景选"确定"）') : false
-                        try {
-                          await api(`/api/admin/students/${s.id}`, { method: 'PATCH', body: { action: 'set-gen-limit', limit: n === -1 ? null : n, resetUsed: reset } })
-                          await load()
-                        } catch (e) { alert((e as Error).message) }
-                      }}
-                    >
-                      {s.genLimit == null ? `不限（已用 ${s.genUsed}）` : `${s.genUsed}/${s.genLimit}`}
+                    <button className="hover:text-flame" title="点击修改该学员的生成额度" onClick={() => openQuota(s)}>
+                      {s.genLimit == null ? `不限 · 已用 ${s.genUsed ?? 0}` : `${s.genUsed ?? 0}/${s.genLimit}`}
                     </button>
                   </td>
                   <td className="num px-4 py-3 text-right">{s.taskCount}</td>
@@ -327,6 +327,53 @@ export default function StudentsPage() {
             <div className="flex justify-end gap-2">
               <button onClick={() => setShowAdd(false)} className="btn-ghost px-4">取消</button>
               <button onClick={createAccount} disabled={addBusy} className="btn-primary px-5">{addBusy ? '创建中…' : '确认创建'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quotaFor && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => { if (!quotaBusy) setQuotaFor(null) }}>
+          <div className="card w-full max-w-sm space-y-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="font-display text-lg font-bold">{quotaFor === 'ALL' ? '一键设置全部额度' : '生成额度'}</h3>
+              <p className="mt-0.5 text-sm text-ink3">
+                {quotaFor === 'ALL'
+                  ? '统一设定所有学员可生成的视频条数（只改上限，不动各自的已用次数）'
+                  : <>学员「{quotaFor.nickname ?? quotaFor.email}」 · 当前已用 <span className="num">{quotaFor.genUsed ?? 0}</span> 条</>}
+              </p>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={quotaUnlimited} onChange={(e) => setQuotaUnlimited(e.target.checked)} className="h-4 w-4" />
+              不限次数
+            </label>
+
+            {!quotaUnlimited && (
+              <label className="block">
+                <span className="mb-1 block text-xs text-ink3">可生成条数（0 = 禁止生成）</span>
+                <input
+                  className="field num" type="text" inputMode="numeric" autoFocus
+                  value={quotaVal}
+                  onChange={(e) => setQuotaVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="如 100"
+                />
+              </label>
+            )}
+
+            {quotaFor !== 'ALL' && (quotaFor.genUsed ?? 0) > 0 && !quotaUnlimited && (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={quotaReset} onChange={(e) => setQuotaReset(e.target.checked)} className="h-4 w-4" />
+                同时把已用次数清零<span className="text-xs text-ink3">（续费/续期时勾选）</span>
+              </label>
+            )}
+
+            {quotaErr && <p className="pill pill-bad">{quotaErr}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setQuotaFor(null)} disabled={quotaBusy} className="btn-ghost px-4">取消</button>
+              <button onClick={saveQuota} disabled={quotaBusy || (!quotaUnlimited && quotaVal === '')} className="btn-primary px-5">
+                {quotaBusy ? '保存中…' : '保存'}
+              </button>
             </div>
           </div>
         </div>

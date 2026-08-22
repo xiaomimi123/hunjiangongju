@@ -50,6 +50,7 @@ export const GET = handler(async (req) => {
 
   const students = rows.map((u) => ({
     id: u.id, email: u.email, nickname: u.nickname, disabled: u.disabled, createdAt: u.createdAt,
+    genLimit: u.genLimit, genUsed: u.genUsed,
     taskCount: byUser.get(u.id)?.total ?? 0, doneCount: byUser.get(u.id)?.done ?? 0,
   }))
   return NextResponse.json({ stats: { totalStudents, todayNew, totalTasks, totalExported }, students, total })

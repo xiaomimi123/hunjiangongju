@@ -675,6 +675,22 @@ export async function generateScript(genTaskId: string): Promise<void> {
     lines = [openTitleText, ...lines.slice(1)]
   }
 
+  // ★ 书名段强制以《书名》开头（确定性兜底，与开场段替换同一个教训）。
+  //
+  // 提示词已要求「第 N 段必须以《书名》开头」，但 AI 会违反——线上实录：
+  // AI 把书名塞进开场白（被上面的替换丢掉），书名段却没带书名，结果整条片子
+  // 没人念书名，TTS 的「书名独立合成」也无从触发。
+  // 补「《书名》，」前缀：带逗号是为了切句时书名独立成拍（快闪卡式的字幕），
+  // TTS 那边按前缀剥离单独合成。行内已有的书名提法不动（删了会破坏句子）。
+  if (themeBook && openTitleText && !(tp.script?.titleInOpening ?? false)) {
+    const idx = Math.min(Math.max(1, (tp.script?.titleSegment ?? 2) - 1), lines.length - 1)
+    const tag = `《${themeBook.title}》`
+    if (!lines[idx].startsWith(tag)) {
+      console.warn(`[gen] generate-script ${genTaskId}: 第 ${idx + 1} 段未以书名开头，补「${tag}」前缀（原开头「${lines[idx].slice(0, 12)}…」）`)
+      lines = lines.map((l, j) => (j === idx ? `${tag}，${l}` : l))
+    }
+  }
+
   // 单本模式：所有正文段统一挂主题书，不走位置均分、也不走书序号标记。
   const assigned = themeBook
     ? lines.map((scriptText) => ({

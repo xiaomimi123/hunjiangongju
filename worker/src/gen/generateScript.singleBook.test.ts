@@ -197,6 +197,33 @@ describe('generateScript：单本模式接线', () => {
     mockIsMockMode.mockReturnValue(true)
   })
 
+  // ★ 与「开场段替换」同一个教训的另一半：提示词要求书名段以《书名》开头，
+  // 但 AI 会违反（线上实录：书名被塞进开场白、书名段反而没带），
+  // 结果整条片子没人念书名。落库前确定性补前缀。
+  it('AI 没让书名段以《书名》开头 → 落库时补「《书名》，」前缀', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, { themeBook: { title: '活着', author: '余华' } })
+    mockLlmComplete.mockResolvedValue('今天分享的是一本书\n他把一生都过成了忍耐\n第三段\n第四段\n第五段\n第六段')
+
+    await generateScript(task.id)
+
+    const segs = await segmentsOf(task.id)
+    expect(segs[0].scriptText, '开场段应被替换为标题原文').toBe('今天分享的是')
+    expect(segs[1].scriptText, '书名段没被补上《书名》前缀').toBe('《活着》，他把一生都过成了忍耐')
+  })
+
+  it('AI 已让书名段以《书名》开头 → 不重复补', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, { themeBook: { title: '活着', author: '余华' } })
+    mockLlmComplete.mockResolvedValue('今天分享的是\n《活着》他把一生都过成了忍耐\n第三段\n第四段\n第五段\n第六段')
+
+    await generateScript(task.id)
+
+    const segs = await segmentsOf(task.id)
+    expect(segs[1].scriptText).toBe('《活着》他把一生都过成了忍耐')
+    expect(segs[1].scriptText).not.toContain('《活着》，《活着》')
+  })
+
   it('variables.themeBook 存在 → 所有正文段挂主题书，且 prompt 不含陪衬书名、不含书序号要求', async () => {
     const fw = await makeFramework()
     const themeBook = { title: '被讨厌的勇气', author: '岸见一郎' }

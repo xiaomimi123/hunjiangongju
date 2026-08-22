@@ -78,6 +78,18 @@ export default function ExtractPage() {
       </PageHeader>
       {err && <p className="pill pill-bad">{err}</p>}
 
+      {/* 定位说明：拆解产出的是 classic 基础框架（无快闪模板参数/图片槽位），
+          与快闪主链路的全部调校（碎裂开场/书封快闪/槽位节奏）不相通。
+          不写清的话，运营用它生成会得到老式片子、以为系统坏了。 */}
+      <div className="card p-4 text-xs text-ink3">
+        <span className="text-ink">定位说明：</span>
+        拆解产出的是**基础文案框架**（提炼口播套路），并可从原声「用此声音克隆」取样。
+        它不带快闪模板的视觉与节奏配方（碎裂开场、书封快闪、分镜槽位）——
+        要复刻同款视觉效果，请用
+        <Link href="/admin/jianying" className="mx-1 text-flame">剪映模板</Link>
+        导入草稿，精度更高。
+      </div>
+
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface2 text-left text-ink3">

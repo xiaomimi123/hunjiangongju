@@ -125,6 +125,9 @@ export default function ExtractDetailPage() {
       {/* 产出框架 */}
       <section className="space-y-2">
         <p className="eyebrow">产出框架（{d.frameworks.length}）</p>
+        <p className="text-xs text-ink3">
+          这里产出的是基础文案框架（不含快闪模板的视觉与节奏配方）。要复刻同款视觉，请用「剪映模板」导入草稿。
+        </p>
         {d.frameworks.length === 0 ? (
           <p className="card p-6 text-center text-sm text-ink3">框架提炼后出现在这里…</p>
         ) : (

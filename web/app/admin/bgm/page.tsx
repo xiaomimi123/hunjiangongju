@@ -15,6 +15,7 @@ export default function BgmPage() {
   const [err, setErr] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editingId, setEditingId] = useState('')
   const [editName, setEditName] = useState('')
   const [editFolder, setEditFolder] = useState('')
@@ -44,6 +45,27 @@ export default function BgmPage() {
     setErr('')
     try { await api(`/api/bgm/${id}`, { method: 'DELETE' }); await load() }
     catch (e) { setErr((e as Error).message) }
+  }
+
+  function toggle(id: string) {
+    setSelected((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+  async function delSelected() {
+    if (selected.size === 0) return
+    if (!confirm(`确认删除选中的 ${selected.size} 首 BGM？被渲染任务引用的会自动跳过。`)) return
+    setErr(''); setBusy(true)
+    try {
+      const r = await api<{ deleted: number; skipped: { name: string | null; reason: string }[] }>(
+        '/api/bgm/batch-delete', { method: 'POST', body: { ids: Array.from(selected) } })
+      if (r.skipped.length) setErr(`已删 ${r.deleted} 首；跳过 ${r.skipped.length} 首：${r.skipped.map((x) => `${x.name || '未命名'}（${x.reason}）`).join('、')}`)
+      setSelected(new Set())
+      await load()
+    } catch (e) { setErr((e as Error).message) }
+    finally { setBusy(false) }
   }
 
   function startEdit(b: Bgm) {
@@ -100,7 +122,25 @@ export default function BgmPage() {
       </div>
 
       <section className="space-y-5">
-        <p className="eyebrow">曲库（{list.length}）</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="eyebrow">曲库（{list.length}）</p>
+          {list.length > 0 && (
+            <>
+              <button className="btn-ghost text-xs"
+                onClick={() => setSelected(selected.size === list.length ? new Set() : new Set(list.map((b) => b.id)))}>
+                {selected.size === list.length ? '取消全选' : '全选'}
+              </button>
+              {selected.size > 0 && (
+                <button className="btn-danger text-xs" disabled={busy} onClick={delSelected}>
+                  删除选中（{selected.size}）
+                </button>
+              )}
+            </>
+          )}
+          <span className="text-xs text-ink3">
+            时长不用对齐：合成时自动从曲子开头（或框架里设置的起点）截取成片长度，60 秒的歌只会用到前 20 多秒。
+          </span>
+        </div>
         {list.length === 0 ? (
           <p className="card p-6 text-center text-sm text-ink3">曲库还是空的，先上传一首 mp3。</p>
         ) : (
@@ -110,6 +150,7 @@ export default function BgmPage() {
               <ul className="space-y-2.5">
                 {groups.get(g)!.map((b) => (
                   <li key={b.id} className="card flex flex-wrap items-center gap-3 p-3">
+                    <input type="checkbox" checked={selected.has(b.id)} onChange={() => toggle(b.id)} />
                     <span className="pill">{b.styleTag || '未标注'}</span>
                     {editingId === b.id ? (
                       <div className="flex flex-wrap items-center gap-1.5">

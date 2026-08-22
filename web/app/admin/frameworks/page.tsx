@@ -102,6 +102,19 @@ export default function FrameworksPage() {
       .then((j) => { if (Array.isArray(j?.voices)) setTtsVoices(j.voices) })
       .catch(() => { /* 拉不到就不显示勾选项，不影响其余编辑 */ })
   }, [])
+  // BGM 分组清单：给「BGM 分组随机配乐」下拉用
+  const [bgmFolders, setBgmFolders] = useState<string[]>([])
+  useEffect(() => {
+    fetch('/api/bgm')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!Array.isArray(j)) return
+        const fs = new Set<string>()
+        for (const b of j) if (typeof b?.folder === 'string' && b.folder.trim()) fs.add(b.folder.trim())
+        setBgmFolders(Array.from(fs).sort())
+      })
+      .catch(() => { /* 拉不到就不显示下拉，不影响其余编辑 */ })
+  }, [])
   const [form, setForm] = useState<Form | null>(null)
   const [modalErr, setModalErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -356,6 +369,26 @@ export default function FrameworksPage() {
                       </button>
                     ))}
                   </div>
+
+                  <span className="eyebrow mt-4 block">BGM 分组（随机配乐）</span>
+                  <p className="mt-1 text-xs text-ink3">
+                    选中后，用这个框架生成的每条片子从该分组里**随机**配一首 BGM（同一条任务重跑不换曲）。
+                    优先级：单条任务里手选的 BGM ＞ 这里的分组 ＞ 剪映导入的原曲 ＞ 全曲库随机。
+                    分组在「BGM 曲库」页维护（上传时填文件夹即可建组）。
+                  </p>
+                  <select
+                    className="field mt-2 w-64 text-xs"
+                    value={typeof ot.__bgmFolder === 'string' ? (ot.__bgmFolder as string) : ''}
+                    onChange={(e) => {
+                      const next = { ...ot } as Record<string, unknown>
+                      if (e.target.value) next.__bgmFolder = e.target.value
+                      else delete next.__bgmFolder
+                      setF({ overlayTemplate: JSON.stringify(next, null, 2) })
+                    }}
+                  >
+                    <option value="">不绑定分组（用剪映原曲 / 全曲库随机）</option>
+                    {bgmFolders.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
 
                   <span className="eyebrow mt-4 block">快闪书封提示词（书单封面底图）</span>
                   <p className="mt-1 text-xs text-ink3">

@@ -57,6 +57,58 @@ interface SegmentRow {
   captionBeats?: unknown
 }
 
+/** 框架绑定的 BGM 分组（overlayTemplate.__bgmFolder）：生成时从该分组随机配乐 */
+export function readBgmFolder(overlayTemplate: unknown): string | null {
+  const ot = overlayTemplate && typeof overlayTemplate === 'object' && !Array.isArray(overlayTemplate)
+    ? (overlayTemplate as Record<string, unknown>) : {}
+  const v = typeof ot.__bgmFolder === 'string' ? ot.__bgmFolder.trim() : ''
+  return v || null
+}
+
+/**
+ * 选定本条片子的 BGM。优先级：
+ *   1. variables.__bgmId —— 运营在编辑页/工作台手选的这一条
+ *   2. 框架绑定的 BGM 分组（__bgmFolder）—— 从分组里按 genTaskId 稳定随机挑一首
+ *      （用户要的"框架的 BGM 分组随机匹配"；排在 __defaultBgmId 之前：
+ *      分组是运营显式配置的意图，导入默认曲只是解析残留）
+ *   3. 剪映导入框架的默认 BGM（__defaultBgmId，原工程同款）
+ *   4. 全库随机兜底（对齐竞品：无指定则配乐，不留白）
+ * 随机一律用 genTaskId 派生的稳定索引：同任务重跑不换曲（本仓禁 Math.random）。
+ * 每一级都校验记录仍存在，避免陈旧 id 触发 FK 失败。
+ */
+export async function resolveBgmId(
+  variables: unknown,
+  overlayTemplate: unknown,
+  genTaskId: string,
+): Promise<string | null> {
+  const vars = variables as { __bgmId?: string } | null
+  if (vars && typeof vars === 'object' && vars.__bgmId) {
+    const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
+    if (bgm) return bgm.id
+  }
+  const hashPick = (pool: { id: string }[]): string | null => {
+    if (pool.length === 0) return null
+    const idx = Array.from(genTaskId).reduce((a, c) => a + c.charCodeAt(0), 0) % pool.length
+    return pool[idx].id
+  }
+  const folder = readBgmFolder(overlayTemplate)
+  if (folder) {
+    const pool = await prisma.bgmLibrary.findMany({
+      where: { folder, fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' },
+    })
+    const picked = hashPick(pool)
+    if (picked) return picked
+    console.warn(`[gen] resolve-bgm: 框架绑定的分组「${folder}」里没有可用曲目，落到下一级`)
+  }
+  const defaultBgmId = readFrameworkDefaults(overlayTemplate).bgmId
+  if (defaultBgmId) {
+    const bgm = await prisma.bgmLibrary.findUnique({ where: { id: defaultBgmId } })
+    if (bgm) return bgm.id
+  }
+  const pool = await prisma.bgmLibrary.findMany({ where: { fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' } })
+  return hashPick(pool)
+}
+
 /** 组装 BodyData：segments 由 bodyTimings（按 seqNo）join generated_segments；images 1:1 */
 export function buildBodyData(
   task: TaskWithFramework,
@@ -179,31 +231,7 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
 
   const { data, images } = buildBodyData(task, segments, genTaskId)
 
-  // 换 BGM：编辑页把选中的 bgmId 存在 variables.__bgmId，此处取出写入 RenderTask.bgmId
-  // （render-video 会据此混入 BGM）。校验 bgm 仍存在，避免陈旧 id 触发 FK 失败。
-  const vars = task.variables as { __bgmId?: string } | null
-  let bgmId: string | null = null
-  if (vars && typeof vars === 'object' && vars.__bgmId) {
-    const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
-    bgmId = bgm?.id ?? null
-  }
-  // 次优先：剪映导入框架的默认 BGM（原工程同款）。校验仍存在，避免陈旧 id 触发 FK 失败。
-  if (!bgmId) {
-    const defaultBgmId = readFrameworkDefaults(task.framework.overlayTemplate).bgmId
-    if (defaultBgmId) {
-      const bgm = await prisma.bgmLibrary.findUnique({ where: { id: defaultBgmId } })
-      bgmId = bgm?.id ?? null
-    }
-  }
-  // 未指定 BGM → 从曲库自动选一首（对齐竞品：无指定则配乐，不留白）。
-  // 用 genTaskId 派生的稳定索引，避免同任务重跑换曲。
-  if (!bgmId) {
-    const pool = await prisma.bgmLibrary.findMany({ where: { fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' } })
-    if (pool.length > 0) {
-      const idx = Array.from(genTaskId).reduce((a, c) => a + c.charCodeAt(0), 0) % pool.length
-      bgmId = pool[idx].id
-    }
-  }
+  const bgmId = await resolveBgmId(task.variables, task.framework.overlayTemplate, genTaskId)
 
   // 本 job 创建 RenderTask
   const renderTask = await prisma.renderTask.create({

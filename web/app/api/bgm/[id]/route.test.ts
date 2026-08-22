@@ -120,8 +120,10 @@ describe('DELETE /api/bgm/[id]', () => {
     expect(await fs.stat(abs).then(() => true).catch(() => false)).toBe(false)
   })
 
-  it('不存在 → 404', async () => {
+  // ★ 幂等：删除的语义是「让它不存在」，已经不存在就是成功。
+  // 线上实测同一个删除被连点两次，第二发 404 对用户呈现为「删除报错」。
+  it('不存在 → 仍返回 ok（幂等，连点第二发不报错）', async () => {
     const res = await DELETE(jsonReq('http://localhost/x', 'DELETE'), { params: { id: 'nope' } })
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
   })
 })

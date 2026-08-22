@@ -29,7 +29,9 @@ export const POST = handler(async (req) => {
     data: {
       douyinShareUrl: '(manual-upload)',
       videoFileUrl: `/api/files/${rel}`,
-      status: 'DOWNLOADING',
+      // 直接从转写起步：文件已经在本地了，没有"下载"这一步。
+      // 原先写 DOWNLOADING，转写期间 UI 一直显示「下载中」——上传路径的第一步状态是错的。
+      status: 'TRANSCRIBING',
       createdBy: session.userId,
     },
   })

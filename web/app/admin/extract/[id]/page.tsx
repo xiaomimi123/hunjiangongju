@@ -19,6 +19,7 @@ export default function ExtractDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState('')
+  const [retrying, setRetrying] = useState(false)
 
   const load = useCallback(async () => {
     try { const r = await api<Detail>(`/api/extract/${id}`); setD(r); return r }
@@ -74,9 +75,21 @@ export default function ExtractDetailPage() {
           </div>
         )}
         {failed && (
-          <p className="rounded-xl border-l-4 border-l-bad bg-surface2 p-3 text-sm text-ink2">
-            拆解失败。若为链接解析失败，请返回列表改用「上传视频」重试。
-          </p>
+          <div className="space-y-2 rounded-xl border-l-4 border-l-bad bg-surface2 p-3 text-sm text-ink2">
+            <p>拆解失败。可直接重试（从上次成功的步骤继续，不重复已完成的环节）；若为链接解析失败，改用「上传视频」。</p>
+            <button
+              className="btn-primary text-xs"
+              disabled={retrying}
+              onClick={async () => {
+                setErr(''); setRetrying(true)
+                try { await api(`/api/extract/${id}/retry`, { method: 'POST' }); await load() }
+                catch (e) { setErr((e as Error).message) }
+                finally { setRetrying(false) }
+              }}
+            >
+              {retrying ? '已提交…' : '重试拆解'}
+            </button>
+          </div>
         )}
       </div>
 

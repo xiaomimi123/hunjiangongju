@@ -152,6 +152,9 @@ export async function generateImage(genTaskId: string): Promise<void> {
       // 画风优先用槽位自己的 style（支持「开场卡通头像、后面达芬奇」这种同片多画风），
       // 未配则沿用框架的 imageStylePrompt。
       const prompt = buildFreeArtPrompt(slot?.style ?? stylePrompt, slot?.prompt ?? scenes[i])
+      // 打印**最终**提示词：运营在控制台直接测的是裸提示词，走流水线会经过
+      // 「画风 + 画什么 + 竖屏尾巴」的拼接——效果对不上时先看这行，别猜。
+      console.log(`[gen] generate-image ${genTaskId}: 正片#${i + 1} 提示词「${prompt}」`)
       // 参考图：配了就让它参与生成（模型直接沿用其笔触与配色，比文字描述准）。
       // 签名是短时效的，每张图各签一次，不要提到循环外复用。
       const refUrl = slot?.refImage ? publicAssetUrl(slot.refImage) : undefined
@@ -243,6 +246,7 @@ export async function generateImage(genTaskId: string): Promise<void> {
           return
         } catch { /* 未缓存过，现做 */ }
         const { prompt, negativePrompt } = buildBookCoverPrompt(book, styleHint, coverPrompt)
+        if (i === 0) console.log(`[gen] book-cover ${genTaskId}: 最终提示词「${prompt}」 负向「${negativePrompt.slice(0, 40)}…」`)
         const png = await withRetry(() => imageGenerate({ prompt, size: '720x960', negativePrompt }), {
           attempts: 3, delayMs: 3000,
           onRetry: (err, n) => console.warn(`[gen] book-cover ${genTaskId} #${i} 第${n}次失败,重试: ${(err as Error).message?.slice(0, 90)}`),

@@ -33,6 +33,17 @@ describe('框架专属书封提示词（customPrompt）', () => {
     expect(prompt).toContain('no text')
     expect(negativePrompt).toContain('watermark')
   })
+  // ★ 自定义提示词的负向词**只禁文字，不禁人物**。禁人物是默认抽象外壳的保险；
+  // 运营写「文学名著的封面」这类画面很可能就要人物，带着人物禁令等于把提示词砍半
+  //（线上实测：同一段提示词直接调模型效果好、走后台差很多，这就是差异源）。
+  it('自定义提示词 → 负向词不禁人物；默认外壳 → 仍禁', () => {
+    const custom = buildBookCoverPrompt({ title: '活着' }, undefined, '文学名著封面，人物剪影')
+    expect(custom.negativePrompt).not.toContain('人物')
+    expect(custom.negativePrompt).not.toContain('portrait')
+    expect(custom.negativePrompt, '禁文字是功能性的，必须保留').toContain('watermark')
+    const preset = buildBookCoverPrompt({ title: '活着' }, '梵高')
+    expect(preset.negativePrompt).toContain('人物')
+  })
   it('customPrompt 为空/空白 → 回退外壳（零回归）', () => {
     const a = buildBookCoverPrompt({ title: '活着' }, '梵高')
     const b = buildBookCoverPrompt({ title: '活着' }, '梵高', '   ')

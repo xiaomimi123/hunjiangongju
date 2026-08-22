@@ -3,8 +3,17 @@
 
 export interface CoverPrompt { prompt: string; negativePrompt: string }
 
+// 默认外壳用的负向词：禁文字（功能性）+ 禁人物（默认抽象封面产出风景/静物最稳）
 const COVER_NEG =
   '人, 人物, 人脸, 人像, person, people, human, face, portrait, ' +
+  '文字, 字, 汉字, 字母, 单词, 书法, 标题, 作者名, 字幕, 水印, 条形码, ' +
+  'text, letters, words, title, author, typography, caption, watermark, barcode, signature'
+
+// 自定义提示词用的负向词：**只禁文字**。
+// 禁人物是给默认抽象外壳配的保险，不是功能性约束——运营写「文学名著的封面」
+// 这类画面很可能就要人物，带着人物禁令等于把他的提示词砍掉一半
+//（线上实测：同一段提示词直接调模型效果好、走后台差很多，这就是差异源之一）。
+const COVER_NEG_TEXT_ONLY =
   '文字, 字, 汉字, 字母, 单词, 书法, 标题, 作者名, 字幕, 水印, 条形码, ' +
   'text, letters, words, title, author, typography, caption, watermark, barcode, signature'
 
@@ -23,7 +32,7 @@ export function buildBookCoverPrompt(
   const custom = (customPrompt ?? '').trim()
   if (custom) {
     const prompt = [custom, '中央留出空白标题区, 3:4 portrait, no text'].join(', ')
-    return { prompt, negativePrompt: COVER_NEG }
+    return { prompt, negativePrompt: COVER_NEG_TEXT_ONLY }
   }
   const style = (styleHint ?? '厚涂油画文艺').trim()
   const prompt = [

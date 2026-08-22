@@ -299,6 +299,13 @@ export default function FrameworksPage() {
             </div>
             <label className="block">
               <span className="eyebrow">图片风格提示词</span>
+              <p className="mt-1 text-xs text-ink3">
+                这里只写**画风**（如「厚涂油画质感，浓郁色彩」），不要写完整画面。
+                每张正片配图实发的提示词 = 画风 + 画什么 + 竖屏禁文字尾巴；
+                「画什么」来自下面图片槽位的填写，槽位留空时由系统轮换场景方向（保证几张图不重样）。
+                把完整画面写在这里的话，系统拼上的场景会和你的画面互相打架——想逐张全权控制，
+                去图片槽位里把「画什么」和「画风」都填上。
+              </p>
               <div className="mt-1 flex gap-2">
                 {STYLE_PRESETS.map((p) => (
                   <button key={p.label} type="button" className="btn-ghost text-xs" onClick={() => setF({ imageStylePrompt: p.v })}>

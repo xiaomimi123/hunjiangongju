@@ -26,11 +26,11 @@ describe('框架专属书封提示词（customPrompt）', () => {
     expect(prompt, '外壳没被换掉').not.toContain('literary book cover background')
     expect(prompt).not.toContain('优雅抽象构图')
   })
-  // 功能性约束不归运营调：书名标题要叠在底图上，留白和禁文字丢了会糊成一团
-  it('功能性约束保留：中央留白 + 禁文字 + 负向提示词', () => {
+  // ★ 原样直发：正向提示词一个字不追加（用户拍板：留白等限制由管理员写进提示词）。
+  // 只保留负向词的禁文字兜底——它不与画面描述冲突，而书名标题要叠在封面上。
+  it('正向提示词原样直发，不追加任何约束', () => {
     const { prompt, negativePrompt } = buildBookCoverPrompt({ title: '活着' }, undefined, '赛博朋克霓虹')
-    expect(prompt).toContain('中央留出空白标题区')
-    expect(prompt).toContain('no text')
+    expect(prompt).toBe('赛博朋克霓虹')
     expect(negativePrompt).toContain('watermark')
   })
   // ★ 自定义提示词的负向词**只禁文字，不禁人物**。禁人物是默认抽象外壳的保险；

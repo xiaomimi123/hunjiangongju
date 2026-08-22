@@ -40,19 +40,6 @@ function fidelityTitle(r: DraftFidelityReport): string {
   return lines.join('\n')
 }
 
-const STYLE_PRESETS = [
-  { label: '厚涂油画', v: '厚涂油画质感,浓郁色彩,可见笔触,古典书卷氛围,无人物,静物/自然/动物' },
-  { label: '梵高风', v: '梵高后印象派风格,旋转笔触,厚重颜料肌理,鲜明蓝黄对比,星夜质感,无人物' },
-  { label: '治愈插画', v: '极简性冷淡治愈系艺术插画,动物自然静物,留白构图,无人物' },
-  // 达芬奇的代表作多是人物画,不加「无人物」——负向提示词也已不再硬禁人物
-  { label: '达芬奇', v: '达芬奇文艺复兴油画风格,晕涂法柔和过渡,明暗对照,大地色调,古典构图' },
-  // 开场那张人物特写头像用。两处必须写死,否则模型给的东西对不上:
-  //   1. 显式点名「人物特写」——否则画风提示词会把它带偏成风景
-  //   2. 显式写「男性」——实测只写「动漫头像/少年人物」时模型默认产出女性角色
-  { label: '日系动漫男头像', v: '日系动漫画风,男性少年面部特写,黑色短发,冷调夜色光影,细腻高光与阴影,单人半身,情绪感' },
-  { label: '日系动漫女头像', v: '日系动漫画风,女性少女面部特写,清透大眼,柔和高光,浅色调,单人半身' },
-]
-
 /**
  * 参考图反推画风。
  *
@@ -298,22 +285,6 @@ export default function FrameworksPage() {
               </label>
             </div>
             <label className="block">
-              <span className="eyebrow">图片风格提示词</span>
-              <p className="mt-1 text-xs text-ink3">
-                **槽位提示词优先**：图片槽位里填了提示词的，就按槽位的原样直发（只追加竖屏禁文字尾巴），
-                这里的画风不掺入。这里只对**没填提示词的槽位**兜底：画风 + 系统轮换的场景方向。
-              </p>
-              <div className="mt-1 flex gap-2">
-                {STYLE_PRESETS.map((p) => (
-                  <button key={p.label} type="button" className="btn-ghost text-xs" onClick={() => setF({ imageStylePrompt: p.v })}>
-                    {p.label}
-                  </button>
-                ))}
-                <StyleFromImage onDone={(v) => setF({ imageStylePrompt: v })} />
-              </div>
-              <textarea className="field mt-1 text-xs" rows={3} value={form.imageStylePrompt} onChange={(e) => setF({ imageStylePrompt: e.target.value })} placeholder="留空则用默认：写实摄影质感,柔和自然光,低饱和统一色调,浅景深,电影感构图" />
-            </label>
-            <label className="block">
               <span className="eyebrow">叠加模板（JSON）</span>
               <textarea className="field mt-1 font-mono text-xs" rows={4} value={form.overlayTemplate} onChange={(e) => setF({ overlayTemplate: e.target.value })} placeholder='{"title_card":"{{标题}} {{副标题}}","watermark":"{{账号}}"}' />
             </label>
@@ -415,15 +386,9 @@ export default function FrameworksPage() {
                       className="field flex-1 text-xs"
                       value={openCfg.prompt ?? ''}
                       onChange={(e) => writeOpen({ prompt: e.target.value })}
-                      placeholder="画什么（留空 = 人物特写）"
+                      placeholder="完整提示词（留空 = 人物特写）"
                     />
-                    <input
-                      className="field flex-1 text-xs"
-                      value={openCfg.style ?? ''}
-                      onChange={(e) => writeOpen({ style: e.target.value })}
-                      placeholder="画风（留空 = 全局画风）"
-                    />
-                    <StyleFromImage onDone={(v, ref) => writeOpen({ style: v, refImage: ref })} />
+                    <StyleFromImage onDone={(v, ref) => writeOpen({ prompt: v, refImage: ref })} />
                     {openCfg.refImage ? (
                       <span className="inline-flex items-center gap-1">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -436,9 +401,8 @@ export default function FrameworksPage() {
                   <span className="eyebrow mt-4 block">图片槽位（{count} 张正片配图）</span>
                   <p className="mt-1 text-xs text-ink3">
                     **提示词就是完整提示词**：填了就原样发给生图模型（只自动追加「竖屏、禁文字」），
-                    在模型控制台调好的提示词直接粘进来即可，效果一致。
-                    「画风」一栏可留空；两栏都填时按「画风 + 提示词」拼接（想拆分复用画风时用）。
-                    留空提示词的槽位由系统按全局画风 + 轮换场景方向兜底。
+                    在模型控制台调好的提示词直接粘进来即可，效果一致。画风直接写在提示词里。
+                    留空的槽位由系统按内置兜底画风 + 轮换场景方向随机出图。
                     人物类请显式写明性别（只写「动漫头像」时模型默认产出女性角色）。
                   </p>
                   <div className="mt-2 space-y-2">
@@ -462,15 +426,10 @@ export default function FrameworksPage() {
                                 className="field flex-1 text-xs"
                                 value={sl.prompt ?? ''}
                                 onChange={(e) => write(i, { prompt: e.target.value })}
-                                placeholder="画什么（留空则用内置场景池随机）"
+                                placeholder="完整提示词（留空则用内置场景池随机）"
                               />
-                              <input
-                                className="field flex-1 text-xs"
-                                value={sl.style ?? ''}
-                                onChange={(e) => write(i, { style: e.target.value })}
-                                placeholder="画风（留空 = 用上面的全局画风）"
-                              />
-                              <StyleFromImage onDone={(v, ref) => write(i, { style: v, refImage: ref })} />
+                              {/* 反推结果直接写进提示词（画风字段已从界面移除，画风写在提示词里） */}
+                              <StyleFromImage onDone={(v, ref) => write(i, { prompt: v, refImage: ref })} />
                               {sl.refImage ? (
                                 <span className="inline-flex items-center gap-1">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}

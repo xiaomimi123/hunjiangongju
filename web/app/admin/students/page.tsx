@@ -264,8 +264,19 @@ export default function StudentsPage() {
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs text-ink3">账号（学员填 11 位手机号；运营可用邮箱）</span>
-                <input className="field" type="text" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="13800000000" autoCapitalize="none" inputMode="tel" autoFocus />
+                <span className="mb-1 block text-xs text-ink3">{newRole === 'student' ? '手机号（11 位数字）' : '账号（手机号或邮箱）'}</span>
+                <input
+                  className="field" type="text" value={newEmail}
+                  onChange={(e) => {
+                    // 学员账号只收数字：非数字键入直接丢弃，长度锁 11 位——
+                    // 让"格式不对"在输入时就不可能发生，而不是提交时才报错
+                    const v = newRole === 'student' ? e.target.value.replace(/\D/g, '').slice(0, 11) : e.target.value
+                    setNewEmail(v)
+                  }}
+                  placeholder={newRole === 'student' ? '13800000000' : '13800000000 或 name@example.com'}
+                  autoCapitalize="none" inputMode={newRole === 'student' ? 'numeric' : 'email'}
+                  maxLength={newRole === 'student' ? 11 : undefined} autoFocus
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs text-ink3">昵称（可选）</span>

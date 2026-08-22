@@ -146,11 +146,10 @@ export async function generateImage(genTaskId: string): Promise<void> {
       await makeThumbSafely(abs)
       imageUrl = `/api/files/gen/${genTaskId}/${seg.seqNo}${ext}`
     } else {
-      // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在 buildFreeArtPrompt
-      // 内保底，再配 negative_prompt 强力压制。人物不再被硬禁——由画风提示词决定。
-      // 槽位配了 prompt 就用它当主体，否则回退场景池方向。
-      // 画风优先用槽位自己的 style（支持「开场卡通头像、后面达芬奇」这种同片多画风），
-      // 未配则沿用框架的 imageStylePrompt。
+      // 绝不能把文案当文字画进图里（否则与字幕层叠字、乱码）；禁文字约束在尾巴
+      // 内保底，再配 negative_prompt 强力压制。人物不再被硬禁——由提示词决定。
+      // 拼接规则见 composeArtPrompt：槽位提示词**原样直发**，全局画风只对没填
+      // 提示词的槽位兜底（老注释说"画风未配则沿用框架的"——那正是被修掉的污染）。
       const prompt = composeArtPrompt({ slotPrompt: slot?.prompt, slotStyle: slot?.style, globalStyle: stylePrompt, scene: scenes[i] })
       // 打印**最终**提示词：运营在控制台直接测的是裸提示词，走流水线会经过
       // 「画风 + 画什么 + 竖屏尾巴」的拼接——效果对不上时先看这行，别猜。

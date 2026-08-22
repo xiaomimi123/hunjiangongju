@@ -158,6 +158,8 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
     const pc: Record<string, unknown> = {}
     const lead = clampNum(pace.bookTitleLeadMs, 0, 3000)
     if (lead !== undefined) pc.bookTitleLeadMs = Math.round(lead)
+    const tail = clampNum(pace.bookTitleTailMs, 0, 2000)
+    if (tail !== undefined) pc.bookTitleTailMs = Math.round(tail)
     const rate = clampNum(pace.speechCharsPerSec, 2, 12)
     if (rate !== undefined) pc.speechCharsPerSec = rate
     const tempo = clampNum(pace.maxTempo, 1, 2)
@@ -169,6 +171,7 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
   const script = obj(r.script)
   if (script) {
     const sc: Record<string, unknown> = {}
+    if (typeof script.openingTitleOnly === 'boolean') sc.openingTitleOnly = script.openingTitleOnly
     if (typeof script.titleInOpening === 'boolean') sc.titleInOpening = script.titleInOpening
     const seg = clampNum(script.titleSegment, 1, 9)
     if (seg !== undefined) sc.titleSegment = Math.round(seg)

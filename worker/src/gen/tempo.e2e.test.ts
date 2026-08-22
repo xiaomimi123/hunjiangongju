@@ -10,7 +10,7 @@ import { spawnSync } from 'child_process'
 import { mkdtempSync, rmSync, copyFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
-import { compressTo, prependSilence } from './generateTts'
+import { compressTo, prependSilence, writeSilence, concatClips } from './generateTts'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -108,6 +108,36 @@ d('真音频验收 —— 配音变速压回槽位', () => {
     }
     expect(rms(0, 0.3), '开头不是静音，留白没加在前面').toBeLessThan(50)
     expect(rms(0.5, 0.3), '留白之后没有声音').toBeGreaterThan(1000)
+  })
+
+  // ★ 书名后的停顿：书名与正文分两次合成、中间夹静音拼接。
+  // 验的是拼出来的音轨结构：前段有声 → 中间 300ms 静音 → 后段有声。
+  // 只验总时长不够——静音拼在头尾时长也对，但节奏完全不是那回事。
+  it('书名与正文之间的停顿真的在中间', async () => {
+    const a = path.join(dir, 'ta.wav')
+    const gap = path.join(dir, 'tgap.wav')
+    const b = path.join(dir, 'tb.wav')
+    const out = path.join(dir, 'tjoin.wav')
+    // 书名 1 秒、正文 2 秒，中间 300ms 停顿
+    spawnSync(FFMPEG, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1:sample_rate=48000', '-ac', '1', '-y', a], { encoding: 'utf8' })
+    spawnSync(FFMPEG, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2:sample_rate=48000', '-ac', '1', '-y', b], { encoding: 'utf8' })
+    await writeSilence(gap, 300)
+    await concatClips([a, gap, b], out)
+
+    expect(Math.abs(durationMs(out) - 3300), `总长不对: ${durationMs(out)}`).toBeLessThan(60)
+    const rms = (from: number, dur: number): number => {
+      const r = spawnSync(FFMPEG,
+        ['-v', 'error', '-ss', String(from), '-t', String(dur), '-i', out,
+          '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '1', '-'],
+        { encoding: 'buffer', maxBuffer: 16 * 1024 * 1024 })
+      const buf = r.stdout as unknown as Buffer
+      let sum = 0
+      for (let i = 0; i + 1 < buf.length; i += 2) sum += buf.readInt16LE(i) ** 2
+      return Math.sqrt(sum / (buf.length / 2))
+    }
+    expect(rms(0.4, 0.4), '书名段没声音').toBeGreaterThan(1000)
+    expect(rms(1.05, 0.2), '书名后没有停顿（静音没插进中间）').toBeLessThan(50)
+    expect(rms(1.8, 0.4), '正文段没声音').toBeGreaterThan(1000)
   })
 
   // 只压不拉：配音比槽位短时该走补静音那条路，不该在这里被拉长

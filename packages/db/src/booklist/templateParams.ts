@@ -40,6 +40,16 @@ export interface TemplateParams {
   // 「开场白不得出现书名」「第二段以《书名》开头」这类要求每变一次都要改代码。
   // 现在做成结构化开关 + 自由规则文本；默认值 = 现行提示词的口径，老框架零回归。
   script?: {
+    /**
+     * 开场白**只念开场标题本身**（如「今天分享的是」六个字），不加任何其它话。
+     *
+     * 客户原工程的人声轨就是这么剪的：开场 1.8 秒只有这六个字，快闪期间静默，
+     * 书名单独念，正文再进。此前提示词要求"以标题开头 + 一句话点出问题"，
+     * 而那句话不受任何硬约束（配额是建议、重排跳过开场白、变速兜不满），
+     * AI 一写长就吃进快闪窗口——线上反馈的「停顿感没了」就是这么来的。
+     * 生成后有确定性兜底：开场段文本强制替换为标题原文（见 generateScript）。
+     */
+    openingTitleOnly: boolean
     /** 开场白里允许出现书名（false = 书名留到 titleSegment 段才报出，对齐快闪揭晓的节奏） */
     titleInOpening: boolean
     /** 书名在第几段开头报出（1 起数；仅 titleInOpening=false 时生效） */
@@ -55,6 +65,12 @@ export interface TemplateParams {
   pace?: {
     /** 正片第 1 段报书名前的留白（ms）。0 = 书名紧贴快闪出口 */
     bookTitleLeadMs: number
+    /**
+     * 书名念完之后、正文开口之前的停顿（ms）。
+     * 原工程书名是独立的一小段人声，念完停约 200~400ms 才进正文；
+     * 我们此前把书名和正文连成一次合成，中间只有个逗号——听感就是"赶"。
+     */
+    bookTitleTailMs: number
     /** 配音语速（字/秒），用来推字数预算。换音色后要重新标定（看 worker 日志里的逐段时长） */
     speechCharsPerSec: number
     /** 配音超槽位时保音高变速的上限。1 = 不许变速（超出就让画面变长） */
@@ -123,8 +139,8 @@ export const DEFAULT_PARAMS: TemplateParams = {
   flash: { perClipMs: 200, minClipMs: 120, bounceIn: true, titleFontFamily: 'flash-title' },
   transition: { type: 'dissolve', durationMs: 400 },
   body: { subtitleFontFamily: 'subtitle', subtitleColor: '#ffffff', subtitlePosY: 0.78, kenBurns: 'subtle' },
-  script: { titleInOpening: false, titleSegment: 2, chineseTitlesOnly: true, extraRules: '' },
-  pace: { bookTitleLeadMs: 400, speechCharsPerSec: 5.5, maxTempo: 1.25 },
+  script: { openingTitleOnly: true, titleInOpening: false, titleSegment: 2, chineseTitlesOnly: true, extraRules: '' },
+  pace: { bookTitleLeadMs: 400, bookTitleTailMs: 300, speechCharsPerSec: 5.5, maxTempo: 1.25 },
   audio: { bgmVolume: 0.69, bgmStartMs: 0, bgmFadeInMs: 0, bgmFadeOutMs: 0, sfx: { openGear: true, transitionDrop: true } },
   // 按客户样例草稿实测标定（今天分享的是/draft_content.json，720×960）。
   // 给默认值而不是留空：库里已有的框架是在这个字段存在之前导入的，留空它们会继续用
@@ -217,6 +233,7 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       const DS = D.script!
       const seg = num(sc.titleSegment, DS.titleSegment)
       return {
+        openingTitleOnly: bool(sc.openingTitleOnly, DS.openingTitleOnly),
         titleInOpening: bool(sc.titleInOpening, DS.titleInOpening),
         // 夹在 1~9：0/负数没有意义，超过段数时调用方按"最后一段"处理
         titleSegment: Math.min(9, Math.max(1, Math.round(seg))),
@@ -232,6 +249,7 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
       const tempo = num(pc.maxTempo, DP.maxTempo)
       return {
         bookTitleLeadMs: Math.max(0, num(pc.bookTitleLeadMs, DP.bookTitleLeadMs)),
+        bookTitleTailMs: Math.max(0, num(pc.bookTitleTailMs, DP.bookTitleTailMs)),
         // 语速夹在 2~12：离谱值宁可回默认，也不让字数预算被脏数据带跑
         speechCharsPerSec: rate >= 2 && rate <= 12 ? rate : DP.speechCharsPerSec,
         // 变速上限夹在 1~2：低于 1 会变成拉长（那是补静音的事），高于 2 是机关枪

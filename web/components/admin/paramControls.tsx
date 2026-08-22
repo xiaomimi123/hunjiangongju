@@ -189,8 +189,8 @@ export type TextParams = {
   flashTitleScale: number
   openTitleScale: number
 }
-export type PaceParams = { bookTitleLeadMs: number; speechCharsPerSec: number; maxTempo: number }
-export type ScriptParams = { titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string }
+export type PaceParams = { bookTitleLeadMs: number; bookTitleTailMs: number; speechCharsPerSec: number; maxTempo: number }
+export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string }
 
 function ColorRow(props: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (
@@ -249,6 +249,9 @@ export function PaceRows(props: {
       <NumRow label="书名前留白" value={props.pace.bookTitleLeadMs} disabled={props.disabled}
         min={0} max={3000} step={100} unit="ms" hint="快闪结束后停顿多久再报书名"
         onChange={(v) => set({ bookTitleLeadMs: v })} />
+      <NumRow label="书名后停顿" value={props.pace.bookTitleTailMs} disabled={props.disabled}
+        min={0} max={2000} step={100} unit="ms" hint="书名念完停多久再进正文（0 = 连着念）"
+        onChange={(v) => set({ bookTitleTailMs: v })} />
       <NumRow label="配音语速" value={props.pace.speechCharsPerSec} disabled={props.disabled}
         min={2} max={12} step={0.1} unit="字/秒" hint="换音色后要重新标定（看 worker 日志）"
         onChange={(v) => set({ speechCharsPerSec: v })} />
@@ -267,6 +270,12 @@ export function ScriptRows(props: {
   const s = props.script
   return (
     <>
+      <label className="flex items-center gap-3 py-1">
+        <span className="w-40 shrink-0 text-xs text-ink3">开场白只念标题</span>
+        <input type="checkbox" checked={s.openingTitleOnly} disabled={props.disabled}
+          onChange={(e) => set({ openingTitleOnly: e.target.checked })} />
+        <span className="text-xs text-ink3">开场只念「今天分享的是」这几个字，不加其它话（原工程即如此）</span>
+      </label>
       <label className="flex items-center gap-3 py-1">
         <span className="w-40 shrink-0 text-xs text-ink3">书名什么时候报出</span>
         <select className="field w-56 text-sm" disabled={props.disabled}

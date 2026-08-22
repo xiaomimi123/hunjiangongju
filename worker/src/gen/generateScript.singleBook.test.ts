@@ -70,6 +70,20 @@ describe('buildSingleBookPrompt', () => {
     expect(p).not.toContain('这个书名开头')
   })
 
+  // ★ 开场白只念标题：原工程的开场人声只有「今天分享的是」几个字，
+  // 快闪的静默是节奏的一部分。带钩子句的开场白不受硬约束，AI 一写长
+  // 就吃进快闪窗口——线上「停顿感没了」的直接成因。
+  it('policy.openingTitleOnly=true：第一段只许原样输出标题', () => {
+    const p = buildSingleBookPrompt({
+      book, framework, openTitleText: '今天分享的是',
+      policy: { openingTitleOnly: true, titleInOpening: false, titleSegment: 2, extraRules: '' },
+    })
+    expect(p).toContain('第一段只有「今天分享的是」这几个字')
+    expect(p).toContain('原样输出，不得增删任何内容')
+    expect(p).not.toContain('一句话点出')
+    expect(p).toContain('第 2 段必须以「《被讨厌的勇气》」这个书名开头')
+  })
+
   it('policy.titleSegment=3：书名改在第 3 段开头报出', () => {
     const p = buildSingleBookPrompt({
       book, framework, openTitleText: '今天分享的是',

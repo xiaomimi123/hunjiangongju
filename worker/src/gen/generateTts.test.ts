@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { readVoiceId, parseBeats, readVoice } from './generateTts'
+import { readVoiceId, parseBeats, readVoice, splitTitleBeat } from './generateTts'
 
 describe('parseBeats（逐段配音的朗读文本来源）', () => {
   it('正常节拍 → 按序取出 zh，并保留 en', () => {
@@ -69,5 +69,26 @@ describe('readVoice', () => {
   it('格式不合法（含空格/过短）仍拒绝', () => {
     expect(readVoice({ voice: '乱 填' })).toBeUndefined()
     expect(readVoice({ voice: 'ab' })).toBeUndefined()
+  })
+})
+
+
+describe('splitTitleBeat —— 书名独立成一次合成', () => {
+  // 原工程的人声轨里书名是独立的一小段：念完停约 300ms 才进正文。
+  // 整段用逗号连成一次合成的话，书名与正文之间只有逗号级停顿，听感是"赶"。
+  it('首拍恰好是《书名》→ 拆成书名 + 正文', () => {
+    expect(splitTitleBeat([{ zh: '《简爱》' }, { zh: '如果你总困在过往' }, { zh: '这本书会给你出口' }]))
+      .toEqual({ title: '《简爱》', rest: '如果你总困在过往，这本书会给你出口' })
+  })
+  it('首拍带尾随标点也认（《简爱》，）', () => {
+    expect(splitTitleBeat([{ zh: '《简爱》，' }, { zh: '正文' }])).toEqual({ title: '《简爱》', rest: '正文' })
+  })
+  // AI 没按格式写时不硬拆——拆错（比如把半句话当书名）比不拆糟
+  it('首拍不是纯书名（书名后还跟着字）→ null，整段一次合成', () => {
+    expect(splitTitleBeat([{ zh: '《简爱》讲了一个故事' }, { zh: '正文' }])).toBeNull()
+    expect(splitTitleBeat([{ zh: '如果你困在过往' }, { zh: '正文' }])).toBeNull()
+  })
+  it('只有一拍（没有正文可接）→ null', () => {
+    expect(splitTitleBeat([{ zh: '《简爱》' }])).toBeNull()
   })
 })

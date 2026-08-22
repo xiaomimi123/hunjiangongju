@@ -360,6 +360,8 @@ export function buildImitatePrompt(args: {
  * 指令只会增加模型出错面）。调性由 frameworkText 决定，不在此写死风格词。
  */
 export interface ScriptPolicy {
+  /** 开场白只念开场标题本身，不加任何其它话（见 templateParams.script 的注释） */
+  openingTitleOnly?: boolean
   titleInOpening: boolean
   titleSegment: number
   extraRules: string
@@ -384,6 +386,8 @@ export function buildSingleBookPrompt(args: {
   // 文案口径可由框架配置（剪辑工作台的「文案口径」分区）。
   // 缺省 = 现行行为：开场白不含书名、书名在第二段开头报出（对齐快闪揭晓的节奏）。
   const titleInOpening = policy?.titleInOpening ?? false
+  // 直接调用（测试/旧代码）缺省保持旧行为；生产走 parseTemplateParams，默认 true
+  const openingTitleOnly = policy?.openingTitleOnly ?? false
   const titleSeg = Math.min(policy?.titleSegment ?? 2, segCount)
   const extraRules = (policy?.extraRules ?? '').trim()
 
@@ -394,10 +398,16 @@ export function buildSingleBookPrompt(args: {
     ...(openTitle
       ? titleInOpening
         ? [`第一段是开场白：以「${openTitle}《${book.title}》」开头，一句话点出这条视频要解决的问题。`]
-        : [
-            `第一段是开场白：以「${openTitle}」开头，用一句话点出这条视频要解决的问题，**整段不得出现书名**。`,
-            `第 ${titleSeg} 段必须以「《${book.title}》」这个书名开头，报出书名后再展开。`,
-          ]
+        : openingTitleOnly
+          ? [
+              // 原工程的开场人声只有标题这几个字——快闪的静默就是节奏的一部分。
+              `第一段只有「${openTitle}」这几个字，**原样输出，不得增删任何内容**。`,
+              `第 ${titleSeg} 段必须以「《${book.title}》」这个书名开头，报出书名后再展开。`,
+            ]
+          : [
+              `第一段是开场白：以「${openTitle}」开头，用一句话点出这条视频要解决的问题，**整段不得出现书名**。`,
+              `第 ${titleSeg} 段必须以「《${book.title}》」这个书名开头，报出书名后再展开。`,
+            ]
       : []),
     `分成 ${segCount} 段，每段单独一行，段与段之间用换行分隔。`,
     // 核心约束：模型写书评时天然爱旁征博引，不明说必犯。
@@ -648,6 +658,21 @@ export async function generateScript(genTaskId: string): Promise<void> {
       console.warn(`[gen] generate-script ${genTaskId}: 各段字数偏离草稿槽位，按比例重排 ${cnt(lines.slice(1))} → ${cnt(body)}（目标 ${slotChars.slice(1).join('/')}）`)
       lines = [lines[0], ...body]
     }
+  }
+
+  // ★ 开场段强制替换为标题原文（确定性兜底，不信任 AI 遵守）。
+  //
+  // 「第一段只有这几个字」对 AI 只是建议：配额是建议、重排刻意跳过开场白、
+  // 变速上限 1.25× 也兜不住一句长开场白。开场一超长就吃进快闪窗口，
+  // 「今天分享的是……（静默）……书名」的节奏直接没了——这是线上实录的事故，
+  // 不是假设。manual 模式不动（用户自己写的文案自己负责）。
+  if (
+    openTitleText && scriptMode !== 'manual' &&
+    (tp.script?.openingTitleOnly ?? true) && lines.length >= 2 &&
+    lines[0] !== openTitleText
+  ) {
+    console.warn(`[gen] generate-script ${genTaskId}: 开场段替换为标题原文（AI 写了 ${Array.from(lines[0]).length} 字：「${lines[0].slice(0, 20)}…」）`)
+    lines = [openTitleText, ...lines.slice(1)]
   }
 
   // 单本模式：所有正文段统一挂主题书，不走位置均分、也不走书序号标记。

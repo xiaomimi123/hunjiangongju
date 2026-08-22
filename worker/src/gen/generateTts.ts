@@ -90,7 +90,14 @@ export async function prependSilence(audioAbs: string, leadMs: number): Promise<
   await fs.rename(tmp, audioAbs)
 }
 
-async function concatClips(clipPaths: string[], outAbs: string): Promise<void> {
+/** 生成一段指定时长的静音 wav（书名后的停顿用） */
+export async function writeSilence(outAbs: string, ms: number): Promise<void> {
+  const r = await runCmd('ffmpeg',
+    ['-y', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono', '-t', (ms / 1000).toFixed(3), '-ar', '48000', '-ac', '1', outAbs])
+  if (!r.ok) throw new Error(`生成静音失败: ${r.out.slice(-300)}`)
+}
+
+export async function concatClips(clipPaths: string[], outAbs: string): Promise<void> {
   const inputs = clipPaths.flatMap((p) => ['-i', p])
   const filter = clipPaths.map((_p, i) => `[${i}:a]`).join('') + `concat=n=${clipPaths.length}:v=0:a=1[a]`
   const r = await runCmd('ffmpeg',
@@ -99,6 +106,23 @@ async function concatClips(clipPaths: string[], outAbs: string): Promise<void> {
 }
 
 type Beat = { zh: string; en?: string }
+
+/**
+ * 纯函数：把报书名的那一段拆成「书名 + 正文」两次合成。
+ *
+ * 原工程的人声轨里书名是**独立的一小段**：念完停约 300ms 才进正文。
+ * 我们把整段 beats 用逗号连成一次合成的话，书名和正文之间只有逗号级的停顿，
+ * 听感就是"赶"——用户对照原片点名的「停顿感」问题之一。
+ *
+ * 只在首拍**恰好是**《书名》时拆（允许尾随一个标点）；
+ * 不是的话返回 null，维持整段一次合成（AI 没按格式写时不硬拆，拆错比不拆糟）。
+ */
+export function splitTitleBeat(beats: Beat[]): { title: string; rest: string } | null {
+  if (beats.length < 2) return null
+  const first = beats[0].zh.replace(/[，。！？、：；]$/, '')
+  if (!/^《.+》$/.test(first)) return null
+  return { title: first, rest: beats.slice(1).map((b) => b.zh).join('，') }
+}
 // 从 captionBeats（Json）取出可朗读的短句；脏数据/空数组时回退整段 scriptText，
 // 保证每段至少有一次配音（否则该段无音频，后面累加的段起止会整体错位）。
 export function parseBeats(captionBeats: unknown, fallbackText: string): Beat[] {
@@ -171,6 +195,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
   // 「占多长」与「能说多久」是两件事：快闪期间无旁白、书名前留 400ms，
   // 这些留白是节奏的一部分，不能拿来塞话（见 speechCapacities）。
   const bookLeadMs = tp.pace?.bookTitleLeadMs ?? 400
+  const titleTailMs = tp.pace?.bookTitleTailMs ?? 300
   const maxTempo = tp.pace?.maxTempo ?? DEFAULT_MAX_TEMPO
   const speechCap = speechCapacities(timelineMs, tp.open.durationMs, bookLeadMs)
   // 草稿没给正片槽位时回退老行为：只有第 0 段按开场+快闪窗口对齐
@@ -184,10 +209,8 @@ export async function generateTts(genTaskId: string): Promise<void> {
 
   for (const [i, seg] of segments.entries()) {
     const beats = parseBeats(seg.captionBeats, seg.scriptText)
-    // 整段一次配音（节拍拼回整段文本朗读，保证语流自然、且只占一次限流额度）。
-    const segText = beats.map((b) => b.zh).join('，')
-    const audio = await withRetry(
-      () => ttsSynthesize({ text: segText, ...(voiceId ? { voiceId } : {}), ...(voice ? { voice } : {}) }),
+    const synth = (text: string) => withRetry(
+      () => ttsSynthesize({ text, ...(voiceId ? { voiceId } : {}), ...(voice ? { voice } : {}) }),
       {
         attempts: 4,
         delayMs: 4000, // 429 限流窗口较长，退避给足
@@ -196,7 +219,22 @@ export async function generateTts(genTaskId: string): Promise<void> {
       },
     )
     const clipPath = path.join(clipsDir, `c${i}.wav`)
-    await fs.writeFile(clipPath, audio)
+    // 报书名的段：书名与正文分两次合成，中间插 bookTitleTailMs 的停顿——
+    // 对齐原工程「书名独立一小段人声、念完停一下再进正文」的剪法。
+    const split = i === 1 && titleTailMs > 0 ? splitTitleBeat(beats) : null
+    if (split) {
+      const tA = path.join(clipsDir, `c${i}_title.wav`)
+      const tGap = path.join(clipsDir, `c${i}_gap.wav`)
+      const tB = path.join(clipsDir, `c${i}_rest.wav`)
+      await fs.writeFile(tA, await synth(split.title))
+      await writeSilence(tGap, titleTailMs)
+      await fs.writeFile(tB, await synth(split.rest))
+      await concatClips([tA, tGap, tB], clipPath)
+      console.log(`[gen] generate-tts ${genTaskId}: 第 ${i} 段书名独立合成，念完停 ${titleTailMs}ms 再进正文`)
+    } else {
+      // 整段一次配音（节拍拼回整段文本朗读，保证语流自然、且只占一次限流额度）。
+      await fs.writeFile(clipPath, await synth(beats.map((b) => b.zh).join('，')))
+    }
     const speechMs = (await probeDurationMs(clipPath)) || 2000 // 探测失败给个兜底时长
     // 第 0 段补静音到草稿的开场+快闪长度（只补不截：旁白比草稿还长时按旁白走，
     // 截断会把话说到一半切掉）

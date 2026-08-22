@@ -84,6 +84,10 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
     expect(await bookTitles(task.id)).toEqual([null, '甲书', '甲书', '甲书', '乙书', '丙书'])
   })
 
+  // ★ 开场段一律被替换为标题原文（script.openingTitleOnly 默认开）。
+  // 原工程的开场人声只有「今天分享的是」几个字，快闪静默是节奏的一部分；
+  // AI 写的开场白（如「今天分享的是三本书」）会被确定性兜底换掉。
+  // 下面四条的开场行断言都按这个新行为写；标记剥离的验证主体在**其余行**上。
   it('落库文案不带书序号前缀', async () => {
     const fw = await makeFramework()
     const task = await makeTask(fw.id)
@@ -92,7 +96,7 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
     await generateScript(task.id)
 
     const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
-    expect(segs.map((s) => s.scriptText)).toEqual(['今天分享的是三本书', '甲书一句', '乙书一句'])
+    expect(segs.map((s) => s.scriptText)).toEqual(['今天分享的是', '甲书一句', '乙书一句'])
   })
 
   it('LLM 不按格式返回 → 回退位置均分，任务不失败', async () => {
@@ -134,7 +138,7 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
 
     const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
     expect(segs.map((s) => s.scriptText)).toEqual([
-      '开场白文案',
+      '今天分享的是', // 开场段被强制替换为标题原文（openingTitleOnly）
       '甲书一句',
       '甲书二句缺标记',
       '乙书一句',
@@ -156,8 +160,40 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
     await generateScript(task.id)
 
     const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
-    expect(segs.map((s) => s.scriptText)).toEqual(['开场白文案', '甲书一句', '乙书漏打标记的一句', '丙书一句'])
+    expect(segs.map((s) => s.scriptText)).toEqual(['今天分享的是', '甲书一句', '乙书漏打标记的一句', '丙书一句'])
     expect(await bookTitles(task.id)).toEqual(['甲书', '甲书', '乙书', '丙书'])
+  })
+
+  // ★ 本次「停顿感」修复的核心守卫：AI 给开场白加了钩子句 → 落库时强制换回标题原文。
+  // 提示词只是建议（配额是建议、重排跳过开场白、变速兜不满），AI 一写长开场白
+  // 就吃进快闪窗口，「今天分享的是……（静默）……书名」的节奏直接没了。
+  it('AI 写了带钩子的开场白 → 落库时被替换为标题原文', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id)
+    mockLlmComplete.mockResolvedValue('0|今天分享的是一本能救你出内耗的书\n1|甲书一句\n2|乙书一句\n3|丙书一句')
+
+    await generateScript(task.id)
+
+    const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
+    expect(segs[0].scriptText, 'AI 的钩子句没被换掉，会吃进快闪窗口').toBe('今天分享的是')
+    expect(segs.length, '替换不能改段数').toBe(4)
+  })
+
+  it('框架关掉 openingTitleOnly → AI 的开场白原样保留', async () => {
+    const fw = await prisma.copyFramework.create({
+      data: {
+        frameworkText: '框架',
+        overlayTemplate: { __templateParams: { mode: 'flash', open: { titleText: '今天分享的是' }, script: { openingTitleOnly: false } } } as never,
+      },
+    })
+    frameworkIds.push(fw.id)
+    const task = await makeTask(fw.id)
+    mockLlmComplete.mockResolvedValue('0|今天分享的是三本救你出内耗的书\n1|甲书一句\n2|乙书一句\n3|丙书一句')
+
+    await generateScript(task.id)
+
+    const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
+    expect(segs[0].scriptText).toBe('今天分享的是三本救你出内耗的书')
   })
 
   it('imitate 模式：LLM 返回带「数字|」形状文本 → 原样保留，不误剥（非我们要求过标记的路径）', async () => {
@@ -170,12 +206,14 @@ describe('generateScript：《书名》头跟随书序号标记', () => {
       },
     })
     taskIds.push(task.id)
-    mockLlmComplete.mockResolvedValue('1|甲书一句\n2|乙书一句')
+    // 三行：开场段会被替换为标题原文（openingTitleOnly），
+    // 「不误剥标记」的验证主体放在其余两行上——它们必须原样带着「N|」落库。
+    mockLlmComplete.mockResolvedValue('开场一句\n1|甲书一句\n2|乙书一句')
 
     await generateScript(task.id)
 
     const segs = await prisma.generatedSegment.findMany({ where: { generationTaskId: task.id }, orderBy: { seqNo: 'asc' } })
-    expect(segs.map((s) => s.scriptText)).toEqual(['1|甲书一句', '2|乙书一句'])
+    expect(segs.map((s) => s.scriptText)).toEqual(['今天分享的是', '1|甲书一句', '2|乙书一句'])
   })
 })
 

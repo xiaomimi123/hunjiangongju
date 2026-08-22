@@ -139,6 +139,10 @@ describe('sanitizeParamsOverride —— 白名单', () => {
     it('开关必须是布尔，字符串 "true" 不收', () => {
       expect(sanitizeParamsOverride({ script: { titleInOpening: 'true' } })).toBeNull()
     })
+    it('每拍字幕字数取整并夹在 6~24', () => {
+      expect(sanitizeParamsOverride({ script: { captionMaxChars: 3 } })).toEqual({ script: { captionMaxChars: 6 } })
+      expect(sanitizeParamsOverride({ script: { captionMaxChars: 99 } })).toEqual({ script: { captionMaxChars: 24 } })
+    })
   })
 
   it('颜色必须是 #RRGGBB，其它写法丢弃', () => {

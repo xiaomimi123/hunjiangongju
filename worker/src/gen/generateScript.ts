@@ -715,7 +715,7 @@ export async function generateScript(genTaskId: string): Promise<void> {
   }[] = []
   for (let i = 0; i < assignedFinal.length; i++) {
     const { scriptText, bookTitle, bookAuthor } = assignedFinal[i]
-    const phrases = splitCaptionPhrases(scriptText)
+    const phrases = splitCaptionPhrases(scriptText, { max: tp.script?.captionMaxChars ?? 12 })
     const beats: { zh: string; en: string }[] = []
     for (const zh of phrases) beats.push({ zh, en: await translateLine(zh) })
     segments.push({

@@ -178,6 +178,8 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
     if (typeof script.chineseTitlesOnly === 'boolean') sc.chineseTitlesOnly = script.chineseTitlesOnly
     // 附加规则封顶 2000 字（parseTemplateParams 同样会截断，这里先拦一道给出确定行为）
     if (typeof script.extraRules === 'string') sc.extraRules = script.extraRules.slice(0, 2000)
+    const cmax = clampNum(script.captionMaxChars, 6, 24)
+    if (cmax !== undefined) sc.captionMaxChars = Math.round(cmax)
     if (Object.keys(sc).length) out.script = sc
   }
 

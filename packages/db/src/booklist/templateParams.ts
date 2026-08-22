@@ -58,6 +58,12 @@ export interface TemplateParams {
     chineseTitlesOnly: boolean
     /** 附加规则：逐行写给 AI 的额外要求（如"结尾必须反问""不要出现数字"），原样进提示词 */
     extraRules: string
+    /**
+     * 每拍字幕的最多字数。超过就在标点处再切、无标点则硬切。
+     * 从 16 收到 12：线上反馈整行字幕太满（"一次讲述那么多内容"），
+     * 12 字在 720 宽画布 54px 字号下约占画面 90%，再长就顶边了。
+     */
+    captionMaxChars: number
   }
   // pace：节奏留白与语速。原先是代码常量（draftCharBudget.ts / generateTts.ts），
   // 「开场白说完停顿」「书名前留白 0.4 秒」「换音色后语速标定」这些反馈都落在它们身上。
@@ -139,7 +145,7 @@ export const DEFAULT_PARAMS: TemplateParams = {
   flash: { perClipMs: 200, minClipMs: 120, bounceIn: true, titleFontFamily: 'flash-title' },
   transition: { type: 'dissolve', durationMs: 400 },
   body: { subtitleFontFamily: 'subtitle', subtitleColor: '#ffffff', subtitlePosY: 0.78, kenBurns: 'subtle' },
-  script: { openingTitleOnly: true, titleInOpening: false, titleSegment: 2, chineseTitlesOnly: true, extraRules: '' },
+  script: { openingTitleOnly: true, titleInOpening: false, titleSegment: 2, chineseTitlesOnly: true, extraRules: '', captionMaxChars: 12 },
   pace: { bookTitleLeadMs: 400, bookTitleTailMs: 300, speechCharsPerSec: 5.5, maxTempo: 1.25 },
   audio: { bgmVolume: 0.69, bgmStartMs: 0, bgmFadeInMs: 0, bgmFadeOutMs: 0, sfx: { openGear: true, transitionDrop: true } },
   // 按客户样例草稿实测标定（今天分享的是/draft_content.json，720×960）。
@@ -240,6 +246,8 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
         chineseTitlesOnly: bool(sc.chineseTitlesOnly, DS.chineseTitlesOnly),
         // 规则文本封顶 2000 字：提示词不是垃圾场，写超说明该去改框架文案本体
         extraRules: str(sc.extraRules, DS.extraRules).slice(0, 2000),
+        // 夹在 6~24：低于 6 会把词切碎，高于 24 一行铺满画面
+        captionMaxChars: Math.min(24, Math.max(6, Math.round(num(sc.captionMaxChars, DS.captionMaxChars)))),
       }
     })(),
     pace: (() => {

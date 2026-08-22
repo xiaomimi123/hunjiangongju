@@ -248,11 +248,15 @@ export async function generateTts(genTaskId: string): Promise<void> {
     let durMs = speechMs
     const slotMs = slotFor(i)
     const capMs = capFor(i)
+    // 实际人声的窗口（字幕要跟它走，不是跟原始合成时长走）
+    let voiceMs = speechMs
+    let voiceStartOffsetMs = 0
 
     // ① 话太长 → 保音高压到「能说话的时长」（不是占位时长，否则会把留白吃掉）
     if (capMs && speechMs > capMs * PACE_TOLERANCE) {
       const used = await compressTo(clipPath, speechMs, capMs, maxTempo)
       durMs = (await probeDurationMs(clipPath)) || speechMs / used
+      voiceMs = durMs
       const over = Math.round((durMs / capMs - 1) * 100)
       const msg = `[gen] generate-tts ${genTaskId}: 第 ${i} 段配音 ${Math.round(speechMs)}ms 超可说话时长 ${capMs}ms，变速 ${used.toFixed(2)}× → ${Math.round(durMs)}ms`
       if (over > 1) console.warn(`${msg}（仍超 +${over}%，已到变速上限 ${maxTempo}×）`)
@@ -263,6 +267,7 @@ export async function generateTts(genTaskId: string): Promise<void> {
     if (i === 1 && timelineMs.length > 0 && bookLeadMs > 0) {
       await prependSilence(clipPath, bookLeadMs)
       durMs = (await probeDurationMs(clipPath)) || durMs + bookLeadMs
+      voiceStartOffsetMs = bookLeadMs
     }
 
     // ③ 短于槽位 → 段尾补静音，精确落回草稿的切点
@@ -278,9 +283,14 @@ export async function generateTts(genTaskId: string): Promise<void> {
 
     const segStart = Math.round(cursorMs)
     const segEnd = Math.round(cursorMs + durMs)
-    // 段内短句：按**旁白**的长度分布，不是按补过静音的窗口——
-    // 否则第 0 段的字幕会被摊到静音段上（flash 模板不出第 0 段字幕，但 classic 会）。
-    const timedBeats = timeCaptionBeats(beats.map((b) => ({ zh: b.zh, en: b.en })), segStart, Math.round(cursorMs + speechMs))
+    // 段内短句：按**实际人声**的窗口分布——变速后的时长、加上前置留白的偏移。
+    // 两个都踩过坑：
+    // - 原先用变速前的 speechMs：第 2 段 10272ms 被压到 8221ms，字幕却按 10272ms 排，
+    //   尾部两秒越过段边界压到下一段字幕头上——线上实测两行字幕叠在画面上。
+    // - 留白把人声整体后移 400ms，字幕不跟着移就会抢先出现在静音里。
+    // 也不能按补过静音的窗口分布——否则第 0 段的字幕会被摊到快闪的静音段上。
+    const voiceStart = segStart + voiceStartOffsetMs
+    const timedBeats = timeCaptionBeats(beats.map((b) => ({ zh: b.zh, en: b.en })), voiceStart, Math.round(voiceStart + voiceMs))
     await prisma.generatedSegment.update({ where: { id: seg.id }, data: { captionBeats: timedBeats } })
     bodyTimings.push({ seqNo: seg.seqNo, startMs: segStart, endMs: segEnd })
     cursorMs += durMs

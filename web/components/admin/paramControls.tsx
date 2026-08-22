@@ -190,7 +190,7 @@ export type TextParams = {
   openTitleScale: number
 }
 export type PaceParams = { bookTitleLeadMs: number; bookTitleTailMs: number; speechCharsPerSec: number; maxTempo: number }
-export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string }
+export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string; captionMaxChars: number }
 
 function ColorRow(props: { label: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (
@@ -295,6 +295,9 @@ export function ScriptRows(props: {
           onChange={(e) => set({ chineseTitlesOnly: e.target.checked })} />
         <span className="text-xs text-ink3">关掉则允许外文书出现在快闪卡</span>
       </label>
+      <NumRow label="每拍字幕最多字数" value={s.captionMaxChars} disabled={props.disabled}
+        min={6} max={24} step={1} hint="超过就再切一拍；嫌一行字太满就调小"
+        onChange={(v) => set({ captionMaxChars: v })} />
       <label className="block py-1">
         <span className="text-xs text-ink3">附加规则（逐行写给 AI 的额外要求，原样进提示词）</span>
         <textarea className="field mt-1 w-full text-xs" rows={4} disabled={props.disabled}

@@ -31,7 +31,7 @@ export const GET = handler(async (req) => {
     role === 'student' ? prisma.generationTask.count({ where: { status: 'EXPORTED' } }) : Promise.resolve(0),
     prisma.user.findMany({
       where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize,
-      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true, genLimit: true, genUsed: true, genUsedDate: true },
+      select: { id: true, email: true, nickname: true, disabled: true, createdAt: true, credits: true },
     }),
   ])
 
@@ -48,13 +48,9 @@ export const GET = handler(async (req) => {
     byUser.set(t.createdBy, e)
   }
 
-  // genUsed 对外语义是「今日已用」：跨天后计数还留着旧值，但日期不是今天就按 0 报
-  //（真正的归零发生在学员下一次生成时，见 /api/generate 的跨天分支）
-  const today = new Date(new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10))
   const students = rows.map((u) => ({
     id: u.id, email: u.email, nickname: u.nickname, disabled: u.disabled, createdAt: u.createdAt,
-    genLimit: u.genLimit,
-    genUsed: u.genUsedDate?.getTime() === today.getTime() ? u.genUsed : 0,
+    credits: u.credits,
     taskCount: byUser.get(u.id)?.total ?? 0, doneCount: byUser.get(u.id)?.done ?? 0,
   }))
   return NextResponse.json({ stats: { totalStudents, todayNew, totalTasks, totalExported }, students, total })

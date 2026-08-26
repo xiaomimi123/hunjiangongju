@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { api } from '@/lib/fetcher'
+import { api, ApiError } from '@/lib/fetcher'
 import BottomSheet from '@/components/BottomSheet'
 
 type Framework = {
@@ -28,9 +28,15 @@ export default function FrameworkLibraryPage() {
   const [voice, setVoice] = useState('')
   const [sheetErr, setSheetErr] = useState('')
   const [creating, setCreating] = useState(false)
+  // 积分：余额随页面展示；用完（NO_CREDITS）弹导师收款二维码引导充值
+  const [wallet, setWallet] = useState<{ credits: number; qrUrl: string } | null>(null)
+  const [showRecharge, setShowRecharge] = useState(false)
 
+  const loadWallet = () =>
+    api<{ credits: number; qrUrl: string }>('/api/credits').then(setWallet).catch(() => {})
   useEffect(() => {
     api<Framework[]>('/api/library/frameworks').then(setFrameworks).catch((e) => setErr((e as Error).message))
+    loadWallet()
   }, [])
 
   function open(f: Framework) {
@@ -56,13 +62,32 @@ export default function FrameworkLibraryPage() {
         body: { frameworkId: picked.id, subject: subject.trim(), variables },
       })
       router.push(`/works/${task.id}`)
-    } catch (e) { setSheetErr((e as Error).message); setCreating(false) }
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'NO_CREDITS') {
+        setPicked(null)
+        setShowRecharge(true)
+        loadWallet() // 把余额刷成 0，同时兜底补拉二维码
+      } else {
+        setSheetErr((e as Error).message)
+      }
+      setCreating(false)
+    }
   }
 
   return (
     <div className="space-y-5">
-      <h1 className="font-display text-2xl font-bold tracking-tight">框架库</h1>
-      <p className="text-sm text-ink3">选一个爆款框架，填个选题，自动出成片</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold tracking-tight">框架库</h1>
+          <p className="text-sm text-ink3">选一个爆款框架，填个选题，自动出成片</p>
+        </div>
+        {wallet && (
+          <button onClick={() => setShowRecharge(true)} className="card shrink-0 px-3.5 py-2 text-right">
+            <p className="text-xs text-ink3">剩余积分</p>
+            <p className="num text-lg font-bold">{wallet.credits}</p>
+          </button>
+        )}
+      </div>
       {err && <p className="pill pill-bad">{err}</p>}
 
       <div className="space-y-2.5">
@@ -119,6 +144,28 @@ export default function FrameworkLibraryPage() {
           </button>
         </div>
       </BottomSheet>
+
+      {showRecharge && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setShowRecharge(false)}>
+          <div className="card w-full max-w-sm space-y-4 p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="font-display text-lg font-bold">
+                {wallet && wallet.credits > 0 ? '积分充值' : '积分已用完'}
+              </h3>
+              <p className="mt-1 text-sm text-ink3">
+                1 条视频消耗 1 积分。扫码添加导师微信充值，到账后即可继续生成
+              </p>
+            </div>
+            {wallet?.qrUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={wallet.qrUrl} alt="导师微信二维码" className="mx-auto w-56 max-w-full rounded-xl" />
+            ) : (
+              <p className="rounded-xl bg-surface2 px-4 py-8 text-sm text-ink3">请联系你的导师充值</p>
+            )}
+            <button onClick={() => setShowRecharge(false)} className="btn-ghost w-full">知道了</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

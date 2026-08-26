@@ -141,7 +141,35 @@ describe('[id] route — 运营账号防锁死', () => {
   })
 })
 
+describe('[id] route — 积分充值', () => {
+  it('充值 10 分 → 余额 +10，且记一条充值流水（含操作人）', async () => {
+    const s = await makeUser('student')
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op-recharge', role: 'operator' })
+    const res = await PATCH(patchReq({ action: 'recharge', amount: 10 }), { params: { id: s.id } })
+    expect(res.status).toBe(200)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: s.id } })).credits).toBe(40)
+    const logs = await prisma.creditLog.findMany({ where: { userId: s.id } })
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({ delta: 10, reason: 'recharge', operatorId: 'op-recharge' })
+  })
+
+  it('金额非法（0 / 负数 / 非整数）→ 400，不动余额不记流水', async () => {
+    const s = await makeUser('student')
+    for (const amount of [0, -5, 1.5, '10', undefined]) {
+      requireRoleMock.mockResolvedValueOnce({ userId: 'op-recharge', role: 'operator' })
+      const res = await PATCH(patchReq({ action: 'recharge', amount }), { params: { id: s.id } })
+      expect(res.status, `amount=${String(amount)} 应拒绝`).toBe(400)
+    }
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: s.id } })).credits).toBe(30)
+    expect(await prisma.creditLog.count({ where: { userId: s.id } })).toBe(0)
+  })
+})
+
 afterAll(async () => {
-  for (const email of cleanupEmails) await prisma.user.deleteMany({ where: { email } })
+  for (const email of cleanupEmails) {
+    const users = await prisma.user.findMany({ where: { email }, select: { id: true } })
+    if (users.length) await prisma.creditLog.deleteMany({ where: { userId: { in: users.map((u) => u.id) } } })
+    await prisma.user.deleteMany({ where: { email } })
+  }
   await prisma.$disconnect()
 })

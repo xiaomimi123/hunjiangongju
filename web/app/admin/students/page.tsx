@@ -4,7 +4,8 @@ import { api } from '@/lib/fetcher'
 import { StatusPill } from '@/components/ui'
 import PageHeader from '@/components/admin/PageHeader'
 
-type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number; genLimit: number | null; genUsed: number }
+type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number; credits: number }
+type CreditLog = { id: string; delta: number; reason: string; createdAt: string }
 type Resp = { stats: { totalStudents: number; todayNew: number; totalTasks: number; totalExported: number }; students: Row[]; total: number }
 type Task = { id: string; status: string; subject: string; createdAt: string; framework: { name: string | null } | null }
 // 重置密码弹窗共用（学员/运营账号字段一致，仅需 id/email/nickname）
@@ -24,34 +25,30 @@ export default function StudentsPage() {
   const [expanded, setExpanded] = useState('')          // 展开查看作品的学员 id
   const [works, setWorks] = useState<Task[] | null>(null)
   const [resetFor, setResetFor] = useState<AccountRef | null>(null)
-  // 配额弹窗：quotaFor=null 关闭；quotaFor='ALL' 一键全体；否则单人
-  const [quotaFor, setQuotaFor] = useState<Row | 'ALL' | null>(null)
-  const [quotaUnlimited, setQuotaUnlimited] = useState(false)
-  const [quotaVal, setQuotaVal] = useState('')
-  const [quotaReset, setQuotaReset] = useState(false)
-  const [quotaBusy, setQuotaBusy] = useState(false)
-  const [quotaErr, setQuotaErr] = useState('')
-  function openQuota(target: Row | 'ALL') {
-    setQuotaFor(target)
-    setQuotaErr(''); setQuotaReset(false); setQuotaBusy(false)
-    if (target === 'ALL') { setQuotaUnlimited(false); setQuotaVal('') }
-    else { setQuotaUnlimited(target.genLimit == null); setQuotaVal(target.genLimit == null ? '' : String(target.genLimit)) }
+  // 充值弹窗：导师线下收款后给该学员加积分；弹窗内顺带展示最近充值流水
+  const [rechargeFor, setRechargeFor] = useState<Row | null>(null)
+  const [rechargeVal, setRechargeVal] = useState('')
+  const [rechargeBusy, setRechargeBusy] = useState(false)
+  const [rechargeErr, setRechargeErr] = useState('')
+  const [rechargeLogs, setRechargeLogs] = useState<CreditLog[] | null>(null)
+  function openRecharge(target: Row) {
+    setRechargeFor(target)
+    setRechargeErr(''); setRechargeVal(''); setRechargeBusy(false); setRechargeLogs(null)
+    api<{ logs: CreditLog[] }>(`/api/admin/students/${target.id}/credit-logs`)
+      .then((r) => setRechargeLogs(r.logs))
+      .catch(() => setRechargeLogs([]))
   }
-  async function saveQuota() {
-    if (!quotaFor) return
-    const limit = quotaUnlimited ? null : Number(quotaVal)
-    if (!quotaUnlimited && (!Number.isInteger(limit) || (limit as number) < 0)) { setQuotaErr('请输入 0 或正整数'); return }
-    setQuotaBusy(true); setQuotaErr('')
+  async function saveRecharge() {
+    if (!rechargeFor) return
+    const amount = Number(rechargeVal)
+    if (!Number.isInteger(amount) || amount < 1) { setRechargeErr('请输入正整数积分'); return }
+    setRechargeBusy(true); setRechargeErr('')
     try {
-      if (quotaFor === 'ALL') {
-        await api('/api/admin/students/gen-limit', { method: 'POST', body: { limit } })
-      } else {
-        await api(`/api/admin/students/${quotaFor.id}`, { method: 'PATCH', body: { action: 'set-gen-limit', limit, resetUsed: quotaReset } })
-      }
-      setQuotaFor(null)
+      await api(`/api/admin/students/${rechargeFor.id}`, { method: 'PATCH', body: { action: 'recharge', amount } })
+      setRechargeFor(null)
       await load()
-    } catch (e) { setQuotaErr((e as Error).message) }
-    finally { setQuotaBusy(false) }
+    } catch (e) { setRechargeErr((e as Error).message) }
+    finally { setRechargeBusy(false) }
   } // 重置密码弹窗目标（学员/运营共用）
   const [newPw, setNewPw] = useState('')
   const [modalErr, setModalErr] = useState('')
@@ -184,7 +181,6 @@ export default function StudentsPage() {
 
       <div className="flex flex-wrap items-center gap-3">
         <input className="field max-w-xs" value={search} onChange={(e) => { setPage(1); setSearch(e.target.value) }} placeholder="搜索手机号 / 昵称" autoCapitalize="none" />
-        <button className="btn-ghost text-xs" onClick={() => openQuota('ALL')}>一键设置全部额度</button>
       </div>
 
       <div className="card overflow-x-auto">
@@ -194,7 +190,7 @@ export default function StudentsPage() {
               <th className="px-4 py-3 font-medium">账号（手机号）</th>
               <th className="px-4 py-3 font-medium">昵称</th>
               <th className="px-4 py-3 font-medium">注册时间</th>
-              <th className="px-4 py-3 text-right font-medium">每日额度</th>
+              <th className="px-4 py-3 text-right font-medium">积分余额</th>
               <th className="px-4 py-3 text-right font-medium">任务</th>
               <th className="px-4 py-3 text-right font-medium">已完成</th>
               <th className="px-4 py-3 text-right font-medium">操作</th>
@@ -213,8 +209,8 @@ export default function StudentsPage() {
                   <td className="px-4 py-3">{s.nickname ?? '—'}</td>
                   <td className="num px-4 py-3 text-ink2">{new Date(s.createdAt).toLocaleString('zh-CN')}</td>
                   <td className="num px-4 py-3 text-right">
-                    <button className="hover:text-flame" title="点击修改该学员的生成额度" onClick={() => openQuota(s)}>
-                      {s.genLimit == null ? `不限 · 今日 ${s.genUsed ?? 0}` : `今日 ${s.genUsed ?? 0}/${s.genLimit}`}
+                    <button className="hover:text-flame" title="点击给该学员充值积分" onClick={() => openRecharge(s)}>
+                      {s.credits}{s.credits === 0 && <span className="pill pill-bad ml-1.5">待充值</span>}
                     </button>
                   </td>
                   <td className="num px-4 py-3 text-right">{s.taskCount}</td>
@@ -332,47 +328,47 @@ export default function StudentsPage() {
         </div>
       )}
 
-      {quotaFor && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => { if (!quotaBusy) setQuotaFor(null) }}>
+      {rechargeFor && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => { if (!rechargeBusy) setRechargeFor(null) }}>
           <div className="card w-full max-w-sm space-y-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div>
-              <h3 className="font-display text-lg font-bold">{quotaFor === 'ALL' ? '一键设置全部每日额度' : '每日生成额度'}</h3>
+              <h3 className="font-display text-lg font-bold">积分充值</h3>
               <p className="mt-0.5 text-sm text-ink3">
-                {quotaFor === 'ALL'
-                  ? '统一设定所有学员每天可生成的条数。每天 0 点自动重置，当天没用完不累计到明天。'
-                  : <>学员「{quotaFor.nickname ?? quotaFor.email}」 · 今日已用 <span className="num">{quotaFor.genUsed ?? 0}</span> 条。每天 0 点自动重置，不累计。</>}
+                学员「{rechargeFor.nickname ?? rechargeFor.email}」 · 当前余额 <span className="num">{rechargeFor.credits}</span> 分。1 条视频 = 1 积分。
               </p>
             </div>
 
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={quotaUnlimited} onChange={(e) => setQuotaUnlimited(e.target.checked)} className="h-4 w-4" />
-              不限次数
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink3">充值积分数</span>
+              <input
+                className="field num" type="text" inputMode="numeric" autoFocus
+                value={rechargeVal}
+                onChange={(e) => setRechargeVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="如 100"
+              />
             </label>
 
-            {!quotaUnlimited && (
-              <label className="block">
-                <span className="mb-1 block text-xs text-ink3">每日可生成条数（0 = 禁止生成）</span>
-                <input
-                  className="field num" type="text" inputMode="numeric" autoFocus
-                  value={quotaVal}
-                  onChange={(e) => setQuotaVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="如 100"
-                />
-              </label>
-            )}
+            <div>
+              <p className="eyebrow mb-1.5">最近充值记录</p>
+              {rechargeLogs === null ? <p className="text-xs text-ink3">加载中…</p>
+                : rechargeLogs.length === 0 ? <p className="text-xs text-ink3">暂无充值记录</p>
+                : (
+                  <ul className="max-h-36 space-y-1 overflow-y-auto">
+                    {rechargeLogs.map((l) => (
+                      <li key={l.id} className="flex items-center justify-between rounded-lg bg-surface2 px-3 py-1.5 text-xs">
+                        <span className="num font-medium text-ok">+{l.delta}</span>
+                        <span className="num text-ink3">{new Date(l.createdAt).toLocaleString('zh-CN')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+            </div>
 
-            {quotaFor !== 'ALL' && (quotaFor.genUsed ?? 0) > 0 && !quotaUnlimited && (
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={quotaReset} onChange={(e) => setQuotaReset(e.target.checked)} className="h-4 w-4" />
-                同时把**今日**已用清零<span className="text-xs text-ink3">（临时给学员当天加量时勾选）</span>
-              </label>
-            )}
-
-            {quotaErr && <p className="pill pill-bad">{quotaErr}</p>}
+            {rechargeErr && <p className="pill pill-bad">{rechargeErr}</p>}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setQuotaFor(null)} disabled={quotaBusy} className="btn-ghost px-4">取消</button>
-              <button onClick={saveQuota} disabled={quotaBusy || (!quotaUnlimited && quotaVal === '')} className="btn-primary px-5">
-                {quotaBusy ? '保存中…' : '保存'}
+              <button onClick={() => setRechargeFor(null)} disabled={rechargeBusy} className="btn-ghost px-4">取消</button>
+              <button onClick={saveRecharge} disabled={rechargeBusy || rechargeVal === ''} className="btn-primary px-5">
+                {rechargeBusy ? '充值中…' : '确认充值'}
               </button>
             </div>
           </div>

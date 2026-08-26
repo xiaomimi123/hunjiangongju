@@ -47,46 +47,19 @@ export const POST = handler(async (req) => {
     const voice = await prisma.clonedVoice.findUnique({ where: { voiceId: normalizedVariables.voiceId } })
     if (!voice) throw new HttpError(400, '所选音色不存在')
   }
-  // ★ 学员配额（**按日**，每天 0 点北京时间自动重置、不累计）：
-  // genUsedDate 记当日计数属于哪一天，跨天后的第一次生成把计数归零重记——
-  // 不用定时任务，重置天然精确到 0 点。
-  // 占坑（当日 +1）与建任务同一事务：中途失败不白扣。并发闸两级：
-  //   ① 同日分支 updateMany 带 genUsed < limit 条件——挤最后一个名额只放行一个；
-  //   ② 跨天分支 updateMany 带「日期不是今天」条件——两个请求同时触发重置时
-  //      只有一个能重置成功，输家落回同日分支按新计数竞争。
-  const today = bjToday()
-  if (s.role !== 'operator') {
-    const me = await prisma.user.findUnique({ where: { id: s.userId }, select: { genLimit: true, genUsed: true, genUsedDate: true } })
-    const usedToday = me && me.genUsedDate?.getTime() === today.getTime() ? me.genUsed : 0
-    if (me?.genLimit != null && usedToday >= me.genLimit) {
-      throw new HttpError(403, `今日生成次数已用完（${usedToday}/${me.genLimit}），额度每天 0 点自动重置`)
-    }
-  }
+  // ★ 学员积分：1 条视频 = 1 积分。扣分与建任务同一事务，中途失败不白扣。
+  // updateMany 带 credits >= 1 条件是并发闸：两个请求同抢最后 1 分只放行一个，余额不为负。
   const task = await prisma.$transaction(async (tx) => {
     if (s.role !== 'operator') {
-      const me = await tx.user.findUnique({ where: { id: s.userId }, select: { genLimit: true, genUsedDate: true } })
-      if (me) {
-        // ② 跨天：把计数重置为 1、日期记到今天（乐观：日期不是今天才能改成功）
-        const reset = await tx.user.updateMany({
-          where: { id: s.userId, OR: [{ genUsedDate: null }, { genUsedDate: { not: today } }] },
-          data: { genUsed: 1, genUsedDate: today },
-        })
-        if (reset.count === 0) {
-          // ① 同日：条件自增；限额满了 count=0 → 拒绝
-          const claimed = await tx.user.updateMany({
-            where: {
-              id: s.userId, genUsedDate: today,
-              ...(me.genLimit != null ? { genUsed: { lt: me.genLimit } } : {}),
-            },
-            data: { genUsed: { increment: 1 } },
-          })
-          if (claimed.count === 0) throw new HttpError(403, '今日生成次数已用完，额度每天 0 点自动重置')
-        } else if (me.genLimit != null && me.genLimit < 1) {
-          // 限额为 0：重置也不给名额（重置分支已写入 1，回滚靠抛错终止事务）
-          throw new HttpError(403, '生成额度为 0，请联系管理员开通')
-        }
+      const claimed = await tx.user.updateMany({
+        where: { id: s.userId, credits: { gte: 1 } },
+        data: { credits: { decrement: 1 } },
+      })
+      if (claimed.count === 0) {
+        // 分不够或账号已不存在。学员被删号但会话 cookie 还活着的情况沿用老行为：任务照建、账记不上即可
+        const exists = await tx.user.count({ where: { id: s.userId } })
+        if (exists > 0) throw new HttpError(403, '积分已用完，请扫码联系导师充值', 'NO_CREDITS')
       }
-      // me 为空（学员被删号但会话 cookie 还活着）：任务照建、账记不上即可，不值得炸
     }
     return tx.generationTask.create({
       data: {
@@ -106,11 +79,6 @@ export const POST = handler(async (req) => {
 // 每页条数。原先是运营一次最多 200 条的硬上限（超出静默丢弃后面的），
 // 数据多了页面卡、且翻不到旧任务。改为游标分页（沿用素材库的范式）。
 // 注意不要 export：Next.js route 文件只允许导出 GET/POST/dynamic 等约定名。
-/** 北京时间的「今天」（@db.Date 列比较用 UTC 午夜的 Date 对象）。固定 +8，无夏令时 */
-function bjToday(): Date {
-  return new Date(new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10))
-}
-
 const PAGE_SIZE = 50
 
 export const GET = handler(async (req) => {

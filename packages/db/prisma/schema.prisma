@@ -16,15 +16,34 @@ model User {
   passwordHash String   @map("password_hash")
   role         String   @default("student")
   disabled     Boolean  @default(false)
-  // 生成配额（仅学员生效）：genLimit=**每日**可生成条数（null=不限）；
-  // genUsed=当日已用（只增不减，删任务不返还）；genUsedDate=计数属于哪一天（北京时间）。
-  // 跨天后的第一次生成把计数归零重记——不需要定时任务，重置天然精确到 0 点，且不累计。
-  genLimit     Int?      @map("gen_limit")
-  genUsed      Int       @default(0) @map("gen_used")
-  genUsedDate  DateTime? @map("gen_used_date") @db.Date
+  // 积分（仅学员扣减）：1 条视频 = 1 积分；新账号默认送 30；
+  // 用完由导师在后台充值（流水见 CreditLog），删任务不返还。
+  credits      Int      @default(30)
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("users")
+}
+
+// 积分充值流水：只记后台加分（reason='recharge'），消耗可从生成任务反查，不逐条记流水
+model CreditLog {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  delta      Int
+  reason     String
+  operatorId String?  @map("operator_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("credit_logs")
+}
+
+// 站点级配置单例（id 恒为 1）：目前只有导师收款二维码
+model SiteConfig {
+  id            Int      @id @default(1)
+  rechargeQrUrl String   @default("") @map("recharge_qr_url")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("site_config")
 }
 
 model SmtpConfig {

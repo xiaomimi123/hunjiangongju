@@ -54,22 +54,22 @@ export const DELETE = handler(async (_req, { params }) => {
 export const PATCH = handler(async (req, { params }) => {
   const session = await requireRole('operator')
   const u = await getUser(params.id)
-  const { action, password, limit, resetUsed } = await req.json()
+  const { action, password, amount } = await req.json()
   if (u.role === 'operator') await guardOperator(session, params.id, action === 'disable')
   if (action === 'reset') {
     assertPassword(password)
     await prisma.user.update({ where: { id: params.id }, data: { passwordHash: await bcrypt.hash(password, 10) } })
   } else if (action === 'disable' || action === 'enable') {
     await prisma.user.update({ where: { id: params.id }, data: { disabled: action === 'disable' } })
-  } else if (action === 'set-gen-limit') {
-    // 生成配额：limit=null 不限；resetUsed=true 把已用清零（续费/续期场景）
-    if (limit !== null && (!Number.isInteger(limit) || limit < 0 || limit > 100000)) {
-      throw new HttpError(400, '额度须为 0~100000 的整数，或 null 表示不限')
+  } else if (action === 'recharge') {
+    // 积分充值：导师线下收款后在这里落账。加分与流水同一事务，对账不缺笔
+    if (!Number.isInteger(amount) || amount < 1 || amount > 100000) {
+      throw new HttpError(400, '充值积分须为 1~100000 的整数')
     }
-    await prisma.user.update({
-      where: { id: params.id },
-      data: { genLimit: limit, ...(resetUsed === true ? { genUsed: 0 } : {}) },
-    })
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: params.id }, data: { credits: { increment: amount } } }),
+      prisma.creditLog.create({ data: { userId: params.id, delta: amount, reason: 'recharge', operatorId: session.userId } }),
+    ])
   } else {
     throw new HttpError(400, '未知操作')
   }

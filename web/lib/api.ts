@@ -9,7 +9,7 @@ export function handler(fn: Handler): Handler {
       return await fn(req, ctx)
     } catch (e) {
       if (e instanceof HttpError) {
-        return NextResponse.json({ error: e.message }, { status: e.status })
+        return NextResponse.json({ error: e.message, ...(e.code ? { code: e.code } : {}) }, { status: e.status })
       }
       console.error(e)
       return NextResponse.json({ error: '服务器内部错误' }, { status: 500 })

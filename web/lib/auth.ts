@@ -2,7 +2,8 @@ import { cookies } from 'next/headers'
 import { verifyToken, type Session } from './jwt'
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  // code：机器可读错误码（如 NO_CREDITS），前端据此走专门 UI；缺省只有人读文案
+  constructor(public status: number, message: string, public code?: string) {
     super(message)
   }
 }

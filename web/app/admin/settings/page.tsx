@@ -12,8 +12,30 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // 导师收款二维码：学员积分用完时弹窗展示
+  const [qrUrl, setQrUrl] = useState('')
+  const [qrErr, setQrErr] = useState('')
+  const [qrBusy, setQrBusy] = useState(false)
 
-  useEffect(() => { api<Cfg>('/api/admin/smtp').then(setCfg).catch((e) => setErr((e as Error).message)) }, [])
+  useEffect(() => {
+    api<Cfg>('/api/admin/smtp').then(setCfg).catch((e) => setErr((e as Error).message))
+    api<{ qrUrl: string }>('/api/admin/recharge-qr').then((r) => setQrUrl(r.qrUrl)).catch(() => {})
+  }, [])
+
+  async function uploadQr(file: File) {
+    setQrBusy(true); setQrErr('')
+    try {
+      const form = new FormData()
+      form.set('file', file)
+      const r = await api<{ qrUrl: string }>('/api/admin/recharge-qr', { form })
+      setQrUrl(r.qrUrl)
+    } catch (e) { setQrErr((e as Error).message) } finally { setQrBusy(false) }
+  }
+  async function removeQr() {
+    setQrBusy(true); setQrErr('')
+    try { await api('/api/admin/recharge-qr', { method: 'DELETE' }); setQrUrl('') }
+    catch (e) { setQrErr((e as Error).message) } finally { setQrBusy(false) }
+  }
 
   function up<K extends keyof Cfg>(k: K, v: Cfg[K]) { setCfg((c) => (c ? { ...c, [k]: v } : c)) }
 
@@ -40,9 +62,27 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-xl space-y-6">
-      <PageHeader title="邮件服务（SMTP）" subtitle="学员注册验证码与找回密码依赖邮件服务" />
+      <PageHeader title="系统设置" subtitle="充值二维码与邮件服务" />
       {err && <p className="pill pill-bad">{err}</p>}
       {msg && <p className="pill pill-ok">{msg}</p>}
+
+      <div className="card space-y-3 p-5">
+        <p className="font-medium">学员充值二维码</p>
+        <p className="text-xs text-ink3">学员积分用完时弹出此二维码（导师微信收款码）。1 条视频 = 1 积分，收款后到「学员数据」页给对应学员充值。</p>
+        {qrUrl
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={qrUrl} alt="充值二维码" className="w-44 rounded-xl border border-line" />
+          : <p className="rounded-xl bg-surface2 px-4 py-6 text-center text-sm text-ink3">未上传，学员端将只提示「请联系导师充值」</p>}
+        <div className="flex items-center gap-3">
+          <label className="btn-ghost cursor-pointer text-sm">
+            {qrBusy ? '处理中…' : qrUrl ? '更换图片' : '上传图片'}
+            <input type="file" accept=".png,.jpg,.jpeg,.webp" className="hidden" disabled={qrBusy}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadQr(f); e.target.value = '' }} />
+          </label>
+          {qrUrl && <button onClick={removeQr} disabled={qrBusy} className="text-sm text-bad">移除</button>}
+        </div>
+        {qrErr && <p className="pill pill-bad">{qrErr}</p>}
+      </div>
 
       <div className="card space-y-4 p-5">
         <label className="flex items-center justify-between">

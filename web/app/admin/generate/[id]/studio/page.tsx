@@ -8,6 +8,8 @@ import {
   SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows,
   type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type FontOption,
 } from '@/components/admin/paramControls'
+import { StageCanvas, type StageScene, type StageLayer, type StageBg, type StageSample } from '@/components/admin/StageCanvas'
+import { thumbUrl } from '@/lib/thumbUrl'
 
 // 剪辑工作台：调这一条片子的节奏、字幕样式、配乐，然后重渲。
 //
@@ -56,6 +58,13 @@ export default function StudioPage() {
   const [text, setText] = useState<TextParams | null>(null)
   const [pace, setPace] = useState<PaceParams | null>(null)
   const [fonts, setFonts] = useState<FontOption[]>([])
+  const [scene, setScene] = useState<StageScene>('body')
+  const [bg, setBg] = useState<StageBg>('placeholder')
+  const [sel, setSel] = useState<StageLayer | null>(null)
+  const [sample, setSample] = useState<StageSample>({
+    caption: '这是一句示例字幕', captionEn: 'This is a sample caption',
+    bookTitle: '活着', bookAuthor: '余华', openTitle: '今天分享的是',
+  })
 
   const load = useCallback(async () => {
     try {
@@ -85,8 +94,30 @@ export default function StudioPage() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    api<{ id: string; variables?: Record<string, unknown> | null }>(`/api/generate/${id}`)
-      .then((t) => setBgmId((t.variables?.__bgmId as string) ?? '')).catch(() => {})
+    type TaskDetail = {
+      id: string
+      variables?: Record<string, unknown> | null
+      segments?: { seqNo: number; imageUrl: string | null; bookTitle: string | null; bookAuthor: string | null; captionBeats: unknown }[]
+    }
+    api<TaskDetail>(`/api/generate/${id}`)
+      .then((t) => {
+        setBgmId((t.variables?.__bgmId as string) ?? '')
+        // 画布示例数据：用本条任务第一段的真实文案（含双语），拉不到就保留组件默认的示例文案。
+        const first = t.segments?.[0]
+        if (first) {
+          const beats = Array.isArray(first.captionBeats) ? (first.captionBeats as { zh?: unknown; en?: unknown }[]) : []
+          const beat0 = beats.find((b) => typeof b?.zh === 'string' && (b.zh as string).trim())
+          setSample((s) => ({
+            ...s,
+            caption: (beat0?.zh as string) || s.caption,
+            captionEn: (typeof beat0?.en === 'string' && beat0.en) ? (beat0.en as string) : s.captionEn,
+            bookTitle: first.bookTitle || s.bookTitle,
+            bookAuthor: first.bookAuthor || s.bookAuthor,
+          }))
+          if (first.imageUrl) setBg({ url: thumbUrl(first.imageUrl) })
+        }
+      })
+      .catch(() => {})
     api<Bgm[]>('/api/bgm').then(setBgms).catch(() => {})
   }, [id])
 
@@ -150,6 +181,45 @@ export default function StudioPage() {
       {err && <p className="pill pill-bad">{err}</p>}
       {msg && <p className="pill pill-ok">{msg}</p>}
       {locked && <p className="pill pill-warn">{info.blockReason}</p>}
+
+      {text && (
+        <section className="card space-y-3 p-4 lg:sticky lg:top-4">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">画面预览 · 可直接拖</p>
+            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+              onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
+              {busy === '画面' ? '保存中…' : '保存画面'}
+            </button>
+          </div>
+          <StageCanvas
+            width={720} height={1280}
+            text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
+            scene={scene} onScene={setScene} bg={bg} onBg={setBg}
+            sample={sample}
+            selected={sel} onSelect={setSel}
+            onPosY={(layer, v) => {
+              if (locked) return
+              switch (layer) {
+                case 'caption': setCapPosY(v); break
+                case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
+                case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
+                case 'openTitle': setText({ ...text, openTitlePosY: v }); break
+                default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
+              }
+            }}
+            onSize={(layer, v) => {
+              if (locked) return
+              switch (layer) {
+                case 'caption': setText({ ...text, captionSizePx: v }); break
+                case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
+                case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
+                case 'openTitle': setText({ ...text, openTitleScale: v }); break
+                default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
+              }
+            }}
+          />
+        </section>
+      )}
 
       {info.override && (
         <div className="card flex flex-wrap items-center gap-3 p-4">

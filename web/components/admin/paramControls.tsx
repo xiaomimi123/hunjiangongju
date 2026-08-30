@@ -299,12 +299,19 @@ export function TextRows(props: {
         onChange={(v) => set({ captionSizePx: v })} />
       <NumRow label="书名标题倍数" value={t.bookTitleScale} disabled={props.disabled}
         min={0.2} max={5} step={0.05} hint="相对正文" onChange={(v) => set({ bookTitleScale: v })} />
+      <NumRow label="书名标题竖直位置" value={t.bookTitlePosY} disabled={props.disabled}
+        min={0} max={1} step={0.01} hint="0 = 顶端，1 = 底端；也可在预览画布上直接拖"
+        onChange={(v) => set({ bookTitlePosY: v })} />
       <NumRow label="书名标题再放大" value={t.bookTitleBoost} disabled={props.disabled}
         min={0.5} max={3} step={0.05} hint="嫌书名还不够大就调它" onChange={(v) => set({ bookTitleBoost: v })} />
       <NumRow label="快闪书名倍数" value={t.flashTitleScale} disabled={props.disabled}
         min={0.2} max={5} step={0.05} onChange={(v) => set({ flashTitleScale: v })} />
+      <NumRow label="快闪书名竖直位置" value={t.flashTitlePosY} disabled={props.disabled}
+        min={0} max={1} step={0.01} hint="也可在预览画布上直接拖" onChange={(v) => set({ flashTitlePosY: v })} />
       <NumRow label="开场标题倍数" value={t.openTitleScale} disabled={props.disabled}
         min={0.2} max={5} step={0.05} onChange={(v) => set({ openTitleScale: v })} />
+      <NumRow label="开场标题竖直位置" value={t.openTitlePosY} disabled={props.disabled}
+        min={0} max={1} step={0.01} hint="也可在预览画布上直接拖" onChange={(v) => set({ openTitlePosY: v })} />
       <NumRow label="字幕渐入" value={t.captionFadeInMs} disabled={props.disabled}
         min={0} max={1000} step={50} unit="ms" hint="正文字幕淡入时长，0 = 瞬间出现"
         onChange={(v) => set({ captionFadeInMs: v })} />

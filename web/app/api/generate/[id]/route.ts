@@ -15,7 +15,12 @@ export const GET = handler(async (_req, { params }) => {
     include: {
       framework: { select: { id: true, name: true } },
       // published 供运营详情页反映「发布到成片库」开关状态
-      segments: { orderBy: { seqNo: 'asc' }, select: { seqNo: true, scriptText: true, imageUrl: true } },
+      // captionBeats/bookTitle/bookAuthor：剪辑工作台画布用第一段真实文案做预览示例
+      // （见 /admin/generate/[id]/studio），复用这条已有接口，不新开一个。
+      segments: {
+        orderBy: { seqNo: 'asc' },
+        select: { seqNo: true, scriptText: true, imageUrl: true, captionBeats: true, bookTitle: true, bookAuthor: true },
+      },
       renderTasks: {
         orderBy: { createdAt: 'desc' },
         select: { id: true, status: true, videoUrl: true, subtitleUrl: true },

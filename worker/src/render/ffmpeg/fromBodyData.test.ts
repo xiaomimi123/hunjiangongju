@@ -98,6 +98,33 @@ describe('fromBodyData —— 新旧渲染器的唯一接缝', () => {
     expect(o.assStyle.captionPosY).toBe(0.7)
   })
 
+  it('双语参数映射进 assStyle', () => {
+    const o = fromBodyData(data({ templateParams: params({
+      text: { bilingual: true, enScale: 0.5, enColor: '#cccccc', enGapPx: 12 },
+    }) }), io)
+    expect(o.assStyle.bilingual).toBe(true)
+    expect(o.assStyle.enScale).toBe(0.5)
+    expect(o.assStyle.enColor).toBe('#cccccc')
+    expect(o.assStyle.enGapPx).toBe(12)
+  })
+
+  it('没配双语时 assStyle 里不出现 bilingual（老调用零回归）', () => {
+    const o = fromBodyData(data(), io)
+    expect('bilingual' in o.assStyle).toBe(false)
+  })
+
+  it('captionBeats 的 en 透传进 bodySegments', () => {
+    const o = fromBodyData(data({
+      segments: [
+        { seqNo: 1, startMs: 0, endMs: 3984, subtitle: '今天分享的是', imageIndex: 0 },
+        { seqNo: 2, startMs: 3984, endMs: 9687, subtitle: '第一句', imageIndex: 1, bookTitle: '活着', bookAuthor: '余华',
+          captionBeats: [{ zh: '中文', en: 'English', startMs: 4200, endMs: 9000 }] },
+        { seqNo: 3, startMs: 9687, endMs: 15000, subtitle: '第二句', imageIndex: 2, bookTitle: '活着', bookAuthor: '余华' },
+      ],
+    }), io)
+    expect(o.bodySegments[0].captionBeats![0].en).toBe('English')
+  })
+
   it('自带字体：fontsDir 与 fontName 都指向仓库内的字体', () => {
     const o = fromBodyData(data(), io)
     expect(o.assStyle.fontName).toBe('Noto Sans SC')

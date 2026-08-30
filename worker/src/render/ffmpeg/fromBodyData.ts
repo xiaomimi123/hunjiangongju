@@ -88,7 +88,7 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     ...(s.bookAuthor ? { bookAuthor: s.bookAuthor } : {}),
     ...(s.subtitle ? { subtitle: s.subtitle } : {}),
     ...(s.captionBeats?.length
-      ? { captionBeats: s.captionBeats.map((b) => ({ zh: b.zh, startMs: b.startMs, endMs: b.endMs })) }
+      ? { captionBeats: s.captionBeats.map((b) => ({ zh: b.zh, ...(b.en ? { en: b.en } : {}), startMs: b.startMs, endMs: b.endMs })) }
       : {}),
   }))
 
@@ -139,6 +139,14 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
       ...(tx?.captionFadeInMs !== undefined ? { captionFadeInMs: tx.captionFadeInMs } : {}),
       ...(tx?.captionFadeOutMs !== undefined ? { captionFadeOutMs: tx.captionFadeOutMs } : {}),
       ...(tx?.boldBordPx !== undefined ? { boldBordPx: tx.boldBordPx } : {}),
+      // 双语字幕。默认关：没配过的老框架 assStyle 里连 bilingual 这个键都不出现，
+      // buildAss 的输出逐字节不变。
+      ...(tx?.bilingual ? {
+        bilingual: true,
+        ...(tx.enScale !== undefined ? { enScale: tx.enScale } : {}),
+        ...(tx.enColor !== undefined ? { enColor: tx.enColor } : {}),
+        ...(tx.enGapPx !== undefined ? { enGapPx: tx.enGapPx } : {}),
+      } : {}),
     },
     decor: {
       // 与 HyperFrames 模板的 .scrim（340px 高、底部最深 0.85）对齐

@@ -16,7 +16,7 @@ export interface RenderBodySegment {
   endMs: number
   bookTitle?: string
   bookAuthor?: string
-  captionBeats?: { zh: string; startMs: number; endMs: number }[]
+  captionBeats?: { zh: string; en?: string; startMs: number; endMs: number }[]
   subtitle?: string
 }
 
@@ -78,7 +78,7 @@ export function captionCues(segs: RenderBodySegment[]): AssCue[] {
       : [{ zh: s.subtitle ?? '', startMs: s.startMs, endMs: s.endMs }]
     for (const b of beats) {
       if (!b.zh?.trim()) continue
-      out.push({ text: b.zh, startMs: b.startMs, endMs: b.endMs })
+      out.push({ text: b.zh, ...(b.en?.trim() ? { en: b.en } : {}), startMs: b.startMs, endMs: b.endMs })
     }
   }
   return out

@@ -328,7 +328,16 @@ export function StageCanvas(props: {
         </span>
       </div>
 
-      <div ref={boxRef} className="relative w-full overflow-hidden rounded border border-line" style={{ height: height * scale }}>
+      {/* 外层 boxRef：全宽测量容器，ResizeObserver 挂在它身上算 scale——
+          它的宽度必须只由父级布局决定，不能反过来被 scale 影响，否则「按容器宽度算
+          scale、再按 scale 设容器宽度」会互相依赖。真正裹住画面的是内层这个显式
+          width/height = 真实像素 * scale 的方框，用 mx-auto 在可用宽度里居中，
+          边框才会刚好贴着画面，不再留一截空白。 */}
+      <div ref={boxRef} className="w-full">
+        <div
+          className="relative mx-auto overflow-hidden rounded border border-line"
+          style={{ width: width * scale, height: height * scale }}
+        >
         <div
           className="absolute left-0 top-0"
           style={{ width, height, transform: `scale(${scale})`, transformOrigin: 'top left' }}
@@ -477,6 +486,7 @@ export function StageCanvas(props: {
             }
             }
           })}
+        </div>
         </div>
       </div>
       <div className="mt-1 flex items-center justify-between">

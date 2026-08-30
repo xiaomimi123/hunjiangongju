@@ -52,6 +52,8 @@ export { buildBookCoverPrompt } from './booklist/bookCoverPrompt'
 export type { CoverPrompt } from './booklist/bookCoverPrompt'
 export { findBookByTitle, findBooksByTheme, upsertBook, normalizeTitle, findCoversByTitles, setBookCover } from './booklist/bookLibrary'
 export * from './booklist/fonts'
+export { readFontMeta } from './booklist/fontFamily'
+export type { ParsedFontMeta } from './booklist/fontFamily'
 export type { BookRow } from './booklist/bookLibrary'
 export {
   seedFrom,

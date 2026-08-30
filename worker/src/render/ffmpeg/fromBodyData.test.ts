@@ -221,3 +221,59 @@ describe('fromBodyData —— 开场那一段不能留空', () => {
     expect(o.openStillAbs).toBeUndefined()
   })
 })
+
+// 运营在后台选的字体：把 id 映射成 ASS 需要的族名。fromBodyData 是纯函数，
+// 自定义字体的族名靠 io.fontFamilies 由调用方喂进来，内置字体靠 findBuiltinFont。
+describe('fromBodyData —— 字体 id 映射成族名', () => {
+  it('字体 id 映射成族名写进 assStyle', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'noto-sc', titleFontId: 'noto-sc' } }),
+    }), io)
+    expect(o.assStyle.fontName).toBe('Noto Sans SC')
+    expect(o.assStyle.titleFontName).toBe('Noto Sans SC')
+  })
+
+  it('认不出的字体 id 回退默认字体，不报错', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'ghost' } }),
+    }), io)
+    expect(o.assStyle.fontName).toBe('Noto Sans SC')
+  })
+
+  it('未配置字体 id 时 assStyle 里不出现 titleFontName（老调用零回归）', () => {
+    const o = fromBodyData(data(), io)
+    expect('titleFontName' in o.assStyle).toBe(false)
+  })
+
+  it('双语英文行字体 id 解析成功才写 enFontName，跟随双语开关', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { bilingual: true, enFontId: 'lxgw-wenkai' } }),
+    }), io)
+    expect(o.assStyle.enFontName).toBe('LXGW WenKai')
+  })
+
+  // ★ 正文字体选到内置 700 字重的条目时必须置粗体位——ass.ts 的 cap/wm 样式行
+  // Bold 位由它驱动。不设的话运营选了「思源黑体 Bold」当正文字体会毫无反应
+  // （族名相同，libass 按 Bold=0 挑回 Regular），是典型的静默失效。
+  it('选了 noto-sc-bold 当正文字体时 captionFontBold 为 true', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'noto-sc-bold' } }),
+    }), io)
+    expect(o.assStyle.fontName).toBe('Noto Sans SC')
+    expect(o.assStyle.captionFontBold).toBe(true)
+  })
+
+  it('正文字体是 400 字重时 captionFontBold 不出现', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'noto-sc' } }),
+    }), io)
+    expect('captionFontBold' in o.assStyle).toBe(false)
+  })
+
+  it('自定义字体族名由 io.fontFamilies 提供', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'cl-custom-id' } }),
+    }), { ...io, fontFamilies: { 'cl-custom-id': 'My Custom Font' } })
+    expect(o.assStyle.fontName).toBe('My Custom Font')
+  })
+})

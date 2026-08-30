@@ -144,6 +144,12 @@ export interface TemplateParams {
     enColor: string
     /** 中英两行的额外行间距（px） */
     enGapPx: number
+    /** 正文字幕字体 id（见 packages/db/src/booklist/fonts.ts）。'' = 默认字体 */
+    captionFontId: string
+    /** 标题类字体 id（书名大标题 + 快闪卡 + 开场标题）。'' = 跟随正文 */
+    titleFontId: string
+    /** 双语英文行字体 id。'' = 跟随正文 */
+    enFontId: string
   }
 }
 
@@ -172,6 +178,7 @@ export const DEFAULT_PARAMS: TemplateParams = {
     bookTitleColor: '#ffe9c0', flashTitleColor: '#ffffff',
     flashAuthorColor: '#ffcc88', openTitleColor: '#ffffff',
     bilingual: false, enScale: 0.6, enColor: '#dddddd', enGapPx: 8,
+    captionFontId: '', titleFontId: '', enFontId: '',
   },
 }
 
@@ -312,6 +319,9 @@ export function parseTemplateParams(raw: unknown): TemplateParams {
         enScale: num(t.enScale, DT.enScale),
         enColor: str(t.enColor, DT.enColor),
         enGapPx: Math.max(0, num(t.enGapPx, DT.enGapPx)),
+        captionFontId: str(t.captionFontId, DT.captionFontId),
+        titleFontId: str(t.titleFontId, DT.titleFontId),
+        enFontId: str(t.enFontId, DT.enFontId),
       }
     })(),
     ...(r.grade && typeof r.grade === 'object' && !Array.isArray(r.grade)

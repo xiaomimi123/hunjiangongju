@@ -160,6 +160,13 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
     const eg = clampNum(text.enGapPx, 0, 40)
     if (eg !== undefined) t.enGapPx = Math.round(eg)
     if (typeof text.enColor === 'string' && HEX.test(text.enColor)) t.enColor = text.enColor
+    // 字体 id。**不校验是否存在** —— 内置 id 在 BUILTIN_FONTS 里，自定义 id 是
+    // CustomFont 的 cuid，白名单层查库不合适（它是纯函数）。认不出的 id 由
+    // fromBodyData 回退到默认字体，不会渲染失败。
+    for (const k of ['captionFontId', 'titleFontId', 'enFontId'] as const) {
+      const v = text[k]
+      if (typeof v === 'string' && v.length <= 64) t[k] = v
+    }
     if (Object.keys(t).length) out.text = t
   }
 

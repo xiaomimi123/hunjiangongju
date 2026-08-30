@@ -47,6 +47,9 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
       transition: { type: 'dissolve', durationMs: 400, bodyCycle: [{ renderType: 'crossfade', durationMs: 500 }] },
       motion: { moves: [], keyframes: [{ scaleFrom: 1, scaleTo: 1.108 }] },
       effects: { ripple: { offsetMs: 7, durationMs: 458 } },
+      // 标题字体选了非默认的内置字体：验收「运营在后台选的字体真正接通到渲染」
+      // ——prepareFontsDir 必须收到这个 id，对应字体文件才会进 per-task fontsdir。
+      text: { titleFontId: 'lxgw-wenkai' },
     }),
     flashCovers: [
       { title: '活着', author: '余华', coverSrc: 'covers/01.png' },
@@ -149,6 +152,17 @@ d('真渲验收 —— FFmpeg 渲染管线接线', () => {
     for (const f of ['x.mkv', 'y.mkv', 'bloom.mkv']) {
       expect(existsSync(path.join(dir, f)), `缺 ${f}`).toBe(true)
     }
+  })
+
+  // ★ 运营在后台选的字体真正接通到渲染：prepareFontsDir 必须收到真实字体 id
+  // （data() 里配了 titleFontId: 'lxgw-wenkai'），而不是恒传空数组。
+  // 直接断言 prepareFontsDir 的入参不好做（它是模块内部函数，未导出），
+  // 所以退一步断言产出的 per-task fontsdir 里确实有对应字体文件、且默认字体恒在。
+  it('per-task fontsdir 里有选中的标题字体，且默认字体恒在', async () => {
+    const dir = path.join(hfDir, 'fonts')
+    const files = await fsp.readdir(dir)
+    expect(files).toContain('LXGWWenKai-Regular.ttf')
+    expect(files).toContain('NotoSansSC-Regular.otf')
   })
 
   it('缓存命中时不重渲（第二次调用不改动缓存目录的 mtime）', async () => {

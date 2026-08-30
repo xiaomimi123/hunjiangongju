@@ -177,4 +177,22 @@ describe('sanitizeParamsOverride —— 白名单', () => {
       expect(sanitizeParamsOverride({ text: { bilingual: 'yes' } })).toBeNull()
     })
   })
+
+  describe('字体字段', () => {
+    it('放行三个字体 id', () => {
+      const out = sanitizeParamsOverride({
+        text: { captionFontId: 'noto-sc', titleFontId: 'noto-sc', enFontId: '' },
+      })
+      expect(out!.text).toEqual({ captionFontId: 'noto-sc', titleFontId: 'noto-sc', enFontId: '' })
+    })
+
+    it('id 过长直接丢弃（防止把整段 JSON 塞进来）', () => {
+      expect(sanitizeParamsOverride({ text: { captionFontId: 'x'.repeat(200) } })).toBeNull()
+    })
+
+    it('不校验 id 是否存在 —— 自定义字体的 id 是 cuid，白名单层不查库', () => {
+      const out = sanitizeParamsOverride({ text: { captionFontId: 'clxxxxxxxxxxxxxxxxxxxxxx' } })
+      expect((out!.text as { captionFontId: string }).captionFontId).toBe('clxxxxxxxxxxxxxxxxxxxxxx')
+    })
+  })
 })

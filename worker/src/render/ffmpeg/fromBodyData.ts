@@ -12,6 +12,7 @@ import type { RenderFullOpts, FullFlashCard } from './renderFull'
 import type { RenderBodySegment } from './renderBody'
 import { DEFAULT_FONT_NAME, FONTS_DIR } from './fonts'
 import { selectPreset, hasGrain } from '../../../templates/booklist/theme'
+import { findBuiltinFont } from '@mixcut/db'
 
 export interface FromBodyDataIo {
   /** hf 工作目录的绝对路径；images/covers 的相对路径以它为基准 */
@@ -30,6 +31,11 @@ export interface FromBodyDataIo {
    * 同族名 Regular/Bold 两个文件时选中真粗体字面，多余的字体文件不能进目录。
    */
   fontsDir?: string
+  /**
+   * 字体 id → 族名。由调用方（renderVisuals）合并内置表与库里的自定义字体后传入。
+   * fromBodyData 是纯函数，不能自己查库；缺省时未配置字体 id 一律回退默认字体。
+   */
+  fontFamilies?: Record<string, string>
 }
 
 /** 相对路径 → 绝对路径。BodyData 里存的是 hf 目录内的相对路径（media/01.png） */
@@ -104,6 +110,18 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
   const tx = p?.text
   const capPx = tx?.captionSizePx ?? DEFAULT_CAPTION_PX
   const px = (ratio: number) => Math.round(capPx * ratio)
+  // 字体 id → 族名。认不出就回退默认字体：宁可字体没换，也不能渲染失败。
+  const fam = (id: string | undefined): string | undefined => {
+    if (!id) return undefined
+    return io.fontFamilies?.[id] ?? findBuiltinFont(id)?.family
+  }
+  const captionFont = fam(tx?.captionFontId) ?? DEFAULT_FONT_NAME
+  const titleFont = fam(tx?.titleFontId)
+  const enFont = fam(tx?.enFontId)
+  // ★ 正文字体解析到内置字重 700 的条目时置粗体位。ass.ts 的 cap/wm 样式行 Bold 位
+  // 由它驱动——不设的话运营选了「思源黑体 Bold」当正文字体会毫无反应（族名相同，
+  // libass 会按 Bold=0 挑回 Regular），是典型的静默失效。
+  const captionFontBold = findBuiltinFont(tx?.captionFontId)?.weight === 700
   // 开场标题：第 0 段是「开场 + 快闪」的时间窗，它的字幕就是这行开场白。
   // ffmpeg 迁移时 segs.slice(1) 把第 0 段整个丢掉了，成片开头一直没有这行字。
   const openTitleText = p?.open.titleText?.trim() || segs[0]?.subtitle?.trim() || ''
@@ -128,7 +146,9 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     flashBounceIn: p?.flash.bounceIn ?? true,
     ...(data.overlay.watermark ? { watermark: data.overlay.watermark } : {}),
     assStyle: {
-      fontName: DEFAULT_FONT_NAME,
+      fontName: captionFont,
+      ...(titleFont ? { titleFontName: titleFont } : {}),
+      ...(captionFontBold ? { captionFontBold: true } : {}),
       captionColor: p?.body.subtitleColor ?? '#ffffff',
       captionPosY: p?.body.subtitlePosY ?? 0.78,
       captionSizePx: capPx,
@@ -155,6 +175,7 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
         ...(tx.enScale !== undefined ? { enScale: tx.enScale } : {}),
         ...(tx.enColor !== undefined ? { enColor: tx.enColor } : {}),
         ...(tx.enGapPx !== undefined ? { enGapPx: tx.enGapPx } : {}),
+        ...(enFont ? { enFontName: enFont } : {}),
       } : {}),
     },
     decor: {

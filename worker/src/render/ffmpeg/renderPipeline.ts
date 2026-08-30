@@ -132,9 +132,8 @@ async function ensureRippleMaps(
  * 选中真粗体字面，所有没被选中的框架也会无声变粗。fontsdir 里有什么文件，
  * 必须由「这条片子选了什么字体」决定，不能由「仓库里有什么字体」决定。
  *
- * 目前 TemplateParams.text 还没有 captionFontId/titleFontId/enFontId 字段
- * （下一批任务才加），所以 usedIds 参数缺省时只会拷默认字体一个文件——
- * 接口先留好，等字段落地后调用方直接把选中的 id 传进来即可。
+ * usedIds 由调用方从 templateParams.text 的 captionFontId/titleFontId/enFontId
+ * 取出后传入；缺省（如测试直接调用）时只会拷默认字体一个文件。
  */
 async function prepareFontsDir(hfDir: string, usedIds: (string | undefined)[] = []): Promise<string> {
   const dir = path.join(hfDir, 'fonts')
@@ -173,8 +172,13 @@ export async function renderBodyWithFfmpeg(
 
   const outAbs = path.join(hfDir, 'renders', 'body.mp4')
   await fs.mkdir(path.dirname(outAbs), { recursive: true })
+  // 运营在后台选的字体 id：来自 templateParams.text，喂给 prepareFontsDir 才会
+  // 真的把字体文件拷进 fontsdir，否则渲染层回退默认字体、运营的选择静默失效。
+  const fontIds = [p?.text?.captionFontId, p?.text?.titleFontId, p?.text?.enFontId]
   // per-task fontsdir：只装本条片子用到的字体（见 prepareFontsDir 的注释）
-  const fontsDir = await prepareFontsDir(hfDir)
+  const fontsDir = await prepareFontsDir(hfDir, fontIds)
+  // 内置字体 id → 族名。自定义字体（运营上传）的族名解析留给后续任务。
+  const fontFamilies = Object.fromEntries(BUILTIN_FONTS.map((f) => [f.id, f.family]))
   const plan = buildRenderFullPlan(fromBodyData(data, {
     hfDir,
     ...(openingClipAbs ? { openingClipAbs } : {}),
@@ -182,6 +186,7 @@ export async function renderBodyWithFfmpeg(
     assAbs: path.join(hfDir, 'subs.ass'),
     outAbs,
     fontsDir,
+    fontFamilies,
   }))
   await fs.writeFile(path.join(hfDir, 'subs.ass'), plan.assContent, 'utf8')
 

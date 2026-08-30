@@ -32,10 +32,12 @@ export interface FromBodyDataIo {
    */
   fontsDir?: string
   /**
-   * 字体 id → 族名。由调用方（renderVisuals）合并内置表与库里的自定义字体后传入。
-   * fromBodyData 是纯函数，不能自己查库；缺省时未配置字体 id 一律回退默认字体。
+   * 自定义字体 id → {族名, 字重}。由调用方（renderPipeline）查库（CustomFont 表）后传入；
+   * fromBodyData 是纯函数，不能自己查库。只需要放**认不出的 id**（即数据库 cuid）
+   * 对应的条目——内置字体走 findBuiltinFont，不必也不应该塞进这张表（见 fontMeta）。
+   * 缺省时未配置字体 id、或 id 既不在这张表也不是内置字体，一律回退默认字体。
    */
-  fontFamilies?: Record<string, string>
+  fontFamilies?: Record<string, { family: string; weight: 400 | 700 }>
 }
 
 /** 相对路径 → 绝对路径。BodyData 里存的是 hf 目录内的相对路径（media/01.png） */
@@ -110,18 +112,24 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
   const tx = p?.text
   const capPx = tx?.captionSizePx ?? DEFAULT_CAPTION_PX
   const px = (ratio: number) => Math.round(capPx * ratio)
-  // 字体 id → 族名。认不出就回退默认字体：宁可字体没换，也不能渲染失败。
-  const fam = (id: string | undefined): string | undefined => {
+  // 字体 id → {族名, 字重}。内置与自定义走同一条路径：先查调用方喂进来的自定义表，
+  // 查不到再查内置表——不能分成两套 if/else，那样字重那条支路很容易漏掉自定义字体
+  // （Task 11 就是活生生的例子：族名走了合并路径，字重却只查了内置表）。
+  // 认不出就整体回退（undefined）：宁可字体没换，也不能渲染失败。
+  const fontMeta = (id: string | undefined): { family: string; weight: 400 | 700 } | undefined => {
     if (!id) return undefined
-    return io.fontFamilies?.[id] ?? findBuiltinFont(id)?.family
+    const custom = io.fontFamilies?.[id]
+    if (custom) return custom
+    const b = findBuiltinFont(id)
+    return b ? { family: b.family, weight: b.weight } : undefined
   }
-  const captionFont = fam(tx?.captionFontId) ?? DEFAULT_FONT_NAME
-  const titleFont = fam(tx?.titleFontId)
-  const enFont = fam(tx?.enFontId)
-  // ★ 正文字体解析到内置字重 700 的条目时置粗体位。ass.ts 的 cap/wm 样式行 Bold 位
-  // 由它驱动——不设的话运营选了「思源黑体 Bold」当正文字体会毫无反应（族名相同，
-  // libass 会按 Bold=0 挑回 Regular），是典型的静默失效。
-  const captionFontBold = findBuiltinFont(tx?.captionFontId)?.weight === 700
+  const captionFont = fontMeta(tx?.captionFontId)?.family ?? DEFAULT_FONT_NAME
+  const titleFont = fontMeta(tx?.titleFontId)?.family
+  const enFont = fontMeta(tx?.enFontId)?.family
+  // ★ 正文字体解析到字重 700 的条目（内置或自定义）时置粗体位。ass.ts 的 cap/wm
+  // 样式行 Bold 位由它驱动——不设的话运营选了粗体字体当正文字体会毫无反应
+  // （族名相同，libass 会按 Bold=0 挑回 Regular），是典型的静默失效。
+  const captionFontBold = fontMeta(tx?.captionFontId)?.weight === 700
   // 开场标题：第 0 段是「开场 + 快闪」的时间窗，它的字幕就是这行开场白。
   // ffmpeg 迁移时 segs.slice(1) 把第 0 段整个丢掉了，成片开头一直没有这行字。
   const openTitleText = p?.open.titleText?.trim() || segs[0]?.subtitle?.trim() || ''

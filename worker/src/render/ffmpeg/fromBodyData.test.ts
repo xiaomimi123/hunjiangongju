@@ -273,7 +273,25 @@ describe('fromBodyData —— 字体 id 映射成族名', () => {
   it('自定义字体族名由 io.fontFamilies 提供', () => {
     const o = fromBodyData(data({
       templateParams: params({ text: { captionFontId: 'cl-custom-id' } }),
-    }), { ...io, fontFamilies: { 'cl-custom-id': 'My Custom Font' } })
+    }), { ...io, fontFamilies: { 'cl-custom-id': { family: 'My Custom Font', weight: 400 } } })
     expect(o.assStyle.fontName).toBe('My Custom Font')
+  })
+
+  // ★ 锁住 Task 11 留下的字重缺口：自定义字体 weight=700 当正文字幕字体时，
+  // captionFontBold 必须为 true。内置与自定义走同一条 fontMeta 解析路径，
+  // 这条断言直接盯着「自定义粗体字体选了毫无反应」这个静默失效场景。
+  it('自定义字体 weight=700 当正文字体时 captionFontBold 为 true', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'cl-bold-id' } }),
+    }), { ...io, fontFamilies: { 'cl-bold-id': { family: 'My Bold Font', weight: 700 } } })
+    expect(o.assStyle.fontName).toBe('My Bold Font')
+    expect(o.assStyle.captionFontBold).toBe(true)
+  })
+
+  it('自定义字体 weight=400 当正文字体时 captionFontBold 不出现（老行为不变）', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'cl-regular-id' } }),
+    }), { ...io, fontFamilies: { 'cl-regular-id': { family: 'My Regular Font', weight: 400 } } })
+    expect('captionFontBold' in o.assStyle).toBe(false)
   })
 })

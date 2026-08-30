@@ -2,7 +2,8 @@
 // 产出与 HyperFrames 完全同契约的 body.mp4（720×960、无声）。
 //
 // 放在这里而不是塞进 renderVisuals：renderVisuals 已经背着建 RenderTask、选 BGM、
-// 拷素材一堆职责，再塞进来就没法读了。这里只做渲染，不碰数据库。
+// 拷素材一堆职责，再塞进来就没法读了。这里只做渲染——唯一碰数据库的地方是
+// prepareFontsDir 查 CustomFont 表（自定义字体元数据），且查库能力可注入以便测试。
 
 import { runCmd } from '../../runCmd'
 import { promises as fs } from 'fs'
@@ -14,7 +15,8 @@ import { buildRenderFullPlan } from './renderFull'
 import { buildRippleDisplaceArgs } from './ripple'
 import { buildShatterMaps, buildShatterArgs, DEFAULT_GEOM, SHATTER_MAPS_VERSION } from './shatterMaps'
 import { FONTS_DIR, usedBuiltinFontIds } from './fonts'
-import { BUILTIN_FONTS } from '@mixcut/db'
+import { BUILTIN_FONTS, findBuiltinFont, prisma } from '@mixcut/db'
+import { DATA_DIR } from '../../paths'
 
 const FPS = 30
 
@@ -124,6 +126,20 @@ async function ensureRippleMaps(
   return { xmapAbs, ymapAbs }
 }
 
+/** prepareFontsDir 查自定义字体表用的最小接口。真实实现是 prisma.customFont，
+ * 测试可以喂一个假的进来——prepareFontsDir 不该因为「测试环境没数据库」而测不了。 */
+export interface CustomFontLookup {
+  findMany(args: { where: { id: { in: string[] } } }): Promise<
+    { id: string; label: string; family: string; weight: number; fileName: string }[]
+  >
+}
+
+export interface PreparedFontsDir {
+  dir: string
+  /** 自定义字体 id → {族名, 字重}，喂给 fromBodyData 的 io.fontFamilies */
+  fontFamilies: Record<string, { family: string; weight: 400 | 700 }>
+}
+
 /**
  * 建 per-task fontsdir：**只拷本条片子真正用到的字体文件**，不是整个内置字体目录。
  *
@@ -134,17 +150,43 @@ async function ensureRippleMaps(
  *
  * usedIds 由调用方从 templateParams.text 的 captionFontId/titleFontId/enFontId
  * 取出后传入；缺省（如测试直接调用）时只会拷默认字体一个文件。
+ *
+ * 认不出的 id（不在内置表里）当自定义字体处理：批量查一次 CustomFont 表
+ * （不逐个查，避免每条片子 3 个字体字段打 3 次库），命中的从 data/fonts/ 拷进目录。
+ *
+ * ★ 磁盘缺文件的处理策略——响亮失败，不跳过：库里有记录但 data/fonts/ 下找不到
+ * 文件，只可能是文件被误删/迁移丢失这类真正的异常状态，不是「运营没配」这种
+ * 正常缺省。跟内置字体缺文件（本函数上半段，copyFile 无 try/catch）同一个态度：
+ * 静默跳过会让运营选中的字体悄悄变成豆腐块，且日志毫无异常，排查成本极高——
+ * 这正是本任务要堵的那类「界面上设了、成片没变化」的静默失效。
  */
-async function prepareFontsDir(hfDir: string, usedIds: (string | undefined)[] = []): Promise<string> {
+export async function prepareFontsDir(
+  hfDir: string,
+  usedIds: (string | undefined)[] = [],
+  customFont: CustomFontLookup = prisma.customFont,
+): Promise<PreparedFontsDir> {
   const dir = path.join(hfDir, 'fonts')
   await fs.mkdir(dir, { recursive: true })
-  const ids = usedBuiltinFontIds(usedIds)
-  for (const id of ids) {
+  const builtinIds = usedBuiltinFontIds(usedIds)
+  for (const id of builtinIds) {
     const entry = BUILTIN_FONTS.find((f) => f.id === id)
     if (!entry) continue // usedBuiltinFontIds 已经过滤过，这里只是防御
     await fs.copyFile(path.join(FONTS_DIR, entry.file), path.join(dir, entry.file))
   }
-  return dir
+
+  // 认不出的 id：既可能是自定义字体的 cuid，也可能是改过名/删过的脏配置——
+  // 统一批量查一次库，查不到的行（脏配置）自然被 findMany 的结果过滤掉，不必单独处理。
+  const unknownIds = [...new Set(usedIds.filter((id): id is string => !!id && !findBuiltinFont(id)))]
+  const fontFamilies: Record<string, { family: string; weight: 400 | 700 }> = {}
+  if (unknownIds.length > 0) {
+    const rows = await customFont.findMany({ where: { id: { in: unknownIds } } })
+    for (const row of rows) {
+      // 响亮失败：copyFile 无 try/catch，文件缺失直接抛错（同内置字体的态度，见函数注释）
+      await fs.copyFile(path.join(DATA_DIR, 'fonts', row.fileName), path.join(dir, row.fileName))
+      fontFamilies[row.id] = { family: row.family, weight: row.weight === 700 ? 700 : 400 }
+    }
+  }
+  return { dir, fontFamilies }
 }
 
 /**
@@ -175,10 +217,10 @@ export async function renderBodyWithFfmpeg(
   // 运营在后台选的字体 id：来自 templateParams.text，喂给 prepareFontsDir 才会
   // 真的把字体文件拷进 fontsdir，否则渲染层回退默认字体、运营的选择静默失效。
   const fontIds = [p?.text?.captionFontId, p?.text?.titleFontId, p?.text?.enFontId]
-  // per-task fontsdir：只装本条片子用到的字体（见 prepareFontsDir 的注释）
-  const fontsDir = await prepareFontsDir(hfDir, fontIds)
-  // 内置字体 id → 族名。自定义字体（运营上传）的族名解析留给后续任务。
-  const fontFamilies = Object.fromEntries(BUILTIN_FONTS.map((f) => [f.id, f.family]))
+  // per-task fontsdir：只装本条片子用到的字体（见 prepareFontsDir 的注释）。
+  // 认不出的 id 会去查 CustomFont 表，命中的连同族名/字重一起回传——
+  // 内置字体不必进 fontFamilies，fromBodyData 的 fontMeta 会自己查 findBuiltinFont。
+  const { dir: fontsDir, fontFamilies } = await prepareFontsDir(hfDir, fontIds)
   const plan = buildRenderFullPlan(fromBodyData(data, {
     hfDir,
     ...(openingClipAbs ? { openingClipAbs } : {}),

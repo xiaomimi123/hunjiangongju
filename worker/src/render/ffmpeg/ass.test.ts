@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildAss, toAssColor, toAssTime, escapeAssText, subtitlesFilter, bilingualExtraPx, type AssOpts } from './ass'
+import { buildAss, toAssColor, toAssTime, escapeAssText, subtitlesFilter, type AssOpts } from './ass'
 
 const style = {
   fontName: 'Noto Sans CJK SC',
@@ -275,15 +275,16 @@ describe('双语字幕', () => {
     expect(withEn).not.toContain('This is Chinese')
   })
 
-  it('开启后英文跟在中文之后，用 \\N 换行并内联覆盖字号/颜色', () => {
+  it('开启后英文行是独立的 Dialogue 事件，\\an8+\\pos 定位、内联覆盖字号/颜色', () => {
     const ass = buildAss(opts({ bilingual: true, enScale: 0.6, enColor: '#dddddd', enGapPx: 0 }) as never)
-    // 50 * 0.6 = 30
-    expect(ass).toContain('这是一句中文\\N{\\fs30\\c&HDDDDDD&}This is Chinese')
+    // 50 * 0.6 = 30；cx = 720/2 = 360；enY = round(1280*0.78) + 0 = 998
+    expect(ass).toContain('{\\an8\\pos(360,998)\\fs30\\c&HDDDDDD&}This is Chinese')
   })
 
-  it('enGapPx > 0 时插一行等高的硬空格撑出行间距', () => {
+  it('enGapPx 决定英文行顶边离中文基线多远（不再是靠 LINE_H 折算的行间距）', () => {
     const ass = buildAss(opts({ bilingual: true, enScale: 0.6, enGapPx: 8 }) as never)
-    expect(ass).toContain('这是一句中文\\N{\\fs8}\\h\\N{\\fs30')
+    // enY = round(1280*0.78) + 8 = 1006
+    expect(ass).toContain('{\\an8\\pos(360,1006)\\fs30\\c&HDDDDDD&}This is Chinese')
   })
 
   it('enFontName 给了就内联换字体', () => {
@@ -291,33 +292,20 @@ describe('双语字幕', () => {
     expect(ass).toContain('\\fnSpace Grotesk}')
   })
 
-  it('英文为空的拍不产出英文段', () => {
+  it('英文为空的拍不产出英文事件', () => {
     const ass = buildAss({
       width: 720, height: 1280, totalMs: 2000,
       captions: [{ text: '只有中文', startMs: 0, endMs: 1000 }],
       style: { ...base, bilingual: true },
     } as never)
     expect(ass).toContain('只有中文')
-    expect(ass).not.toContain('\\N{\\fs')
+    expect(ass).not.toContain('\\an8')
   })
 
-  it('★ 开双语时 cap 样式的 MarginV 减去英文块高度，中文行不被顶上去', () => {
+  it('★ 开/关双语时 Style: cap 那一行逐字节相同——中文行的位置与双语开关彻底解耦', () => {
     const off = buildAss(opts({}) as never)
     const on = buildAss(opts({ bilingual: true, enScale: 0.6, enGapPx: 8 }) as never)
-    const marginV = (ass: string) => Number(/^Style: cap,.*,(\d+),1$/m.exec(ass)![1])
-    // 1280 * (1 - 0.78) = 281.6 → 282
-    expect(marginV(off)).toBe(282)
-    // 英文块高 = round((30 + 8) * 1.2) = 46
-    expect(marginV(on)).toBe(282 - 46)
-  })
-
-  it('bilingualExtraPx：不开双语恒为 0', () => {
-    expect(bilingualExtraPx({ ...base, bilingual: false } as never)).toBe(0)
-    expect(bilingualExtraPx({ ...base, bilingual: true, enScale: 0.6, enGapPx: 8 } as never)).toBe(46)
-  })
-
-  it('MarginV 不会被减成负数', () => {
-    const ass = buildAss(opts({ captionPosY: 0.999, bilingual: true, enScale: 1, enGapPx: 40 }) as never)
-    expect(Number(/^Style: cap,.*,(\d+),1$/m.exec(ass)![1])).toBe(0)
+    const capStyleLine = (ass: string) => ass.split('\n').find((l) => l.startsWith('Style: cap,'))
+    expect(capStyleLine(on)).toBe(capStyleLine(off))
   })
 })

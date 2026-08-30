@@ -14,6 +14,12 @@ export type FontEntry = {
   id: string
   /** 字体内部族名，写进 ASS 的 Fontname / CSS 的 font-family */
   family: string
+  /**
+   * 字重。ASS 靠 Fontname + Bold 位共同定位一个字面——同一字体族的 Regular 与
+   * Bold 两个文件的 family 本来就相同（只有 name 表的 subfamily 不同），
+   * 这不是撞名，是字体格式本身的设计。ass.ts 拼 Style 行时用它推导 Bold 位。
+   */
+  weight: 400 | 700
   /** worker/templates/booklist/fonts/ 下的文件名 */
   file: string
   /** 后台下拉里的中文显示名 */
@@ -21,7 +27,7 @@ export type FontEntry = {
 }
 
 export const BUILTIN_FONTS: readonly FontEntry[] = [
-  { id: 'noto-sc', family: 'Noto Sans SC', file: 'NotoSansSC-Regular.otf', label: '思源黑体 Regular' },
+  { id: 'noto-sc', family: 'Noto Sans SC', weight: 400, file: 'NotoSansSC-Regular.otf', label: '思源黑体 Regular' },
 ] as const
 
 /** 一个字体都没配时用它。与 worker 的 DEFAULT_FONT_NAME 指同一款。 */

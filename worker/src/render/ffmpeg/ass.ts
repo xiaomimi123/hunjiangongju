@@ -86,6 +86,25 @@ export interface AssStyleOpts {
   enGapPx?: number
   /** 英文行字体族名。不给则跟随正文字体 */
   enFontName?: string
+  /**
+   * 标题类字体族名：常驻书名大标题(title) + 快闪书名/作者(ft/fa) + 开场标题(ot)。
+   * 不给则跟随 fontName。正文字幕(cap)与水印(wm)恒用 fontName。
+   *
+   * 只做「正文 / 标题」两档：ass.ts 里本来就是两套 Style，与现有结构对齐；
+   * 四层各给一个下拉框对运营是负担，真有需求再拆。
+   */
+  titleFontName?: string
+  /**
+   * 正文字幕(cap)与水印(wm)是否用粗体字面。缺省 false（与写死 Bold=0 的老输出一致）。
+   *
+   * title/ot/ft/fa 的 Bold 位**不跟这个逻辑**、继续写死 1，见下面 buildAss 里的说明——
+   * 这不是疏漏，是任务复盘后刻意留住的：字重驱动 Bold 位一度改到了标题层，
+   * 但实测证明"写死 1 是空操作"这个前提是假的，改动本身会让存量成片的标题
+   * 无声变薄。cap/wm 这里保留是因为场景不同：运营选中的是**正文**字体，
+   * 若正文字体真收录了粗体字面而这里仍写死 0，libass 会静默选回 Regular，
+   * 表现成「选了没反应」——这类静默失效最难排查，必须留一个开关能让它生效。
+   */
+  captionFontBold?: boolean
 }
 
 export interface AssOpts {
@@ -163,10 +182,16 @@ const TITLE_SUB_RATIO = 0.42
 /**
  * 常驻大标题的「加粗层」描边宽度。
  *
- * 自带字体只有 NotoSansSC-Regular，**没有粗体字面**，而 libass 不会为它合成假粗体
- * ——实测同一段文字 Bold=0 与 Bold=1 渲染出来完全一致，那个标志位一直是摆设。
- * 所以真加粗只能自己做：在原字上再叠一层「与文字同色」的细描边，把笔画撑粗。
- * 底层保留深色粗描边（浅色配图上的可读性靠它），加粗层压在上面。
+ * ★ 这里原来写的是「自带字体只有 NotoSansSC-Regular，libass 不会为它合成假粗体，
+ * Bold=0 与 Bold=1 渲染出来完全一致」——这句话在写下它时用的 libass 版本上或许
+ * 为真，**现在不是**：真渲染实测（2026-08-30，libass 0.17.5，fontsdir 仍只有
+ * Regular 一个文件）显示 Bold=1 会让 libass 走 FreeType 合成假粗体，隔离测量
+ * （去掉本层描边、只看 title 的 Style Bold 位）墨迹占比 0.011762 → 0.014757，
+ * 相对差 25.4%，不是"完全一致"。也就是说 title/ot/ft/fa 的 Style Bold 位
+ * 一直写死 1，此刻并不是空操作，而是"合成假粗"叠加"这层描边假粗"的双重加粗
+ * ——只是没人把它拆开量过。正因为写死 1 已经是存量成片像素的一部分，
+ * 这个位才**不能**动（见 buildAss 里的说明）：改掉它 = 改掉所有存量框架的标题观感。
+ * 这层描边是叠加在"合成假粗"之上的第二层加粗，两者一起构成今天线上的观感。
  */
 const TITLE_BOLD_BORD = 1.6
 
@@ -198,6 +223,16 @@ export function buildAss(o: AssOpts): string {
   // 描边宽度：缺省 3 = 把它放开之前写死的值，老调用逐字节不变
   const bord = Math.max(0, st.outlinePx ?? 3)
   const boldBord = Math.max(0, st.boldBordPx ?? TITLE_BOLD_BORD)
+  // 标题类字体族名：title/ot/ft/fa 用它，cap/wm 继续用 fontName（见 AssStyleOpts.titleFontName）。
+  const titleFont = st.titleFontName || st.fontName
+  // ★ title/ot/ft/fa 的 Bold 位**继续写死 1，不由任何参数驱动**——这是刻意的。
+  // 曾经改成由字体 weight 推导、缺省 0，本意是修「加粗体字面后 Bold 位失控」的隐患，
+  // 但真渲染实测证明「Bold=1 今天是空操作」这个前提是假的（见 TITLE_BOLD_BORD 注释）：
+  // 写死的 1 早就是存量成片像素的一部分，动它 = 让所有存量框架的标题无声变薄。
+  // 病根其实是 fontsdir 装的是整个内置字体池——加一个粗体文件就等于给所有存量
+  // 框架换了可选字体，这个"加字体不能动存量像素"的安全机制挪到后续任务
+  // （fontsdir 改成 per-task、只装这条真正用到的字体），不靠改 Bold 位来解决。
+  const capBold = st.captionFontBold ? 1 : 0
 
   const header = [
     '[Script Info]',
@@ -213,18 +248,18 @@ export function buildAss(o: AssOpts): string {
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     // 描边 + 阴影：配图明暗不可控，没有描边的字幕在浅色图上会糊掉。
     // 描边宽度改为可配（outlinePx，缺省 3 = 原写死值），浅底图多、字看不清时调大它。
-    `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},0,0,0,0,100,100,0,0,1,${bord},2,2,60,60,${capMarginV},1`,
+    `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},${capBold},0,0,0,100,100,0,0,1,${bord},2,2,60,60,${capMarginV},1`,
     // an5(正中) + \pos：位置由草稿的 titlePosY 决定，不再贴死在顶边
-    `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`,
+    `Style: title,${titleFont},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`,
     ...(st.openTitleSizePx
-      ? [`Style: ot,${st.fontName},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`]
+      ? [`Style: ot,${titleFont},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`]
       : []),
-    `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},0,0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
+    `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},${capBold},0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
     // 快闪卡：an5(正中) + \pos 精确定位。只在给了尺寸时产出，老调用零回归。
     ...(st.flashTitleSizePx
       ? [
-          `Style: ft,${st.fontName},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,${bord},3,5,40,40,0,1`,
-          `Style: fa,${st.fontName},${st.flashAuthorSizePx ?? 28},${toAssColor(st.flashAuthorColor ?? '#ffcc88')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,2,2,5,40,40,0,1`,
+          `Style: ft,${titleFont},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,${bord},3,5,40,40,0,1`,
+          `Style: fa,${titleFont},${st.flashAuthorSizePx ?? 28},${toAssColor(st.flashAuthorColor ?? '#ffcc88')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,2,2,5,40,40,0,1`,
         ]
       : []),
     '',

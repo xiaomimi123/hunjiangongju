@@ -14,12 +14,29 @@
 // 仍然存在的差异：字距、CJK 断行位置、描边叠加顺序。所以画布角上常驻
 // 「示意预览，最终以成片为准」。
 //
-// 本任务（Task 19）只做静态渲染：场景/底图可切换、字体真实加载、数值零换算，
-// 但图层还不能拖拽（留给 Task 20），也不接入两个 studio 页（再下一个任务）。
+// Task 19 做了静态渲染；本文件（Task 20）在此基础上加拖拽交互：
+//   - 纵向拖动图层改 posY，拖图层正下方的把手改字号 —— 换算全部是纯函数
+//     （stageGeometry.ts 的 nextPosY / nextCaptionSizePx / nextLayerScale），
+//     本文件只负责事件接线（onPointerDown + window 上的 pointermove/pointerup），
+//     不含任何算术，保证换算逻辑能在 node 环境用 vitest 测到。
+//   - 用 Pointer Events，不用 HTML5 drag：drag 在有 `transform: scale` 的
+//     容器里坐标会错位。
+//   - 只读 clientY，完全不读 clientX——ass.ts 里所有文字层都是居中锚定
+//     （an2 / an5 + \pos(cx, y)），横向坐标从不参与渲染，给横向拖拽自由度
+//     只会让运营以为拖了、成片却纹丝不动。
+// 仍不接入两个 studio 页（下一个任务）。
 
 import { useEffect, useRef, useState } from 'react'
 import type { TextParams, FontOption } from './paramControls'
-import { computeStageLayers, type StageScene, type StageLayer, type StageSample } from './stageGeometry'
+import {
+  computeStageLayers,
+  nextPosY,
+  nextCaptionSizePx,
+  nextLayerScale,
+  type StageScene,
+  type StageLayer,
+  type StageSample,
+} from './stageGeometry'
 
 export type { StageScene, StageLayer, StageSample }
 export type StageBg = 'placeholder' | 'light' | 'dark' | { url: string }
@@ -70,9 +87,10 @@ export function StageCanvas(props: {
   sample: StageSample
   selected: StageLayer | null
   onSelect: (l: StageLayer | null) => void
-  // 本任务只做静态渲染，拖拽（消费 onPosY/onSize）留给 Task 20；
-  // 参数先按最终契约收进来，避免下个任务改 props 形状。
+  // 纵向拖动图层触发：v 是换算后的新 posY（0..1）。
   onPosY: (layer: StageLayer, v: number) => void
+  // 拖图层下方把手触发：caption 层 v 是新的 captionSizePx（绝对像素），
+  // 其余层 v 是新的 *Scale 倍数（相对 captionSizePx）。
   onSize: (layer: StageLayer, v: number) => void
 }) {
   const { width, height, text, captionColor, captionPosY, fonts, scene, sample } = props
@@ -123,6 +141,113 @@ export function StageCanvas(props: {
   const textStroke: React.CSSProperties = {
     WebkitTextStroke: `${strokePx}px #000`,
     paintOrder: 'stroke fill',
+  }
+
+  // 拖拽期间正在处理的 pointerup 清理函数（组件卸载时也要清，避免泄漏 window 监听器）。
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+  useEffect(() => {
+    return () => dragCleanupRef.current?.()
+  }, [])
+
+  /**
+   * 各图层当前的 posY（0..1），拖拽起点。
+   * flashAuthor / watermark 没有独立的 posY 参数——flashAuthor 的位置完全由
+   * flashTitle 的 top + 固定偏移派生（见 stageGeometry.ts flashAuthorTop），
+   * watermark 固定右上角——这两层不支持位置拖拽，返回 undefined。
+   */
+  const posYOf = (layer: StageLayer): number | undefined => {
+    switch (layer) {
+      case 'caption':
+        return captionPosY
+      case 'bookTitle':
+        return text.bookTitlePosY
+      case 'flashTitle':
+        return text.flashTitlePosY
+      case 'openTitle':
+        return text.openTitlePosY
+      default:
+        return undefined
+    }
+  }
+
+  /**
+   * 拖字号把手的起始值。caption 是绝对像素（captionSizePx），
+   * 其余层是各自的 *Scale 倍数。
+   * flashAuthor 没有独立的字号参数——它的字号由 `captionSizePx * flashTitleScale *
+   * 0.48`（fromBodyData.ts 的 FS.flashAuthorRatio）派生，见 stageGeometry.ts
+   * flashAuthorFontSizePx——所以拖 flashAuthor 把手复用 flashTitleScale
+   * 作为起始值/写回目标：视觉上调它俩本来就联动，也没有更独立的参数可改。
+   * watermark 固定字号，不支持拖拽，返回 undefined。
+   */
+  const sizeStartOf = (layer: StageLayer): number | undefined => {
+    switch (layer) {
+      case 'caption':
+        return text.captionSizePx
+      case 'bookTitle':
+        return text.bookTitleScale
+      case 'flashTitle':
+        return text.flashTitleScale
+      case 'flashAuthor':
+        return text.flashTitleScale
+      case 'openTitle':
+        return text.openTitleScale
+      default:
+        return undefined
+    }
+  }
+
+  const setBodyDragCursor = (on: boolean) => {
+    document.body.style.cursor = on ? 'ns-resize' : ''
+    document.body.style.userSelect = on ? 'none' : ''
+  }
+
+  /**
+   * 纵向拖动图层改 posY。只读 e.clientY，完全不读 e.clientX——ass.ts 里所有
+   * 文字层都是居中锚定（an2/an5 + \pos(cx, y)），给水平自由度等于骗人：
+   * 运营横着拖了、成片却纹丝不动。
+   */
+  const beginPosDrag = (layer: StageLayer, e: React.PointerEvent) => {
+    const startPosY = posYOf(layer)
+    if (startPosY === undefined) return
+    e.stopPropagation()
+    const startClientY = e.clientY
+    setBodyDragCursor(true)
+    const onMove = (ev: PointerEvent) => {
+      props.onPosY(layer, nextPosY(startPosY, ev.clientY - startClientY, scale, height))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setBodyDragCursor(false)
+      dragCleanupRef.current = null
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    dragCleanupRef.current = onUp
+  }
+
+  /** 拖图层下方把手改字号。同样只读 e.clientY。 */
+  const beginSizeDrag = (layer: StageLayer, e: React.PointerEvent) => {
+    const startValue = sizeStartOf(layer)
+    if (startValue === undefined) return
+    e.stopPropagation()
+    const startClientY = e.clientY
+    setBodyDragCursor(true)
+    const onMove = (ev: PointerEvent) => {
+      const dy = ev.clientY - startClientY
+      const v =
+        layer === 'caption' ? nextCaptionSizePx(startValue, dy, scale) : nextLayerScale(startValue, dy, scale, text.captionSizePx)
+      props.onSize(layer, v)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setBodyDragCursor(false)
+      dragCleanupRef.current = null
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    dragCleanupRef.current = onUp
   }
 
   const selectable = (layer: StageLayer): React.HTMLAttributes<HTMLDivElement> => ({
@@ -189,7 +314,7 @@ export function StageCanvas(props: {
             switch (l.layer) {
             case 'caption': {
               return (
-                <div key="caption" data-testid="layer-caption">
+                <div key="caption" data-testid="layer-caption" onPointerDown={(e) => beginPosDrag('caption', e)}>
                   <div
                     {...selectable('caption')}
                     className="absolute whitespace-nowrap"
@@ -221,6 +346,23 @@ export function StageCanvas(props: {
                       {l.en.text}
                     </div>
                   )}
+                  {props.selected === 'caption' && (
+                    <div
+                      data-testid="handle-caption"
+                      onPointerDown={(e) => beginSizeDrag('caption', e)}
+                      className="absolute"
+                      style={{
+                        left: '50%',
+                        top: l.zh.top + 4,
+                        width: 120,
+                        height: 8,
+                        transform: 'translate(-50%, 0)',
+                        cursor: 'ns-resize',
+                        background: 'rgba(255, 138, 61, 0.85)',
+                        borderRadius: 4,
+                      }}
+                    />
+                  )}
                 </div>
               )
             }
@@ -230,43 +372,81 @@ export function StageCanvas(props: {
               const color =
                 l.layer === 'bookTitle' ? text.bookTitleColor : l.layer === 'flashTitle' ? text.flashTitleColor : text.openTitleColor
               return (
-                <div
-                  key={l.layer}
-                  data-testid={`layer-${l.layer}`}
-                  {...selectable(l.layer)}
-                  className="absolute whitespace-nowrap"
-                  style={{
-                    left: '50%',
-                    top: l.top,
-                    transform: 'translate(-50%, -50%)',
-                    fontSize: l.fontSizePx,
-                    color,
-                    fontFamily: titleFamily,
-                    ...textStroke,
-                  }}
-                >
-                  {l.text}
+                <div key={l.layer}>
+                  <div
+                    data-testid={`layer-${l.layer}`}
+                    {...selectable(l.layer)}
+                    onPointerDown={(e) => beginPosDrag(l.layer, e)}
+                    className="absolute whitespace-nowrap"
+                    style={{
+                      left: '50%',
+                      top: l.top,
+                      transform: 'translate(-50%, -50%)',
+                      fontSize: l.fontSizePx,
+                      color,
+                      fontFamily: titleFamily,
+                      ...textStroke,
+                    }}
+                  >
+                    {l.text}
+                  </div>
+                  {props.selected === l.layer && (
+                    <div
+                      data-testid={`handle-${l.layer}`}
+                      onPointerDown={(e) => beginSizeDrag(l.layer, e)}
+                      className="absolute"
+                      style={{
+                        left: '50%',
+                        top: l.top + l.fontSizePx / 2 + 4,
+                        width: 120,
+                        height: 8,
+                        transform: 'translate(-50%, 0)',
+                        cursor: 'ns-resize',
+                        background: 'rgba(255, 138, 61, 0.85)',
+                        borderRadius: 4,
+                      }}
+                    />
+                  )}
                 </div>
               )
             }
             case 'flashAuthor': {
               return (
-                <div
-                  key="flashAuthor"
-                  data-testid="layer-flashAuthor"
-                  {...selectable('flashAuthor')}
-                  className="absolute whitespace-nowrap"
-                  style={{
-                    left: '50%',
-                    top: l.top,
-                    transform: 'translate(-50%, -50%)',
-                    fontSize: l.fontSizePx,
-                    color: text.flashAuthorColor,
-                    fontFamily: titleFamily,
-                    ...textStroke,
-                  }}
-                >
-                  {l.text}
+                <div key="flashAuthor">
+                  <div
+                    data-testid="layer-flashAuthor"
+                    {...selectable('flashAuthor')}
+                    onPointerDown={(e) => beginPosDrag('flashAuthor', e)}
+                    className="absolute whitespace-nowrap"
+                    style={{
+                      left: '50%',
+                      top: l.top,
+                      transform: 'translate(-50%, -50%)',
+                      fontSize: l.fontSizePx,
+                      color: text.flashAuthorColor,
+                      fontFamily: titleFamily,
+                      ...textStroke,
+                    }}
+                  >
+                    {l.text}
+                  </div>
+                  {props.selected === 'flashAuthor' && (
+                    <div
+                      data-testid="handle-flashAuthor"
+                      onPointerDown={(e) => beginSizeDrag('flashAuthor', e)}
+                      className="absolute"
+                      style={{
+                        left: '50%',
+                        top: l.top + l.fontSizePx / 2 + 4,
+                        width: 120,
+                        height: 8,
+                        transform: 'translate(-50%, 0)',
+                        cursor: 'ns-resize',
+                        background: 'rgba(255, 138, 61, 0.85)',
+                        borderRadius: 4,
+                      }}
+                    />
+                  )}
                 </div>
               )
             }

@@ -203,6 +203,51 @@ const WATERMARK = { top: 24, right: 24, fontSizePx: 22, opacity: 0.62 }
  *   - flash：快闪书名 + 作者
  *   - body：常驻书名大标题 + 正文字幕（含双语英文行）+ 水印
  */
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v))
+}
+
+/**
+ * 拖拽换算：纵向拖动图层 → 新的 posY（0..1，与 captionPosY / bookTitlePosY /
+ * flashTitlePosY / openTitlePosY 同口径）。
+ *
+ * ★ 必须除以 `scale`：鼠标移动的 `deltaClientY` 是屏幕像素（CSS px），
+ * 而 posY 描述的是真实像素坐标系（720×1280 这一类）里的比例。
+ * `StageCanvas` 最外层用 `transform: scale(containerW / videoW)` 把真实像素
+ * 画面缩小/放大铺满容器——容器越窄 scale 越小，同样的鼠标位移在真实坐标系里
+ * 对应的距离就越大，所以要把 deltaClientY 先除以 scale 换回真实像素，
+ * 再除以 height 换成比例。漏了这一步不会报错，只会让缩放比例一变
+ * 拖拽手感就跟着变（缩得越小拖得越快），运营会觉得"这玩意儿不好用"却说不清哪里错。
+ */
+export function nextPosY(startPosY: number, deltaClientY: number, scale: number, height: number): number {
+  return clamp(startPosY + deltaClientY / scale / height, 0, 1)
+}
+
+/**
+ * 拖把手改字号 —— caption 层：直接改 `captionSizePx`（绝对像素，全片其余层字号
+ * 都按它的倍数派生），区间与 paramControls.tsx「正文字号（锚点）」输入框、
+ * packages/db/paramsWhitelist.ts 的夹取区间一致：[20, 120]。
+ *
+ * 同样要除以 `scale`，理由与 nextPosY 一致。
+ */
+export function nextCaptionSizePx(startPx: number, deltaClientY: number, scale: number): number {
+  return clamp(startPx + deltaClientY / scale, 20, 120)
+}
+
+/**
+ * 拖把手改字号 —— 其余层（bookTitle / flashTitle / openTitle，倍数相对
+ * captionSizePx）：改各自的 `*Scale` 倍数。区间与 paramControls.tsx 里对应
+ * 输入框（「书名标题倍数」「快闪书名倍数」「开场标题倍数」）、
+ * packages/db/paramsWhitelist.ts 的夹取区间一致：[0.2, 5]。
+ *
+ * 除以 `scale` 换回真实像素后，再除以 `captionSizePx`——因为这些层的字号是
+ * `captionSizePx * scale` 算出来的，同样的像素位移对应的「倍数」变化量
+ * 要按当前锚点字号折算，锚点字号越大，拖同样的像素改变的倍数应该越小。
+ */
+export function nextLayerScale(startScale: number, deltaClientY: number, scale: number, captionSizePx: number): number {
+  return clamp(startScale + deltaClientY / scale / captionSizePx, 0.2, 5)
+}
+
 export function computeStageLayers(input: StageGeometryInput): StageLayerGeom[] {
   const { width, height, scene, text, captionPosY, sample } = input
   const out: StageLayerGeom[] = []

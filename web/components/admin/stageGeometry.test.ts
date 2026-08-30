@@ -15,6 +15,9 @@ import {
   flashAuthorFontSizePx,
   openTitleTop,
   openTitleFontSizePx,
+  nextPosY,
+  nextCaptionSizePx,
+  nextLayerScale,
   type StageGeometryInput,
   type StageSample,
   type CaptionGeom,
@@ -206,5 +209,59 @@ describe('水印：固定小字号、半透明、右上角', () => {
     expect(wm.right).toBe(24)
     expect(wm.fontSizePx).toBe(22)
     expect(wm.opacity).toBe(0.62)
+  })
+})
+
+describe('拖拽换算：nextPosY', () => {
+  it('scale=1 时，deltaClientY 换回真实像素后除以 height 就是位移量', () => {
+    // startPosY=0.5, height=1280, delta=64 -> +64/1280
+    expect(nextPosY(0.5, 64, 1, 1280)).toBeCloseTo(0.5 + 64 / 1280, 10)
+  })
+
+  it('★ scale 必须参与换算：scale=2 时同样的 deltaClientY 只产生一半的位移', () => {
+    const full = nextPosY(0.5, 64, 1, 1280) - 0.5
+    const half = nextPosY(0.5, 64, 2, 1280) - 0.5
+    expect(half).toBeCloseTo(full / 2, 10)
+  })
+
+  it('往上拖过头夹到 0', () => {
+    expect(nextPosY(0.1, -9999, 1, 1280)).toBe(0)
+  })
+
+  it('往下拖过头夹到 1', () => {
+    expect(nextPosY(0.9, 9999, 1, 1280)).toBe(1)
+  })
+})
+
+describe('拖把手改字号：caption 层 nextCaptionSizePx', () => {
+  it('scale=1 时直接是像素加减', () => {
+    expect(nextCaptionSizePx(54, 10, 1)).toBe(64)
+  })
+
+  it('★ 受 scale 影响：scale=2 时同样的 deltaClientY 只产生一半的像素变化', () => {
+    expect(nextCaptionSizePx(54, 10, 2)).toBe(59)
+  })
+
+  it('夹在 [20, 120]（与 paramControls.tsx「正文字号（锚点）」及 paramsWhitelist.ts 一致）', () => {
+    expect(nextCaptionSizePx(54, -9999, 1)).toBe(20)
+    expect(nextCaptionSizePx(54, 9999, 1)).toBe(120)
+  })
+})
+
+describe('拖把手改字号：其余层 nextLayerScale', () => {
+  it('scale=1 时按 captionSizePx 折算倍数变化量', () => {
+    // startScale=1.85, delta=27, captionSizePx=54 -> +0.5
+    expect(nextLayerScale(1.85, 27, 1, 54)).toBeCloseTo(1.85 + 0.5, 10)
+  })
+
+  it('★ 受 scale 影响：scale=2 时同样的 deltaClientY 只产生一半的倍数变化', () => {
+    const full = nextLayerScale(1.85, 27, 1, 54) - 1.85
+    const half = nextLayerScale(1.85, 27, 2, 54) - 1.85
+    expect(half).toBeCloseTo(full / 2, 10)
+  })
+
+  it('夹在 [0.2, 5]（与 paramControls.tsx 书名/快闪书名/开场标题倍数输入框及 paramsWhitelist.ts 一致）', () => {
+    expect(nextLayerScale(1.85, -9999, 1, 54)).toBe(0.2)
+    expect(nextLayerScale(1.85, 9999, 1, 54)).toBe(5)
   })
 })

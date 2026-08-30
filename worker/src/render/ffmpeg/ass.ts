@@ -174,7 +174,14 @@ export function escapeAssText(s: string): string {
     .trim()
 }
 
-/** 常驻大标题里作者行相对书名的字号比例（与快闪卡的作者行同一口径） */
+/**
+ * 常驻大标题里作者行相对书名的字号比例。
+ *
+ * ★ 这里**不是**「与快闪卡的作者行同一口径」——快闪卡作者行用的是
+ * `fromBodyData.ts` 里的 `FS.flashAuthorRatio = 0.48`（见该文件
+ * `flashAuthorSizePx: Math.round(capPx * (tx?.flashTitleScale ?? 1.96) * FS.flashAuthorRatio)`），
+ * 与这里的 0.42 是两个独立标定、数值不同的系数，互不共享。
+ */
 const TITLE_SUB_RATIO = 0.42
 
 /**

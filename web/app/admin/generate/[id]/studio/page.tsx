@@ -207,11 +207,12 @@ export default function StudioPage() {
         <div className="flex items-center justify-between">
           <p className="eyebrow">字幕样式</p>
           <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-            onClick={() => save({ body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '字幕样式')}>
+            onClick={() => save({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) }, '字幕样式')}>
             {busy === '字幕样式' ? '保存中…' : '保存字幕样式'}
           </button>
         </div>
-        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} disabled={locked} />
+        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
+          text={text} onText={setText} disabled={locked} />
       </section>
 
       {/* ── 文字层 ── */}

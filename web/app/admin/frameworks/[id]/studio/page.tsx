@@ -135,8 +135,9 @@ export default function FrameworkStudioPage() {
       </Section>
 
       <Section title="字幕样式" what="字幕样式"
-        patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY } })}>
-        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} />
+        patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) })}>
+        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
+          text={text} onText={setText} />
       </Section>
 
       {text && (

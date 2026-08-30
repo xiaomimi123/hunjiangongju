@@ -135,11 +135,20 @@ export function MotionRows(props: {
   )
 }
 
+/**
+ * 字幕样式：颜色、竖直位置、双语。
+ *
+ * 双语的英文文本早就逐拍生成好了（translateLine），这里只是控制**渲不渲、怎么渲**。
+ * 关掉双语的框架，以后生成时会跳过翻译调用（见 generateScript）。
+ */
 export function CaptionStyleRows(props: {
   color: string; posY: number
   onColor: (v: string) => void; onPosY: (v: number) => void
+  text: TextParams | null; onText: (v: TextParams) => void
   disabled?: boolean
 }) {
+  const t = props.text
+  const set = (patch: Partial<TextParams>) => t && props.onText({ ...t, ...patch })
   return (
     <>
       <label className="flex items-center gap-3 py-1">
@@ -150,9 +159,28 @@ export function CaptionStyleRows(props: {
       </label>
       <NumRow label="正文字幕竖直位置" value={props.posY} disabled={props.disabled}
         min={0} max={1} step={0.01} hint="0 = 顶端，1 = 底端" onChange={props.onPosY} />
-      <p className="text-xs text-ink3">
-        字号在「文字层」分区调（正文字号锚点）；字体固定用自带的 Noto Sans SC。
-      </p>
+      {t && (
+        <>
+          <label className="flex items-center gap-3 py-1">
+            <span className="w-40 shrink-0 text-xs text-ink3">中英双语字幕</span>
+            <input type="checkbox" checked={t.bilingual} disabled={props.disabled}
+              onChange={(e) => set({ bilingual: e.target.checked })} />
+            <span className="text-xs text-ink3">中文在上、英文紧贴其下。关掉后以后生成会跳过翻译（省调用）</span>
+          </label>
+          {t.bilingual && (
+            <>
+              <NumRow label="英文字号倍数" value={t.enScale} disabled={props.disabled}
+                min={0.3} max={1} step={0.05} unit="×" hint={`相对正文，当前约 ${Math.round(t.captionSizePx * t.enScale)}px`}
+                onChange={(v) => set({ enScale: v })} />
+              <ColorRow label="英文行颜色" value={t.enColor} disabled={props.disabled}
+                onChange={(v) => set({ enColor: v })} />
+              <NumRow label="中英行间距" value={t.enGapPx} disabled={props.disabled}
+                min={0} max={40} step={1} unit="px" hint="0 = 紧贴" onChange={(v) => set({ enGapPx: v })} />
+            </>
+          )}
+        </>
+      )}
+      <p className="text-xs text-ink3">字号在「文字层」分区调（正文字号锚点）。</p>
     </>
   )
 }
@@ -190,6 +218,10 @@ export type TextParams = {
   bookTitleScale: number
   flashTitleScale: number
   openTitleScale: number
+  bilingual: boolean
+  enScale: number
+  enColor: string
+  enGapPx: number
 }
 export type PaceParams = { bookTitleLeadMs: number; bookTitleTailMs: number; speechCharsPerSec: number; maxTempo: number }
 export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string; captionMaxChars: number }

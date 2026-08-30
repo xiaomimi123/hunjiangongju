@@ -7,6 +7,13 @@ describe('parseTemplateParams', () => {
     expect(p.mode).toBe('classic')
     expect(p.audio.bgmVolume).toBe(DEFAULT_PARAMS.audio.bgmVolume)
   })
+  it('双语字段缺省时给出默认值', () => {
+    const p = parseTemplateParams({})
+    expect(p.text!.bilingual).toBe(false)
+    expect(p.text!.enScale).toBe(0.6)
+    expect(p.text!.enColor).toBe('#dddddd')
+    expect(p.text!.enGapPx).toBe(8)
+  })
   it('mode=flash 生效，其余字段深合并默认', () => {
     const p = parseTemplateParams({ mode: 'flash', body: { subtitleColor: '#ff0' } })
     expect(p.mode).toBe('flash')

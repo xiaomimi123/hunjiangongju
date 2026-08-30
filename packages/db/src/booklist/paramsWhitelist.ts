@@ -153,6 +153,13 @@ export function sanitizeParamsOverride(raw: unknown): Record<string, unknown> | 
     for (const k of ['bookTitleColor', 'flashTitleColor', 'flashAuthorColor', 'openTitleColor'] as const) {
       if (typeof text[k] === 'string' && HEX.test(text[k] as string)) t[k] = text[k]
     }
+    // 双语字幕。渲染层真读（ass.ts 的 bilingual/enScale/enColor/enGapPx），不是死字段。
+    if (typeof text.bilingual === 'boolean') t.bilingual = text.bilingual
+    const es = clampNum(text.enScale, 0.3, 1)
+    if (es !== undefined) t.enScale = es
+    const eg = clampNum(text.enGapPx, 0, 40)
+    if (eg !== undefined) t.enGapPx = Math.round(eg)
+    if (typeof text.enColor === 'string' && HEX.test(text.enColor)) t.enColor = text.enColor
     if (Object.keys(t).length) out.text = t
   }
 

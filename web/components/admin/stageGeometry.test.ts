@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_PARAMS } from '@mixcut/db'
+// 测试跑在 node 环境，走包索引不会崩，但为一致性也改成子模块路径
+// （见 stageGeometry.ts 顶部注释：这条约定是给 'use client' 代码的护栏）。
+import { DEFAULT_PARAMS } from '@mixcut/db/src/booklist/templateParams'
 import {
   fitSizePx,
   computeStageLayers,

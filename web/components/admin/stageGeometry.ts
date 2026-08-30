@@ -13,7 +13,15 @@
 // 常驻《书名》大标题、快闪书名/作者、开场标题、水印。不覆盖常驻大标题自己的
 // 作者副行（ass.ts 支持但当前画布任务范围未要求，见文件末尾的说明）。
 
-import { fitSizePx } from '@mixcut/db'
+// 直接从子模块导入（而非 '@mixcut/db' 包索引）：包索引（packages/db/src/index.ts）
+// 会连带 re-export genQueue.ts，进而拖入 bullmq/ioredis 等仅限服务端的依赖。
+// 本文件被 'use client' 的 StageCanvas.tsx 引入、打包进浏览器 bundle，
+// webpack 解析不了 Node 专属模块（child_process/net/worker_threads），会导致
+// 引用它的页面整页白屏（Module not found），且 `npm test`（node 环境）与
+// `tsc`（只做类型解析）都测不出来——只有真的跑 next dev/build 才会暴露。
+// 沿用 web/app/admin/generate/page.tsx:6-7、jianying/page.tsx、frameworks/page.tsx
+// 里同样的写法与注释。
+import { fitSizePx } from '@mixcut/db/src/booklist/fitSize'
 import type { TextParams } from './paramControls'
 
 export { fitSizePx }

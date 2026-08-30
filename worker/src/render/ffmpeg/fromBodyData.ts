@@ -21,6 +21,15 @@ export interface FromBodyDataIo {
   ripple?: { xmapAbs: string; ymapAbs: string }
   assAbs: string
   outAbs: string
+  /**
+   * 字幕烧录用的 fontsdir。缺省回退仓库内置的 FONTS_DIR（老调用零回归）。
+   *
+   * 调用方（renderPipeline）应该传一个**只装了本条片子真正用到的字体**的
+   * per-task 目录，而不是整个内置字体目录——见 fonts.ts 的 usedBuiltinFontIds
+   * 和 renderVisuals.ts 里的踩坑记录：libass 的 Bold=1 会在 fontsdir 里同时有
+   * 同族名 Regular/Bold 两个文件时选中真粗体字面，多余的字体文件不能进目录。
+   */
+  fontsDir?: string
 }
 
 /** 相对路径 → 绝对路径。BodyData 里存的是 hf 目录内的相对路径（media/01.png） */
@@ -181,6 +190,6 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     ...(openTitle ? { openTitle } : {}),
     assAbs: io.assAbs,
     outAbs: io.outAbs,
-    fontsDir: FONTS_DIR,
+    fontsDir: io.fontsDir ?? FONTS_DIR,
   }
 }

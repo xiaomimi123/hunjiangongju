@@ -8,8 +8,6 @@ import { renderBodyWithFfmpeg } from '../render/ffmpeg/renderPipeline'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { resolveBooks } from './generateImage'
 
-// worker/src/gen → up 2 = worker/ → templates/booklist（tsx 下 __dirname 于 CJS 可用）
-const TEMPLATE_DIR = path.join(__dirname, '..', '..', 'templates', 'booklist')
 const WIDTH = 720
 const HEIGHT = 960
 
@@ -246,12 +244,12 @@ export async function renderVisuals(genTaskId: string): Promise<void> {
     await fs.mkdir(mediaDir, { recursive: true })
     await fs.mkdir(path.join(hfDir, 'covers'), { recursive: true })
 
-    // 拷字体目录：best-effort，缺失时不应中断渲染
-    try {
-      await fs.cp(path.join(TEMPLATE_DIR, 'fonts'), path.join(hfDir, 'fonts'), { recursive: true })
-    } catch {
-      // 忽略：字幕烧录用的是 worker 内置字体，这里只是给模板资源留位
-    }
+    // 字体目录不在这里拷：renderBodyWithFfmpeg 内部会按「本条片子真正用到哪些
+    // 内置字体」建 per-task fontsdir（见 render/ffmpeg/renderPipeline.ts 的
+    // prepareFontsDir）。这里以前是整个 TEMPLATE_DIR/fonts 目录搬过去，
+    // 后果是任何躺在仓库里但没被这条片子选中的字体文件也会进 fontsdir——
+    // 一旦某个文件与已用字体同族名不同字重，ass.ts 写死的 Bold=1 会让 libass
+    // 选中真粗体字面，存量框架的书名/标题会无声变粗（见任务报告）。
 
     // 拷各段图片到 media/<NN>.png
     for (const img of images) {

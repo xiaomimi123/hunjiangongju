@@ -131,6 +131,14 @@ describe('fromBodyData —— 新旧渲染器的唯一接缝', () => {
     expect(o.fontsDir).toContain('templates/booklist/fonts')
   })
 
+  // per-task fontsdir 安全前置：renderPipeline 会传一个只装了本条片子用到的
+  // 字体的临时目录进来，fromBodyData 必须原样透传，不能悄悄换回内置整目录——
+  // 否则「只装用到的字体」这条防线在最后一步又被绕开了。
+  it('传入 io.fontsDir 时原样透传，不回退到内置 FONTS_DIR', () => {
+    const o = fromBodyData(data(), { ...io, fontsDir: '/tmp/per-task-fonts' })
+    expect(o.fontsDir).toBe('/tmp/per-task-fonts')
+  })
+
   it('开场片段缺省时不产出 openingClipAbs（整片从快闪开始）', () => {
     expect(fromBodyData(data(), io).openingClipAbs).toBeUndefined()
     expect(fromBodyData(data(), { ...io, openingClipAbs: '/o.mp4' }).openingClipAbs).toBe('/o.mp4')

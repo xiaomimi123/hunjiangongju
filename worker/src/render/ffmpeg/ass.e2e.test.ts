@@ -5,11 +5,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, copyFileSync, mkdirSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildAss, subtitlesFilter, type AssCue } from './ass'
-import { FONTS_DIR, DEFAULT_FONT_NAME } from './fonts'
+import { FONTS_DIR, DEFAULT_FONT_NAME, usedBuiltinFontIds } from './fonts'
+import { BUILTIN_FONTS, DEFAULT_FONT_ID } from '@mixcut/db'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -258,5 +259,68 @@ d('双语字幕真渲', () => {
     expect(topOn, `扫描窗口[${yFrom},${yTo}]里没找到开启双语时的中文行顶边，窗口要调`).not.toBeNull()
     expect(Math.abs((topOn as number) - (topOff as number)),
       `中文行顶边位移: 关闭=${topOff} 开启=${topOn}`).toBeLessThanOrEqual(1)
+  })
+})
+
+// per-task fontsdir 安全前置：证明「fontsdir 只装用到的字体文件」这条路径本身
+// 不会破坏渲染——字体照样解析得到，成片跟用整个内置字体目录时逐字节等价的墨迹表现。
+//
+// 本仓库目前只有一款内置字体（noto-sc），造不出「同族名不同字重两个真实文件」
+// 的 B 组场景（下一个任务加够字体后才能补上「加了字体但没选中它时墨迹不变」的
+// 真验收）。所以本条测的是能立刻验证、且有牙齿的那一半：
+//   1. usedBuiltinFontIds() 的产出确实只含被选中的字体（这里退化成只含默认字体）；
+//   2. 拿它对应的字体文件单独建一个**不是 FONTS_DIR 本身**的临时 fontsdir，
+//      传给 subtitlesFilter 渲染，字体必须照样被解析到、且墨迹表现与用完整
+//      FONTS_DIR 时的既有断言（见上面「字幕时段内该区域出现墨迹」等）一致——
+//      这证明 renderPipeline.prepareFontsDir「只拷选中的文件」这条路径是可行的，
+//      不是靠「反正整个目录都在」才蒙对的。
+d('per-task fontsdir：只装选中字体不影响渲染', () => {
+  let dir = ''
+  let miniFontsDir = ''
+  let out = ''
+  let renderLog = ''
+  const CUES: AssCue[] = [{ text: '如果你总困在过往的遗憾', startMs: 2000, endMs: 4000 }]
+  const CAP_BAND = `${W}:200:0:${Math.round(H * 0.78) - 160}`
+
+  beforeAll(() => {
+    // 1) usedBuiltinFontIds 的产出只含被选中（这里等于没选，退化成默认）的字体
+    const ids = usedBuiltinFontIds([])
+    expect(ids).toEqual([DEFAULT_FONT_ID])
+
+    // 2) 只拷这些 id 对应的文件到一个全新的临时目录——不是 FONTS_DIR 本身
+    dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-ass-mini-'))
+    miniFontsDir = path.join(dir, 'fonts')
+    mkdirSync(miniFontsDir, { recursive: true })
+    for (const id of ids) {
+      const entry = BUILTIN_FONTS.find((f) => f.id === id)
+      if (!entry) throw new Error(`usedBuiltinFontIds 返回了认不出的 id: ${id}`)
+      copyFileSync(path.join(FONTS_DIR, entry.file), path.join(miniFontsDir, entry.file))
+    }
+    expect(miniFontsDir).not.toBe(FONTS_DIR)
+
+    const assPath = path.join(dir, 's.ass')
+    out = path.join(dir, 'o.mp4')
+    writeFileSync(assPath, buildAss({
+      width: W, height: H, totalMs: 6000, style: STYLE, captions: CUES,
+      bookTitles: [{ text: '《简爱》', startMs: 0, endMs: 6000 }],
+      watermark: '@读书号',
+    }), 'utf8')
+    const r = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(assPath, miniFontsDir), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', out])
+    if (!r.ok) throw new Error(`用 per-task fontsdir 烧字幕失败: ${r.out.slice(-800)}`)
+    renderLog = r.out
+  })
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('用只装了选中字体的 fontsdir，字幕照样出现墨迹', () => {
+    expect(inkRatio(out, 3, CAP_BAND)).toBeGreaterThan(0.005)
+  })
+
+  it('字体被真正解析到，没有静默回退成豆腐块（证明不是靠 fontconfig 兜底蒙对的）', () => {
+    const resolved = /fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC/
+    expect(renderLog, `字体被替换成了别的族: ${/fontselect:[^\n]*/.exec(renderLog)?.[0]}`).toMatch(resolved)
+    expect(renderLog).not.toMatch(/Glyph .* not found/i)
   })
 })

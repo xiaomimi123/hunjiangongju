@@ -13,6 +13,8 @@ import { fromBodyData } from './fromBodyData'
 import { buildRenderFullPlan } from './renderFull'
 import { buildRippleDisplaceArgs } from './ripple'
 import { buildShatterMaps, buildShatterArgs, DEFAULT_GEOM, SHATTER_MAPS_VERSION } from './shatterMaps'
+import { FONTS_DIR, usedBuiltinFontIds } from './fonts'
+import { BUILTIN_FONTS } from '@mixcut/db'
 
 const FPS = 30
 
@@ -123,6 +125,30 @@ async function ensureRippleMaps(
 }
 
 /**
+ * 建 per-task fontsdir：**只拷本条片子真正用到的字体文件**，不是整个内置字体目录。
+ *
+ * 为什么不能图省事整目录拷贝：见 fonts.ts usedBuiltinFontIds 的注释——只要某个
+ * 同族名不同字重的字体文件躺在 fontsdir 里，ass.ts 写死的 Bold=1 就会让 libass
+ * 选中真粗体字面，所有没被选中的框架也会无声变粗。fontsdir 里有什么文件，
+ * 必须由「这条片子选了什么字体」决定，不能由「仓库里有什么字体」决定。
+ *
+ * 目前 TemplateParams.text 还没有 captionFontId/titleFontId/enFontId 字段
+ * （下一批任务才加），所以 usedIds 参数缺省时只会拷默认字体一个文件——
+ * 接口先留好，等字段落地后调用方直接把选中的 id 传进来即可。
+ */
+async function prepareFontsDir(hfDir: string, usedIds: (string | undefined)[] = []): Promise<string> {
+  const dir = path.join(hfDir, 'fonts')
+  await fs.mkdir(dir, { recursive: true })
+  const ids = usedBuiltinFontIds(usedIds)
+  for (const id of ids) {
+    const entry = BUILTIN_FONTS.find((f) => f.id === id)
+    if (!entry) continue // usedBuiltinFontIds 已经过滤过，这里只是防御
+    await fs.copyFile(path.join(FONTS_DIR, entry.file), path.join(dir, entry.file))
+  }
+  return dir
+}
+
+/**
  * 用 FFmpeg 渲染 body.mp4。产出与 HyperFrames 分支同契约：720×960、无声、全片长。
  * @param cacheRoot 模板级素材缓存根目录（水波纹位移图存这里，跨任务复用）
  */
@@ -147,12 +173,15 @@ export async function renderBodyWithFfmpeg(
 
   const outAbs = path.join(hfDir, 'renders', 'body.mp4')
   await fs.mkdir(path.dirname(outAbs), { recursive: true })
+  // per-task fontsdir：只装本条片子用到的字体（见 prepareFontsDir 的注释）
+  const fontsDir = await prepareFontsDir(hfDir)
   const plan = buildRenderFullPlan(fromBodyData(data, {
     hfDir,
     ...(openingClipAbs ? { openingClipAbs } : {}),
     ...(ripple ? { ripple } : {}),
     assAbs: path.join(hfDir, 'subs.ass'),
     outAbs,
+    fontsDir,
   }))
   await fs.writeFile(path.join(hfDir, 'subs.ass'), plan.assContent, 'utf8')
 

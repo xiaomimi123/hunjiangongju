@@ -64,10 +64,24 @@ export default function StudioPage() {
   const [scene, setScene] = useState<StageScene>('body')
   const [bg, setBg] = useState<StageBg>('placeholder')
   const [sel, setSel] = useState<StageLayer | null>(null)
+  // ★ 这里**故意不给 captionEn 塞占位英文**（框架级 frameworks/[id]/studio 页
+  // 没有真实任务，用占位英文合理，那里别动）。任务级页面一旦塞了占位英文，
+  // 会踩真实发生过的静默失效链路：
+  //   1. 某框架原先关着双语 → 该框架生成的任务，captionBeats[].en 全是空串
+  //      （generateScript.ts 里 wantEn 为 false 时跳过 translateLine，省 LLM 调用）
+  //   2. 运营在任务级工作台把双语勾上 → 如果这里给了占位英文，画布立刻显示一行英文
+  //   3. 点「应用并重渲」→ applyAndRender 只入队 render-visuals，不会重跑
+  //      generateScript，captionBeats.en 依然是空串
+  //   4. → 成片里一个英文字都没有，但运营已经在画布上「亲眼看见」了英文，日志毫无异常
+  // 所以：拿不到真英文就不给 captionEn，画布不画英文行；配合下面 enMissing 的
+  // 提示条，让运营知道「不是没显示，是这条任务本来就没有英文文本」。
   const [sample, setSample] = useState<StageSample>({
-    caption: '这是一句示例字幕', captionEn: 'This is a sample caption',
+    caption: '这是一句示例字幕',
     bookTitle: '活着', bookAuthor: '余华', openTitle: '今天分享的是',
   })
+  // bilingual 开着但本条任务所有 beat 都没有英文文本时为 true——见上面的注释，
+  // 这是本条任务生成时没开双语（或翻译失败）留下的既成事实，重渲不会补出英文。
+  const [enMissing, setEnMissing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -113,12 +127,22 @@ export default function StudioPage() {
           setSample((s) => ({
             ...s,
             caption: (beat0?.zh as string) || s.caption,
-            captionEn: (typeof beat0?.en === 'string' && beat0.en) ? (beat0.en as string) : s.captionEn,
+            // 拿不到真英文就不给 captionEn——不塞占位英文，见上面 sample 初始值
+            // 那段注释里的失败场景。
+            captionEn: (typeof beat0?.en === 'string' && beat0.en.trim()) ? (beat0.en as string) : undefined,
             bookTitle: first.bookTitle || s.bookTitle,
             bookAuthor: first.bookAuthor || s.bookAuthor,
           }))
           if (first.imageUrl) setBg({ url: thumbUrl(first.imageUrl) })
         }
+        // 判断「本条任务是否完全没有英文」：扫全部段落的全部 beat，而不只是
+        // 上面拿来做画布示例的第一段——第一段恰好没英文不代表整条任务都没有，
+        // 这条提示要的是「重渲会不会出现英文」这个准确判断，不能靠抽样。
+        const allBeats = (t.segments ?? []).flatMap((seg) =>
+          Array.isArray(seg.captionBeats) ? (seg.captionBeats as { en?: unknown }[]) : [],
+        )
+        const anyEn = allBeats.some((b) => typeof b?.en === 'string' && b.en.trim())
+        setEnMissing(allBeats.length > 0 && !anyEn)
       })
       .catch(() => {})
     api<Bgm[]>('/api/bgm').then(setBgms).catch(() => {})
@@ -292,6 +316,11 @@ export default function StudioPage() {
             {busy === '字幕样式' ? '保存中…' : '保存字幕样式'}
           </button>
         </div>
+        {text?.bilingual && enMissing && (
+          <p className="pill pill-warn text-xs">
+            本条生成时未开双语，字幕没有英文文本；重渲不会出现英文，需要重新生成文案。
+          </p>
+        )}
         <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
           text={text} onText={setText} disabled={locked} />
       </section>

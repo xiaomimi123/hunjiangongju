@@ -225,6 +225,17 @@ export type TextParams = {
   captionFontId: string
   titleFontId: string
   enFontId: string
+  /**
+   * 三个常驻/快闪/开场文字层的竖直位置（0..1，距画面顶端归一化高度）。
+   *
+   * 补自 packages/db 的 TemplateParams['text']（该契约本就有这三个字段，
+   * 只是此前 studio 页的控件没有暴露编辑入口）。画布组件（StageCanvas /
+   * stageGeometry）需要它们来还原 ass.ts 里 title/ft/ot 三个 Style 的
+   * \pos 位置，字段名与取值口径与 ass.ts / templateParams.ts 完全一致。
+   */
+  bookTitlePosY: number
+  flashTitlePosY: number
+  openTitlePosY: number
 }
 export type PaceParams = { bookTitleLeadMs: number; bookTitleTailMs: number; speechCharsPerSec: number; maxTempo: number }
 export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string; captionMaxChars: number }

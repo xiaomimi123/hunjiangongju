@@ -77,6 +77,19 @@ describe('GET /api/fonts/[id]/file', () => {
     expect(buf.length).toBeGreaterThan(0)
   })
 
+  // ★ 内置字体不全是 .otf——霞鹜文楷、站酷快乐体是 .ttf，Content-Type 不能写死
+  // font/otf，否则会把 .ttf 字体标错类型。
+  it('.otf 内置字体返回 font/otf', async () => {
+    const res = await GET(getReq(), ctx('noto-sc'))
+    expect(res.headers.get('content-type')).toBe('font/otf')
+  })
+
+  it('.ttf 内置字体返回 font/ttf', async () => {
+    const res = await GET(getReq(), ctx('lxgw-wenkai'))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('font/ttf')
+  })
+
   it('带匹配的 If-None-Match 返回 304', async () => {
     const first = await GET(getReq(), ctx('noto-sc'))
     const etag = first.headers.get('etag')!

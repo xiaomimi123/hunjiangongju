@@ -1,13 +1,14 @@
 import { runCmd, probeText } from '../runCmd'
 import { promises as fs, existsSync } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, buildSrt, enqueueGen, resolveTemplateParamsRaw } from '@mixcut/db'
+import { prisma, transitionRender, buildSrt, enqueueGen, resolveTemplateParamsRaw, BODY_SIZE } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import { parseTemplateParams, flashTimeline } from '../../templates/booklist/templateParams'
 import { resolveBooks } from './generateImage'
 
-const WIDTH = 720
-const HEIGHT = 960
+// 唯一真源见 packages/db/src/booklist/bodySize.ts —— 与后台剪辑参数画布共用，不再各存一份字面量。
+const WIDTH = BODY_SIZE.width
+const HEIGHT = BODY_SIZE.height
 // worker/src/gen → up 2 = worker/ → assets/sfx（齿轮/水滴音效，Task 9 加入实际文件；缺失时静默跳过）
 const SFX_DIR = path.join(__dirname, '..', '..', 'assets', 'sfx')
 

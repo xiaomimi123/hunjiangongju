@@ -3,7 +3,7 @@
 // ★ 这块画布是**模拟器不是渲染器**，真正出片的是 worker 的 `ass.ts` + libass。
 // 保真靠三条，任何一条松了这块画布就会开始骗人：
 //   1. 坐标 1:1 零换算 —— 这里算出的每个数字（top / fontSizePx）就是将来存进
-//      参数、喂给 ass.ts 的那个数字，单位是真实像素（如 720×1280），
+//      参数、喂给 ass.ts 的那个数字，单位是真实像素（如 720×960，真实值见 packages/db 的 BODY_SIZE），
 //      不做任何按容器宽度的缩放。缩放只发生在 StageCanvas 的最外层 transform。
 //   2. 共享 `fitSizePx` —— 长书名的缩排走 packages/db 里的那一份（下方 import），
 //      与成片同一个函数，不在这里另写一遍近似算法。
@@ -220,7 +220,7 @@ function clamp(v: number, lo: number, hi: number): number {
  * flashTitlePosY / openTitlePosY 同口径）。
  *
  * ★ 必须除以 `scale`：鼠标移动的 `deltaClientY` 是屏幕像素（CSS px），
- * 而 posY 描述的是真实像素坐标系（720×1280 这一类）里的比例。
+ * 而 posY 描述的是真实像素坐标系（720×960（真实值见 packages/db 的 BODY_SIZE）这一类）里的比例。
  * `StageCanvas` 最外层用 `transform: scale(containerW / videoW)` 把真实像素
  * 画面缩小/放大铺满容器——容器越窄 scale 越小，同样的鼠标位移在真实坐标系里
  * 对应的距离就越大，所以要把 deltaClientY 先除以 scale 换回真实像素，

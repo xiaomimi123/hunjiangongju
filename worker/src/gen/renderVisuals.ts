@@ -1,15 +1,16 @@
 import { probeText } from '../runCmd'
 import { promises as fs, existsSync } from 'fs'
 import path from 'path'
-import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults, resolveTemplateParamsRaw } from '@mixcut/db'
+import { prisma, transitionRender, enqueueGen, timeCaptionBeats, readFrameworkDefaults, resolveTemplateParamsRaw, BODY_SIZE } from '@mixcut/db'
 import { DATA_DIR, urlToAbs } from '../paths'
 import type { BodyData, BodyOverlay } from '../../templates/booklist/bodyData'
 import { renderBodyWithFfmpeg } from '../render/ffmpeg/renderPipeline'
 import { parseTemplateParams } from '../../templates/booklist/templateParams'
 import { resolveBooks } from './generateImage'
 
-const WIDTH = 720
-const HEIGHT = 960
+// 唯一真源见 packages/db/src/booklist/bodySize.ts —— 与后台剪辑参数画布共用，不再各存一份字面量。
+const WIDTH = BODY_SIZE.width
+const HEIGHT = BODY_SIZE.height
 
 type Vars = Record<string, unknown>
 

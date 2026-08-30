@@ -10,6 +10,9 @@ import {
 } from '@/components/admin/paramControls'
 import { StageCanvas, type StageScene, type StageLayer, type StageBg, type StageSample } from '@/components/admin/StageCanvas'
 import { thumbUrl } from '@/lib/thumbUrl'
+// 子模块路径导入（非 '@mixcut/db' 包索引）：见 stageGeometry.ts 顶部注释，走包索引会把
+// bullmq/ioredis 拖进浏览器 bundle 导致整页白屏。
+import { BODY_SIZE } from '@mixcut/db/src/booklist/bodySize'
 
 // 剪辑工作台：调这一条片子的节奏、字幕样式、配乐，然后重渲。
 //
@@ -192,7 +195,7 @@ export default function StudioPage() {
             </button>
           </div>
           <StageCanvas
-            width={720} height={1280}
+            width={BODY_SIZE.width} height={BODY_SIZE.height}
             text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
             scene={scene} onScene={setScene} bg={bg} onBg={setBg}
             sample={sample}

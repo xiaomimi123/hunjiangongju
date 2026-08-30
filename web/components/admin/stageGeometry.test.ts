@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 // 测试跑在 node 环境，走包索引不会崩，但为一致性也改成子模块路径
 // （见 stageGeometry.ts 顶部注释：这条约定是给 'use client' 代码的护栏）。
 import { DEFAULT_PARAMS } from '@mixcut/db/src/booklist/templateParams'
+import { BODY_SIZE } from '@mixcut/db/src/booklist/bodySize'
 import {
   fitSizePx,
   computeStageLayers,
@@ -45,7 +46,7 @@ const SAMPLE: StageSample = {
 function input(patch: Partial<StageGeometryInput> = {}): StageGeometryInput {
   return {
     width: 720,
-    height: 1280,
+    height: BODY_SIZE.height, // 960，与 worker 渲染尺寸唯一真源一致（BODY_SIZE）
     scene: 'body',
     text: TEXT,
     captionPosY: 0.78,
@@ -101,7 +102,7 @@ describe('★ 双语时中文行不能位移', () => {
     const capOn = on.find((l) => l.layer === 'caption') as CaptionGeom
     expect(capOn.zh.top).toBe(capOff.zh.top)
     expect(capOn.zh.fontSizePx).toBe(capOff.zh.fontSizePx)
-    expect(capOff.zh.top).toBe(captionZhTop(1280, 0.78))
+    expect(capOff.zh.top).toBe(captionZhTop(BODY_SIZE.height, 0.78))
   })
 
   it('关闭双语时不产出英文行', () => {
@@ -121,8 +122,8 @@ describe('★ 双语时中文行不能位移', () => {
   it('英文行 top = round(height*captionPosY) + enGapPx', () => {
     const layers = computeStageLayers(input({ text: { ...TEXT, bilingual: true, enGapPx: 12 }, captionPosY: 0.777 }))
     const cap = layers.find((l) => l.layer === 'caption') as CaptionGeom
-    expect(cap.en!.top).toBe(Math.round(1280 * 0.777) + 12)
-    expect(cap.en!.top).toBe(captionEnTop(1280, 0.777, 12))
+    expect(cap.en!.top).toBe(Math.round(BODY_SIZE.height * 0.777) + 12)
+    expect(cap.en!.top).toBe(captionEnTop(BODY_SIZE.height, 0.777, 12))
   })
 
   it('英文行字号 = round(captionSizePx * enScale)', () => {
@@ -189,10 +190,10 @@ describe('快闪作者：top 与字号系数', () => {
 
 describe('开场标题', () => {
   it('top = height * openTitlePosY，字号 = round(captionSizePx * openTitleScale)', () => {
-    const layers = computeStageLayers(input({ scene: 'open', height: 1280 }))
+    const layers = computeStageLayers(input({ scene: 'open', height: BODY_SIZE.height }))
     const ot = layers.find((l) => l.layer === 'openTitle') as CenterTextGeom
-    expect(ot.top).toBe(openTitleTop(1280, TEXT.openTitlePosY))
-    expect(ot.top).toBe(1280 * TEXT.openTitlePosY)
+    expect(ot.top).toBe(openTitleTop(BODY_SIZE.height, TEXT.openTitlePosY))
+    expect(ot.top).toBe(BODY_SIZE.height * TEXT.openTitlePosY)
     expect(ot.fontSizePx).toBe(openTitleFontSizePx(TEXT))
     expect(ot.fontSizePx).toBe(Math.round(TEXT.captionSizePx * TEXT.openTitleScale))
   })
@@ -216,22 +217,22 @@ describe('水印：固定小字号、半透明、右上角', () => {
 
 describe('拖拽换算：nextPosY', () => {
   it('scale=1 时，deltaClientY 换回真实像素后除以 height 就是位移量', () => {
-    // startPosY=0.5, height=1280, delta=64 -> +64/1280
-    expect(nextPosY(0.5, 64, 1, 1280)).toBeCloseTo(0.5 + 64 / 1280, 10)
+    // startPosY=0.5, height=BODY_SIZE.height, delta=64 -> +64/height
+    expect(nextPosY(0.5, 64, 1, BODY_SIZE.height)).toBeCloseTo(0.5 + 64 / BODY_SIZE.height, 10)
   })
 
   it('★ scale 必须参与换算：scale=2 时同样的 deltaClientY 只产生一半的位移', () => {
-    const full = nextPosY(0.5, 64, 1, 1280) - 0.5
-    const half = nextPosY(0.5, 64, 2, 1280) - 0.5
+    const full = nextPosY(0.5, 64, 1, BODY_SIZE.height) - 0.5
+    const half = nextPosY(0.5, 64, 2, BODY_SIZE.height) - 0.5
     expect(half).toBeCloseTo(full / 2, 10)
   })
 
   it('往上拖过头夹到 0', () => {
-    expect(nextPosY(0.1, -9999, 1, 1280)).toBe(0)
+    expect(nextPosY(0.1, -9999, 1, BODY_SIZE.height)).toBe(0)
   })
 
   it('往下拖过头夹到 1', () => {
-    expect(nextPosY(0.9, 9999, 1, 1280)).toBe(1)
+    expect(nextPosY(0.9, 9999, 1, BODY_SIZE.height)).toBe(1)
   })
 })
 

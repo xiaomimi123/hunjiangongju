@@ -4,7 +4,7 @@
 // ★ 它是**模拟器不是渲染器**。真正出片的是 worker 的 ass.ts + libass。
 // 保真靠三条，缺一条这块画布就会开始骗人：
 //   1. 坐标 1:1 零换算 —— 缩放只发生在最外层 transform: scale()，
-//      内部一律用真实像素（720×1280 这一类）。画布上的每个数字**就是**存进参数的数字。
+//      内部一律用真实像素（720×960（真实值见 packages/db 的 BODY_SIZE）这一类）。画布上的每个数字**就是**存进参数的数字。
 //      全部几何计算（top / 字号 / 是否显示）都在 stageGeometry.ts 里算好，
 //      本文件只负责把算好的数字渲染成绝对定位的 div，不再做任何计算。
 //   2. 共享 fitSizePx —— 长书名的缩排走 packages/db 里的那一份，与成片同一个函数
@@ -99,15 +99,32 @@ export function StageCanvas(props: {
   const [fileBgUrl, setFileBgUrl] = useState<string | null>(null)
 
   // 坐标 1:1：缩放只发生在这一层，内部 children 全部用真实像素定位。
+  //
+  // scale 封顶不放大（Math.min(1, ...)）：容器越宽（大屏），按 containerW / width
+  // 算出的 scale 会大于 1，把 720 宽的真实画面撑大显示——线上实测撑到 1.6 倍后
+  // 单帧要滚 2.5 屏才能看完，而「一眼看清整帧构图」正是这块画布存在的意义。
+  // 同时按可用视口高度再收一档（availH / height）：这块画布常年 sticky 贴顶，
+  // 高度超出视口一样滚不完整帧，宽度封顶不放大解决不了这个问题。
+  // 两个上限取更小的那个，且都不超过 1——不满足其中任一条都不放大画布。
   useEffect(() => {
     const box = boxRef.current
     if (!box) return
-    const update = () => setScale(box.clientWidth > 0 ? box.clientWidth / width : 1)
+    const update = () => {
+      if (box.clientWidth <= 0) { setScale(1); return }
+      const byWidth = box.clientWidth / width
+      const availH = Math.max(240, window.innerHeight - 160)
+      const byHeight = availH / height
+      setScale(Math.min(1, byWidth, byHeight))
+    }
     update()
     const ro = new ResizeObserver(update)
     ro.observe(box)
-    return () => ro.disconnect()
-  }, [width])
+    window.addEventListener('resize', update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+    }
+  }, [width, height])
 
   // 同一份字体二进制：与 worker fontsdir 里的文件一致，动态注册后渲染。
   useEffect(() => {

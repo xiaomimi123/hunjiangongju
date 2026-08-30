@@ -135,11 +135,20 @@ export function MotionRows(props: {
   )
 }
 
+/**
+ * 字幕样式：颜色、竖直位置、双语。
+ *
+ * 双语的英文文本早就逐拍生成好了（translateLine），这里只是控制**渲不渲、怎么渲**。
+ * 关掉双语的框架，以后生成时会跳过翻译调用（见 generateScript）。
+ */
 export function CaptionStyleRows(props: {
   color: string; posY: number
   onColor: (v: string) => void; onPosY: (v: number) => void
+  text: TextParams | null; onText: (v: TextParams) => void
   disabled?: boolean
 }) {
+  const t = props.text
+  const set = (patch: Partial<TextParams>) => t && props.onText({ ...t, ...patch })
   return (
     <>
       <label className="flex items-center gap-3 py-1">
@@ -150,9 +159,28 @@ export function CaptionStyleRows(props: {
       </label>
       <NumRow label="正文字幕竖直位置" value={props.posY} disabled={props.disabled}
         min={0} max={1} step={0.01} hint="0 = 顶端，1 = 底端" onChange={props.onPosY} />
-      <p className="text-xs text-ink3">
-        字号在「文字层」分区调（正文字号锚点）；字体固定用自带的 Noto Sans SC。
-      </p>
+      {t && (
+        <>
+          <label className="flex items-center gap-3 py-1">
+            <span className="w-40 shrink-0 text-xs text-ink3">中英双语字幕</span>
+            <input type="checkbox" checked={t.bilingual} disabled={props.disabled}
+              onChange={(e) => set({ bilingual: e.target.checked })} />
+            <span className="text-xs text-ink3">中文在上、英文紧贴其下。关掉后以后生成会跳过翻译（省调用）</span>
+          </label>
+          {t.bilingual && (
+            <>
+              <NumRow label="英文字号倍数" value={t.enScale} disabled={props.disabled}
+                min={0.3} max={1} step={0.05} unit="×" hint={`相对正文，当前约 ${Math.round(t.captionSizePx * t.enScale)}px`}
+                onChange={(v) => set({ enScale: v })} />
+              <ColorRow label="英文行颜色" value={t.enColor} disabled={props.disabled}
+                onChange={(v) => set({ enColor: v })} />
+              <NumRow label="中英行间距" value={t.enGapPx} disabled={props.disabled}
+                min={0} max={40} step={1} unit="px" hint="0 = 紧贴" onChange={(v) => set({ enGapPx: v })} />
+            </>
+          )}
+        </>
+      )}
+      <p className="text-xs text-ink3">字号在「文字层」分区调（正文字号锚点）。</p>
     </>
   )
 }
@@ -190,6 +218,24 @@ export type TextParams = {
   bookTitleScale: number
   flashTitleScale: number
   openTitleScale: number
+  bilingual: boolean
+  enScale: number
+  enColor: string
+  enGapPx: number
+  captionFontId: string
+  titleFontId: string
+  enFontId: string
+  /**
+   * 三个常驻/快闪/开场文字层的竖直位置（0..1，距画面顶端归一化高度）。
+   *
+   * 补自 packages/db 的 TemplateParams['text']（该契约本就有这三个字段，
+   * 只是此前 studio 页的控件没有暴露编辑入口）。画布组件（StageCanvas /
+   * stageGeometry）需要它们来还原 ass.ts 里 title/ft/ot 三个 Style 的
+   * \pos 位置，字段名与取值口径与 ass.ts / templateParams.ts 完全一致。
+   */
+  bookTitlePosY: number
+  flashTitlePosY: number
+  openTitlePosY: number
 }
 export type PaceParams = { bookTitleLeadMs: number; bookTitleTailMs: number; speechCharsPerSec: number; maxTempo: number }
 export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string; captionMaxChars: number }
@@ -205,25 +251,67 @@ function ColorRow(props: { label: string; value: string; onChange: (v: string) =
   )
 }
 
+export type FontOption = { id: string; label: string; family: string; builtin: boolean }
+
+/**
+ * 字体下拉。allowInherit 时空值项文案是「跟随正文字体」，否则是「默认（思源黑体）」——
+ * 后者对应正文字幕本身，没有「跟随」一说。
+ *
+ * 下拉里用 label 区分选项而不是 family：内置字体里思源黑体 Regular / Bold 两条
+ * family 相同（都是 Noto Sans SC，靠 weight 区分字重），用 family 展示会看不出是哪条。
+ */
+export function FontSelect(props: {
+  label: string; value: string; onChange: (v: string) => void
+  fonts: FontOption[]; allowInherit?: boolean; disabled?: boolean
+}) {
+  return (
+    <label className="flex items-center gap-3 py-1">
+      <span className="w-40 shrink-0 text-xs text-ink3">{props.label}</span>
+      <select className="field w-56 text-sm" disabled={props.disabled}
+        value={props.value} onChange={(e) => props.onChange(e.target.value)}>
+        <option value="">{props.allowInherit ? '跟随正文字体' : '默认（思源黑体）'}</option>
+        {props.fonts.map((f) => (
+          <option key={f.id} value={f.id}>{f.builtin ? f.label : `${f.label}（上传）`}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 /** 文字层全套：字号锚点、各层放大倍数、描边、加粗、颜色。线上「字太小/要加粗/看不清」的反馈全在这里解决。 */
 export function TextRows(props: {
-  text: TextParams; onChange: (v: TextParams) => void; disabled?: boolean
+  text: TextParams; onChange: (v: TextParams) => void; fonts: FontOption[]; disabled?: boolean
 }) {
   const set = (patch: Partial<TextParams>) => props.onChange({ ...props.text, ...patch })
   const t = props.text
   return (
     <>
+      <FontSelect label="正文字幕字体" value={t.captionFontId} fonts={props.fonts} disabled={props.disabled}
+        onChange={(v) => set({ captionFontId: v })} />
+      <FontSelect label="标题类字体" value={t.titleFontId} fonts={props.fonts} allowInherit disabled={props.disabled}
+        onChange={(v) => set({ titleFontId: v })} />
+      {t.bilingual && (
+        <FontSelect label="英文行字体" value={t.enFontId} fonts={props.fonts} allowInherit disabled={props.disabled}
+          onChange={(v) => set({ enFontId: v })} />
+      )}
       <NumRow label="正文字号（锚点）" value={t.captionSizePx} disabled={props.disabled}
         min={20} max={120} step={2} unit="px" hint="其余各层字号都按它的倍数派生"
         onChange={(v) => set({ captionSizePx: v })} />
       <NumRow label="书名标题倍数" value={t.bookTitleScale} disabled={props.disabled}
         min={0.2} max={5} step={0.05} hint="相对正文" onChange={(v) => set({ bookTitleScale: v })} />
+      <NumRow label="书名标题竖直位置" value={t.bookTitlePosY} disabled={props.disabled}
+        min={0} max={1} step={0.01} hint="0 = 顶端，1 = 底端；也可在预览画布上直接拖"
+        onChange={(v) => set({ bookTitlePosY: v })} />
       <NumRow label="书名标题再放大" value={t.bookTitleBoost} disabled={props.disabled}
         min={0.5} max={3} step={0.05} hint="嫌书名还不够大就调它" onChange={(v) => set({ bookTitleBoost: v })} />
       <NumRow label="快闪书名倍数" value={t.flashTitleScale} disabled={props.disabled}
         min={0.2} max={5} step={0.05} onChange={(v) => set({ flashTitleScale: v })} />
+      <NumRow label="快闪书名竖直位置" value={t.flashTitlePosY} disabled={props.disabled}
+        min={0} max={1} step={0.01} hint="也可在预览画布上直接拖" onChange={(v) => set({ flashTitlePosY: v })} />
       <NumRow label="开场标题倍数" value={t.openTitleScale} disabled={props.disabled}
         min={0.2} max={5} step={0.05} onChange={(v) => set({ openTitleScale: v })} />
+      <NumRow label="开场标题竖直位置" value={t.openTitlePosY} disabled={props.disabled}
+        min={0} max={1} step={0.01} hint="也可在预览画布上直接拖" onChange={(v) => set({ openTitlePosY: v })} />
       <NumRow label="字幕渐入" value={t.captionFadeInMs} disabled={props.disabled}
         min={0} max={1000} step={50} unit="ms" hint="正文字幕淡入时长，0 = 瞬间出现"
         onChange={(v) => set({ captionFadeInMs: v })} />

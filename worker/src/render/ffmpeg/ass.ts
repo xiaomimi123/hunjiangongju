@@ -7,8 +7,15 @@
 //
 // 纯函数：只产出文件内容字符串。写盘与拼命令由调用方负责。
 
+// fitSizePx 抽到 packages/db 供后台画布共用 —— 画布要复刻同样的长标题缩排行为，
+// 复制一份代码必然会漂。
+import { fitSizePx } from '@mixcut/db'
+export { fitSizePx }
+
 export interface AssCue {
   text: string
+  /** 双语字幕的英文行。不开双语时忽略。 */
+  en?: string
   startMs: number
   endMs: number
 }
@@ -64,6 +71,45 @@ export interface AssStyleOpts {
   /** 正文字幕渐入/渐出（ms）。缺省 0 = 瞬间出现（老调用零回归） */
   captionFadeInMs?: number
   captionFadeOutMs?: number
+  /**
+   * 双语字幕：中文在上、英文紧贴其下。
+   *
+   * 英文早就逐拍生成好了（generateScript 的 translateLine → captionBeats[].en），
+   * 只是一直没被渲染层消费。默认 false = 老框架逐字节零回归。
+   */
+  bilingual?: boolean
+  /** 英文行字号 = captionSizePx × enScale。缺省 0.6 */
+  enScale?: number
+  /** 英文行颜色 #rrggbb。缺省 #dddddd */
+  enColor?: string
+  /**
+   * 中文行基线往下多少像素开始画英文行的顶边（px）。缺省 8。
+   *
+   * 英文行是独立定位的（见 buildAss），这个值就是它的 \pos 的 y 分量减去
+   * 中文基线 y——语义直给，不依赖任何字体行高的经验系数。
+   */
+  enGapPx?: number
+  /** 英文行字体族名。不给则跟随正文字体 */
+  enFontName?: string
+  /**
+   * 标题类字体族名：常驻书名大标题(title) + 快闪书名/作者(ft/fa) + 开场标题(ot)。
+   * 不给则跟随 fontName。正文字幕(cap)与水印(wm)恒用 fontName。
+   *
+   * 只做「正文 / 标题」两档：ass.ts 里本来就是两套 Style，与现有结构对齐；
+   * 四层各给一个下拉框对运营是负担，真有需求再拆。
+   */
+  titleFontName?: string
+  /**
+   * 正文字幕(cap)与水印(wm)是否用粗体字面。缺省 false（与写死 Bold=0 的老输出一致）。
+   *
+   * title/ot/ft/fa 的 Bold 位**不跟这个逻辑**、继续写死 1，见下面 buildAss 里的说明——
+   * 这不是疏漏，是任务复盘后刻意留住的：字重驱动 Bold 位一度改到了标题层，
+   * 但实测证明"写死 1 是空操作"这个前提是假的，改动本身会让存量成片的标题
+   * 无声变薄。cap/wm 这里保留是因为场景不同：运营选中的是**正文**字体，
+   * 若正文字体真收录了粗体字面而这里仍写死 0，libass 会静默选回 Regular，
+   * 表现成「选了没反应」——这类静默失效最难排查，必须留一个开关能让它生效。
+   */
+  captionFontBold?: boolean
 }
 
 export interface AssOpts {
@@ -129,22 +175,28 @@ export function escapeAssText(s: string): string {
 }
 
 /**
- * 按可用宽度把字号缩下来，避免长标题溢出画面。
+ * 常驻大标题里作者行相对书名的字号比例。
  *
- * 中日韩字符按「一字一个字号宽」估，ASCII 按半个——这是等宽近似，不精确，
- * 但字幕层只需要"不溢出"，宁可略小。剪映自己也是这么处理的：
- * 同一层的 clip.scale 随书名长度从 1.407 缩到 0.698。
+ * ★ 这里**不是**「与快闪卡的作者行同一口径」——快闪卡作者行用的是
+ * `fromBodyData.ts` 里的 `FS.flashAuthorRatio = 0.48`（见该文件
+ * `flashAuthorSizePx: Math.round(capPx * (tx?.flashTitleScale ?? 1.96) * FS.flashAuthorRatio)`），
+ * 与这里的 0.42 是两个独立标定、数值不同的系数，互不共享。
  */
-/** 常驻大标题里作者行相对书名的字号比例（与快闪卡的作者行同一口径） */
 const TITLE_SUB_RATIO = 0.42
 
 /**
  * 常驻大标题的「加粗层」描边宽度。
  *
- * 自带字体只有 NotoSansSC-Regular，**没有粗体字面**，而 libass 不会为它合成假粗体
- * ——实测同一段文字 Bold=0 与 Bold=1 渲染出来完全一致，那个标志位一直是摆设。
- * 所以真加粗只能自己做：在原字上再叠一层「与文字同色」的细描边，把笔画撑粗。
- * 底层保留深色粗描边（浅色配图上的可读性靠它），加粗层压在上面。
+ * ★ 这里原来写的是「自带字体只有 NotoSansSC-Regular，libass 不会为它合成假粗体，
+ * Bold=0 与 Bold=1 渲染出来完全一致」——这句话在写下它时用的 libass 版本上或许
+ * 为真，**现在不是**：真渲染实测（2026-08-30，libass 0.17.5，fontsdir 仍只有
+ * Regular 一个文件）显示 Bold=1 会让 libass 走 FreeType 合成假粗体，隔离测量
+ * （去掉本层描边、只看 title 的 Style Bold 位）墨迹占比 0.011762 → 0.014757，
+ * 相对差 25.4%，不是"完全一致"。也就是说 title/ot/ft/fa 的 Style Bold 位
+ * 一直写死 1，此刻并不是空操作，而是"合成假粗"叠加"这层描边假粗"的双重加粗
+ * ——只是没人把它拆开量过。正因为写死 1 已经是存量成片像素的一部分，
+ * 这个位才**不能**动（见 buildAss 里的说明）：改掉它 = 改掉所有存量框架的标题观感。
+ * 这层描边是叠加在"合成假粗"之上的第二层加粗，两者一起构成今天线上的观感。
  */
 const TITLE_BOLD_BORD = 1.6
 
@@ -152,20 +204,6 @@ const TITLE_BOLD_BORD = 1.6
 function inlineColor(hex: string): string {
   const full = toAssColor(hex) // &HAABBGGRR
   return `&H${full.slice(4)}&`
-}
-
-export function fitSizePx(text: string, basePx: number, widthPx: number, marginPx = 40): number {
-  // ★ 按**最长的那一行**量，不是整串。
-  // 第一版把整串当一行：常驻大标题的文本是「《书名》\N作者」，连 ASS 的换行转义一起算进去，
-  // 于是 9 字的书名被当成 18 字，缩到 35px —— 比 54px 的正文字幕还小（线上实测）。
-  // 真换行与 ASS 的 \N 都要切：调用点传的是**未转义**的原文（含真换行），
-  // 只认 \N 的话换行符会被当成一个字算进宽度。
-  const cells = text
-    .split(/\r?\n|\\N/)
-    .reduce((m, line) => Math.max(m, [...line].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x2e80 ? 0.5 : 1), 0)), 0)
-  if (cells <= 0) return basePx
-  const max = Math.floor((widthPx - marginPx * 2) / cells)
-  return Math.max(18, Math.min(basePx, max))
 }
 
 export function buildAss(o: AssOpts): string {
@@ -176,6 +214,16 @@ export function buildAss(o: AssOpts): string {
   // 描边宽度：缺省 3 = 把它放开之前写死的值，老调用逐字节不变
   const bord = Math.max(0, st.outlinePx ?? 3)
   const boldBord = Math.max(0, st.boldBordPx ?? TITLE_BOLD_BORD)
+  // 标题类字体族名：title/ot/ft/fa 用它，cap/wm 继续用 fontName（见 AssStyleOpts.titleFontName）。
+  const titleFont = st.titleFontName || st.fontName
+  // ★ title/ot/ft/fa 的 Bold 位**继续写死 1，不由任何参数驱动**——这是刻意的。
+  // 曾经改成由字体 weight 推导、缺省 0，本意是修「加粗体字面后 Bold 位失控」的隐患，
+  // 但真渲染实测证明「Bold=1 今天是空操作」这个前提是假的（见 TITLE_BOLD_BORD 注释）：
+  // 写死的 1 早就是存量成片像素的一部分，动它 = 让所有存量框架的标题无声变薄。
+  // 病根其实是 fontsdir 装的是整个内置字体池——加一个粗体文件就等于给所有存量
+  // 框架换了可选字体，这个"加字体不能动存量像素"的安全机制挪到后续任务
+  // （fontsdir 改成 per-task、只装这条真正用到的字体），不靠改 Bold 位来解决。
+  const capBold = st.captionFontBold ? 1 : 0
 
   const header = [
     '[Script Info]',
@@ -191,18 +239,18 @@ export function buildAss(o: AssOpts): string {
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     // 描边 + 阴影：配图明暗不可控，没有描边的字幕在浅色图上会糊掉。
     // 描边宽度改为可配（outlinePx，缺省 3 = 原写死值），浅底图多、字看不清时调大它。
-    `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},0,0,0,0,100,100,0,0,1,${bord},2,2,60,60,${capMarginV},1`,
+    `Style: cap,${st.fontName},${st.captionSizePx},${toAssColor(st.captionColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 128)},${capBold},0,0,0,100,100,0,0,1,${bord},2,2,60,60,${capMarginV},1`,
     // an5(正中) + \pos：位置由草稿的 titlePosY 决定，不再贴死在顶边
-    `Style: title,${st.fontName},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`,
+    `Style: title,${titleFont},${st.titleSizePx},${toAssColor(st.titleColor)},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`,
     ...(st.openTitleSizePx
-      ? [`Style: ot,${st.fontName},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`]
+      ? [`Style: ot,${titleFont},${st.openTitleSizePx},${toAssColor(st.openTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 160)},1,0,0,0,100,100,0,0,1,${bord},2,5,40,40,0,1`]
       : []),
-    `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},0,0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
+    `Style: wm,${st.fontName},${st.watermarkSizePx},${toAssColor('#ffffff', 96)},${toAssColor('#ffffff')},${toAssColor('#000000', 96)},${toAssColor('#000000', 200)},${capBold},0,0,0,100,100,0,0,1,2,0,9,24,24,24,1`,
     // 快闪卡：an5(正中) + \pos 精确定位。只在给了尺寸时产出，老调用零回归。
     ...(st.flashTitleSizePx
       ? [
-          `Style: ft,${st.fontName},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,${bord},3,5,40,40,0,1`,
-          `Style: fa,${st.fontName},${st.flashAuthorSizePx ?? 28},${toAssColor(st.flashAuthorColor ?? '#ffcc88')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,2,2,5,40,40,0,1`,
+          `Style: ft,${titleFont},${st.flashTitleSizePx},${toAssColor(st.flashTitleColor ?? '#ffffff')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,${bord},3,5,40,40,0,1`,
+          `Style: fa,${titleFont},${st.flashAuthorSizePx ?? 28},${toAssColor(st.flashAuthorColor ?? '#ffcc88')},${toAssColor('#ffffff')},${toAssColor('#000000')},${toAssColor('#000000', 180)},1,0,0,0,100,100,0,0,1,2,2,5,40,40,0,1`,
         ]
       : []),
     '',
@@ -271,6 +319,29 @@ export function buildAss(o: AssOpts): string {
   const fadOut = Math.max(0, Math.round(st.captionFadeOutMs ?? 0))
   const fad = fadIn > 0 || fadOut > 0 ? `{\\fad(${fadIn},${fadOut})}` : ''
   for (const c of o.captions) line(1, c, 'cap', fad)
+  // 双语英文行：独立 Dialogue + \pos，不再合并进中文那条事件。
+  //
+  // 第一版是合并成一条事件，靠 bilingualExtraPx() 算出英文块高度、从 MarginV 里
+  // 扣掉把中文行"顶回原位"——系数 LINE_H（libass 行距≈字号×1.2）是经验值，
+  // e2e 真渲染实测换一套参数就偏了 7px，超过"中文行不位移"的验收线（详见任务报告）。
+  // 这类系数注定不可能对所有字号/字体都准，尤其字体马上要做成可选项。
+  // 拆成独立事件后中文行的 Dialogue 与关闭双语时逐字节相同、capMarginV 也不再
+  // 依赖任何双语参数——中文行的位置和双语开关彻底解耦，不用猜系数就是 0 位移。
+  //
+  // 英文行用 \an8（顶边锚点）+ \pos 精确定位：enY 是"中文基线往下 enGapPx 像素"，
+  // 语义直给，enGapPx 越大英文行离中文越远，不再是"行间距"这种要靠 LINE_H 折算的量。
+  if (st.bilingual) {
+    const enPx = Math.round(st.captionSizePx * (st.enScale ?? 0.6))
+    const enGap = Math.max(0, Math.round(st.enGapPx ?? 8))
+    const enY = Math.round(o.height * st.captionPosY) + enGap
+    const enTags = `{\\an8\\pos(${cx},${enY})\\fs${enPx}\\c${inlineColor(st.enColor ?? '#dddddd')}${st.enFontName ? `\\fn${st.enFontName}` : ''}}`
+    for (const c of o.captions) {
+      if (!(c.endMs > c.startMs)) continue // 与 line() 里的零长/负长事件规则保持一致
+      const en = escapeAssText(c.en ?? '')
+      if (!en) continue
+      ev.push(`Dialogue: 1,${toAssTime(c.startMs)},${toAssTime(c.endMs)},cap,,0,0,0,,${fad}${enTags}${en}`)
+    }
+  }
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {
     line(2, { text: o.watermark, startMs: 0, endMs: o.totalMs }, 'wm')
   }

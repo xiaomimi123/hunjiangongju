@@ -98,10 +98,45 @@ describe('fromBodyData —— 新旧渲染器的唯一接缝', () => {
     expect(o.assStyle.captionPosY).toBe(0.7)
   })
 
+  it('双语参数映射进 assStyle', () => {
+    const o = fromBodyData(data({ templateParams: params({
+      text: { bilingual: true, enScale: 0.5, enColor: '#cccccc', enGapPx: 12 },
+    }) }), io)
+    expect(o.assStyle.bilingual).toBe(true)
+    expect(o.assStyle.enScale).toBe(0.5)
+    expect(o.assStyle.enColor).toBe('#cccccc')
+    expect(o.assStyle.enGapPx).toBe(12)
+  })
+
+  it('没配双语时 assStyle 里不出现 bilingual（老调用零回归）', () => {
+    const o = fromBodyData(data(), io)
+    expect('bilingual' in o.assStyle).toBe(false)
+  })
+
+  it('captionBeats 的 en 透传进 bodySegments', () => {
+    const o = fromBodyData(data({
+      segments: [
+        { seqNo: 1, startMs: 0, endMs: 3984, subtitle: '今天分享的是', imageIndex: 0 },
+        { seqNo: 2, startMs: 3984, endMs: 9687, subtitle: '第一句', imageIndex: 1, bookTitle: '活着', bookAuthor: '余华',
+          captionBeats: [{ zh: '中文', en: 'English', startMs: 4200, endMs: 9000 }] },
+        { seqNo: 3, startMs: 9687, endMs: 15000, subtitle: '第二句', imageIndex: 2, bookTitle: '活着', bookAuthor: '余华' },
+      ],
+    }), io)
+    expect(o.bodySegments[0].captionBeats![0].en).toBe('English')
+  })
+
   it('自带字体：fontsDir 与 fontName 都指向仓库内的字体', () => {
     const o = fromBodyData(data(), io)
     expect(o.assStyle.fontName).toBe('Noto Sans SC')
     expect(o.fontsDir).toContain('templates/booklist/fonts')
+  })
+
+  // per-task fontsdir 安全前置：renderPipeline 会传一个只装了本条片子用到的
+  // 字体的临时目录进来，fromBodyData 必须原样透传，不能悄悄换回内置整目录——
+  // 否则「只装用到的字体」这条防线在最后一步又被绕开了。
+  it('传入 io.fontsDir 时原样透传，不回退到内置 FONTS_DIR', () => {
+    const o = fromBodyData(data(), { ...io, fontsDir: '/tmp/per-task-fonts' })
+    expect(o.fontsDir).toBe('/tmp/per-task-fonts')
   })
 
   it('开场片段缺省时不产出 openingClipAbs（整片从快闪开始）', () => {
@@ -184,5 +219,79 @@ describe('fromBodyData —— 开场那一段不能留空', () => {
     const o = fromBodyData(data(), { ...io, openingClipAbs: '/o.mp4' })
     expect(o.openingClipAbs).toBe('/o.mp4')
     expect(o.openStillAbs).toBeUndefined()
+  })
+})
+
+// 运营在后台选的字体：把 id 映射成 ASS 需要的族名。fromBodyData 是纯函数，
+// 自定义字体的族名靠 io.fontFamilies 由调用方喂进来，内置字体靠 findBuiltinFont。
+describe('fromBodyData —— 字体 id 映射成族名', () => {
+  it('字体 id 映射成族名写进 assStyle', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'noto-sc', titleFontId: 'noto-sc' } }),
+    }), io)
+    expect(o.assStyle.fontName).toBe('Noto Sans SC')
+    expect(o.assStyle.titleFontName).toBe('Noto Sans SC')
+  })
+
+  it('认不出的字体 id 回退默认字体，不报错', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'ghost' } }),
+    }), io)
+    expect(o.assStyle.fontName).toBe('Noto Sans SC')
+  })
+
+  it('未配置字体 id 时 assStyle 里不出现 titleFontName（老调用零回归）', () => {
+    const o = fromBodyData(data(), io)
+    expect('titleFontName' in o.assStyle).toBe(false)
+  })
+
+  it('双语英文行字体 id 解析成功才写 enFontName，跟随双语开关', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { bilingual: true, enFontId: 'lxgw-wenkai' } }),
+    }), io)
+    expect(o.assStyle.enFontName).toBe('LXGW WenKai')
+  })
+
+  // ★ 正文字体选到内置 700 字重的条目时必须置粗体位——ass.ts 的 cap/wm 样式行
+  // Bold 位由它驱动。不设的话运营选了「思源黑体 Bold」当正文字体会毫无反应
+  // （族名相同，libass 按 Bold=0 挑回 Regular），是典型的静默失效。
+  it('选了 noto-sc-bold 当正文字体时 captionFontBold 为 true', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'noto-sc-bold' } }),
+    }), io)
+    expect(o.assStyle.fontName).toBe('Noto Sans SC')
+    expect(o.assStyle.captionFontBold).toBe(true)
+  })
+
+  it('正文字体是 400 字重时 captionFontBold 不出现', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'noto-sc' } }),
+    }), io)
+    expect('captionFontBold' in o.assStyle).toBe(false)
+  })
+
+  it('自定义字体族名由 io.fontFamilies 提供', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'cl-custom-id' } }),
+    }), { ...io, fontFamilies: { 'cl-custom-id': { family: 'My Custom Font', weight: 400 } } })
+    expect(o.assStyle.fontName).toBe('My Custom Font')
+  })
+
+  // ★ 锁住 Task 11 留下的字重缺口：自定义字体 weight=700 当正文字幕字体时，
+  // captionFontBold 必须为 true。内置与自定义走同一条 fontMeta 解析路径，
+  // 这条断言直接盯着「自定义粗体字体选了毫无反应」这个静默失效场景。
+  it('自定义字体 weight=700 当正文字体时 captionFontBold 为 true', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'cl-bold-id' } }),
+    }), { ...io, fontFamilies: { 'cl-bold-id': { family: 'My Bold Font', weight: 700 } } })
+    expect(o.assStyle.fontName).toBe('My Bold Font')
+    expect(o.assStyle.captionFontBold).toBe(true)
+  })
+
+  it('自定义字体 weight=400 当正文字体时 captionFontBold 不出现（老行为不变）', () => {
+    const o = fromBodyData(data({
+      templateParams: params({ text: { captionFontId: 'cl-regular-id' } }),
+    }), { ...io, fontFamilies: { 'cl-regular-id': { family: 'My Regular Font', weight: 400 } } })
+    expect('captionFontBold' in o.assStyle).toBe(false)
   })
 })

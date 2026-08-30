@@ -151,4 +151,48 @@ describe('sanitizeParamsOverride —— 白名单', () => {
     expect(sanitizeParamsOverride({ body: { subtitleColor: '#FFEE00' } }))
       .toEqual({ body: { subtitleColor: '#FFEE00' } })
   })
+
+  describe('双语字幕字段', () => {
+    it('放行并原样保留合法值', () => {
+      const out = sanitizeParamsOverride({
+        text: { bilingual: true, enScale: 0.55, enColor: '#dddddd', enGapPx: 10 },
+      })
+      expect(out!.text).toEqual({ bilingual: true, enScale: 0.55, enColor: '#dddddd', enGapPx: 10 })
+    })
+
+    it('enScale 越界夹到 [0.3, 1.0]', () => {
+      expect((sanitizeParamsOverride({ text: { enScale: 9 } })!.text as never as { enScale: number }).enScale).toBe(1)
+      expect((sanitizeParamsOverride({ text: { enScale: 0 } })!.text as never as { enScale: number }).enScale).toBe(0.3)
+    })
+
+    it('enGapPx 越界夹到 [0, 40]，并取整', () => {
+      expect((sanitizeParamsOverride({ text: { enGapPx: 99.7 } })!.text as never as { enGapPx: number }).enGapPx).toBe(40)
+    })
+
+    it('enColor 非 #rrggbb 直接丢弃', () => {
+      expect(sanitizeParamsOverride({ text: { enColor: 'red' } })).toBeNull()
+    })
+
+    it('bilingual 非布尔直接丢弃', () => {
+      expect(sanitizeParamsOverride({ text: { bilingual: 'yes' } })).toBeNull()
+    })
+  })
+
+  describe('字体字段', () => {
+    it('放行三个字体 id', () => {
+      const out = sanitizeParamsOverride({
+        text: { captionFontId: 'noto-sc', titleFontId: 'noto-sc', enFontId: '' },
+      })
+      expect(out!.text).toEqual({ captionFontId: 'noto-sc', titleFontId: 'noto-sc', enFontId: '' })
+    })
+
+    it('id 过长直接丢弃（防止把整段 JSON 塞进来）', () => {
+      expect(sanitizeParamsOverride({ text: { captionFontId: 'x'.repeat(200) } })).toBeNull()
+    })
+
+    it('不校验 id 是否存在 —— 自定义字体的 id 是 cuid，白名单层不查库', () => {
+      const out = sanitizeParamsOverride({ text: { captionFontId: 'clxxxxxxxxxxxxxxxxxxxxxx' } })
+      expect((out!.text as { captionFontId: string }).captionFontId).toBe('clxxxxxxxxxxxxxxxxxxxxxx')
+    })
+  })
 })

@@ -30,6 +30,8 @@ export type { DraftStructure } from './booklist/draftStructure'
 export { extractDraftGrade } from './booklist/draftGrade'
 export { extractDraftMoves } from './booklist/draftMotion'
 export { fitToSegmentCount } from './booklist/fitSegments'
+export { fitSizePx } from './booklist/fitSize'
+export { BODY_SIZE, FLASH_AUTHOR_RATIO } from './booklist/bodySize'
 export { deriveDraftCharBudget, deriveDraftSpeechRate, deriveSlotCharBudgets, speechSlotDurations, slotDurationsForSegments, charBudgetsFromWeights, speechCapacities, BOOK_TITLE_LEAD_MS, SPEECH_CHARS_PER_SEC, charsForSpeechMs } from './booklist/draftCharBudget'
 export { rebalanceToSlotChars, splitSentences } from './booklist/rebalanceSlots'
 export { mergeTemplateParamsRaw, readTaskParamsOverride, resolveTemplateParamsRaw, TASK_PARAMS_KEY } from './booklist/paramsOverride'
@@ -51,6 +53,9 @@ export type { ProvenanceStatus, ProvenanceEntry, DraftFidelityReport } from './b
 export { buildBookCoverPrompt } from './booklist/bookCoverPrompt'
 export type { CoverPrompt } from './booklist/bookCoverPrompt'
 export { findBookByTitle, findBooksByTheme, upsertBook, normalizeTitle, findCoversByTitles, setBookCover } from './booklist/bookLibrary'
+export * from './booklist/fonts'
+export { readFontMeta } from './booklist/fontFamily'
+export type { ParsedFontMeta } from './booklist/fontFamily'
 export type { BookRow } from './booklist/bookLibrary'
 export {
   seedFrom,

@@ -258,3 +258,124 @@ describe('字幕渐入渐出（\\fad）', () => {
     expect(a).not.toContain('\\fad')
   })
 })
+
+describe('双语字幕', () => {
+  const base = {
+    fontName: 'Noto Sans SC', captionColor: '#ffffff', captionPosY: 0.78,
+    captionSizePx: 50, titleSizePx: 60, titleColor: '#ffe9c0', watermarkSizePx: 22,
+  }
+  const cue = { text: '这是一句中文', en: 'This is Chinese', startMs: 0, endMs: 2000 }
+  const opts = (style: Record<string, unknown>) =>
+    ({ width: 720, height: 1280, captions: [cue], totalMs: 2000, style: { ...base, ...style } })
+
+  it('默认（不开双语）逐字节等于没有 en 字段时的输出', () => {
+    const withEn = buildAss(opts({}) as never)
+    const withoutEn = buildAss(opts({}) as never)
+    expect(withEn).toBe(withoutEn)
+    expect(withEn).not.toContain('This is Chinese')
+  })
+
+  it('开启后英文行是独立的 Dialogue 事件，\\an8+\\pos 定位、内联覆盖字号/颜色', () => {
+    const ass = buildAss(opts({ bilingual: true, enScale: 0.6, enColor: '#dddddd', enGapPx: 0 }) as never)
+    // 50 * 0.6 = 30；cx = 720/2 = 360；enY = round(1280*0.78) + 0 = 998
+    expect(ass).toContain('{\\an8\\pos(360,998)\\fs30\\c&HDDDDDD&}This is Chinese')
+  })
+
+  it('enGapPx 决定英文行顶边离中文基线多远（不再是靠 LINE_H 折算的行间距）', () => {
+    const ass = buildAss(opts({ bilingual: true, enScale: 0.6, enGapPx: 8 }) as never)
+    // enY = round(1280*0.78) + 8 = 1006
+    expect(ass).toContain('{\\an8\\pos(360,1006)\\fs30\\c&HDDDDDD&}This is Chinese')
+  })
+
+  it('enFontName 给了就内联换字体', () => {
+    const ass = buildAss(opts({ bilingual: true, enFontName: 'Space Grotesk' }) as never)
+    expect(ass).toContain('\\fnSpace Grotesk}')
+  })
+
+  it('英文为空的拍不产出英文事件', () => {
+    const ass = buildAss({
+      width: 720, height: 1280, totalMs: 2000,
+      captions: [{ text: '只有中文', startMs: 0, endMs: 1000 }],
+      style: { ...base, bilingual: true },
+    } as never)
+    expect(ass).toContain('只有中文')
+    expect(ass).not.toContain('\\an8')
+  })
+
+  it('★ 开/关双语时 Style: cap 那一行逐字节相同——中文行的位置与双语开关彻底解耦', () => {
+    const off = buildAss(opts({}) as never)
+    const on = buildAss(opts({ bilingual: true, enScale: 0.6, enGapPx: 8 }) as never)
+    const capStyleLine = (ass: string) => ass.split('\n').find((l) => l.startsWith('Style: cap,'))
+    expect(capStyleLine(on)).toBe(capStyleLine(off))
+  })
+})
+
+describe('分层字体', () => {
+  const base = {
+    fontName: 'Noto Sans SC', captionColor: '#ffffff', captionPosY: 0.78,
+    captionSizePx: 50, titleSizePx: 60, titleColor: '#ffe9c0', watermarkSizePx: 22,
+    openTitleSizePx: 40, flashTitleSizePx: 58,
+  }
+  const build = (style: Record<string, unknown>) =>
+    buildAss({ width: 720, height: 1280, captions: [], totalMs: 1000, style: { ...base, ...style } } as never)
+
+  it('不给 titleFontName 时所有 Style 行都用 fontName（老调用零回归）', () => {
+    const ass = build({})
+    for (const name of ['cap', 'title', 'ot', 'wm', 'ft', 'fa']) {
+      expect(ass).toContain(`Style: ${name},Noto Sans SC,`)
+    }
+  })
+
+  it('给了 titleFontName 时 title/ot/ft/fa 换字体，cap/wm 不变', () => {
+    const ass = build({ titleFontName: '思源宋体' })
+    expect(ass).toContain('Style: cap,Noto Sans SC,')
+    expect(ass).toContain('Style: wm,Noto Sans SC,')
+    expect(ass).toContain('Style: title,思源宋体,')
+    expect(ass).toContain('Style: ot,思源宋体,')
+    expect(ass).toContain('Style: ft,思源宋体,')
+    expect(ass).toContain('Style: fa,思源宋体,')
+  })
+})
+
+// ★ 复盘记录：这里曾经想把 title/ot/ft/fa 的 Bold 位也改成由字重驱动、缺省 0，
+// 理由是「写死 1 今天是空操作，字体池加了 Bold 文件后才会失控」。
+// 真渲染实测推翻了这个前提：libass 0.17.5 上即使只有 Regular 一个文件，
+// Bold=1 仍会触发 FreeType 合成假粗体，隔离测量墨迹差 25.4%（详见 ass.ts 里
+// TITLE_BOLD_BORD 上方的注释与任务报告）。也就是说写死的 1 早就是存量成片
+// 像素的一部分，改成 0 反而会让所有存量框架的标题无声变薄——所以 title/ot/ft/fa
+// 的 Bold 位**保留写死 1**，不接受任何参数。
+// cap/wm 保留 captionFontBold：场景不同——运营选的是**正文**字体，若正文字体
+// 真收录了粗体字面而 Bold 位仍写死 0，libass 会静默选回 Regular，表现成
+// 「选了没反应」，这类静默失效必须留一个开关能让它生效。
+describe('正文的 Bold 位由 captionFontBold 驱动，标题类保持写死 1', () => {
+  const base = {
+    fontName: 'Noto Sans SC', captionColor: '#ffffff', captionPosY: 0.78,
+    captionSizePx: 50, titleSizePx: 60, titleColor: '#ffe9c0', watermarkSizePx: 22,
+    openTitleSizePx: 40, flashTitleSizePx: 58,
+  }
+  const build = (style: Record<string, unknown>) =>
+    buildAss({ width: 720, height: 1280, captions: [], totalMs: 1000, style: { ...base, ...style } } as never)
+  // Style 行里 Bold 紧跟在 BackColour 之后：找到 `Style: name,...,Bold,Italic,...`
+  const boldOf = (ass: string, name: string) => {
+    const line = ass.split('\n').find((l) => l.startsWith(`Style: ${name},`))!
+    return line.split(',')[7] // Name,Fontname,Fontsize,Primary,Secondary,Outline,Back,Bold
+  }
+
+  it('缺省不给 captionFontBold 时，cap/wm 是 0，title/ot/ft/fa 保持写死的 1', () => {
+    const ass = build({})
+    expect(boldOf(ass, 'cap')).toBe('0')
+    expect(boldOf(ass, 'wm')).toBe('0')
+    for (const name of ['title', 'ot', 'ft', 'fa']) {
+      expect(boldOf(ass, name), `${name} 的 Bold 位`).toBe('1')
+    }
+  })
+
+  it('captionFontBold=true 只让 cap/wm 变 1，标题类的写死值不受影响', () => {
+    const ass = build({ captionFontBold: true })
+    expect(boldOf(ass, 'cap')).toBe('1')
+    expect(boldOf(ass, 'wm')).toBe('1')
+    for (const name of ['title', 'ot', 'ft', 'fa']) {
+      expect(boldOf(ass, name), `${name} 的 Bold 位`).toBe('1')
+    }
+  })
+})

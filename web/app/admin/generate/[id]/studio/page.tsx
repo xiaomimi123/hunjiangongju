@@ -6,8 +6,13 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import {
   SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows,
-  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams,
+  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type FontOption,
 } from '@/components/admin/paramControls'
+import { StageCanvas, type StageScene, type StageLayer, type StageBg, type StageSample } from '@/components/admin/StageCanvas'
+import { thumbUrl } from '@/lib/thumbUrl'
+// 子模块路径导入（非 '@mixcut/db' 包索引）：见 stageGeometry.ts 顶部注释，走包索引会把
+// bullmq/ioredis 拖进浏览器 bundle 导致整页白屏。
+import { BODY_SIZE } from '@mixcut/db/src/booklist/bodySize'
 
 // 剪辑工作台：调这一条片子的节奏、字幕样式、配乐，然后重渲。
 //
@@ -55,10 +60,39 @@ export default function StudioPage() {
   const [capPosY, setCapPosY] = useState(0.78)
   const [text, setText] = useState<TextParams | null>(null)
   const [pace, setPace] = useState<PaceParams | null>(null)
+  const [fonts, setFonts] = useState<FontOption[]>([])
+  const [scene, setScene] = useState<StageScene>('body')
+  const [bg, setBg] = useState<StageBg>('placeholder')
+  const [sel, setSel] = useState<StageLayer | null>(null)
+  // ★ 这里**故意不给 captionEn 塞占位英文**（框架级 frameworks/[id]/studio 页
+  // 没有真实任务，用占位英文合理，那里别动）。任务级页面一旦塞了占位英文，
+  // 会踩真实发生过的静默失效链路：
+  //   1. 某框架原先关着双语 → 该框架生成的任务，captionBeats[].en 全是空串
+  //      （generateScript.ts 里 wantEn 为 false 时跳过 translateLine，省 LLM 调用）
+  //   2. 运营在任务级工作台把双语勾上 → 如果这里给了占位英文，画布立刻显示一行英文
+  //   3. 点「应用并重渲」→ applyAndRender 只入队 render-visuals，不会重跑
+  //      generateScript，captionBeats.en 依然是空串
+  //   4. → 成片里一个英文字都没有，但运营已经在画布上「亲眼看见」了英文，日志毫无异常
+  // 所以：拿不到真英文就不给 captionEn，画布不画英文行；配合下面 enMissing 的
+  // 提示条，让运营知道「不是没显示，是这条任务本来就没有英文文本」。
+  const [sample, setSample] = useState<StageSample>({
+    caption: '这是一句示例字幕',
+    bookTitle: '活着', bookAuthor: '余华', openTitle: '今天分享的是',
+  })
+  // bilingual 开着但本条任务所有 beat 都没有英文文本时为 true——见上面的注释，
+  // 这是本条任务生成时没开双语（或翻译失败）留下的既成事实，重渲不会补出英文。
+  const [enMissing, setEnMissing] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const d = await api<Info>(`/api/generate/${id}/params`)
+      const [d, fontsRes] = await Promise.all([
+        api<Info>(`/api/generate/${id}/params`),
+        api<{ builtin: { id: string; label: string; family: string }[]; custom: { id: string; label: string; family: string }[] }>('/api/admin/fonts').catch(() => ({ builtin: [], custom: [] })),
+      ])
+      setFonts([
+        ...fontsRes.builtin.map((f) => ({ ...f, builtin: true })),
+        ...fontsRes.custom.map((f) => ({ ...f, builtin: false })),
+      ])
       setInfo(d)
       const e = d.effective
       // 分镜时长的当前值优先取 bodyTimings —— 画面实际就是按它切的；
@@ -77,8 +111,40 @@ export default function StudioPage() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    api<{ id: string; variables?: Record<string, unknown> | null }>(`/api/generate/${id}`)
-      .then((t) => setBgmId((t.variables?.__bgmId as string) ?? '')).catch(() => {})
+    type TaskDetail = {
+      id: string
+      variables?: Record<string, unknown> | null
+      segments?: { seqNo: number; imageUrl: string | null; bookTitle: string | null; bookAuthor: string | null; captionBeats: unknown }[]
+    }
+    api<TaskDetail>(`/api/generate/${id}`)
+      .then((t) => {
+        setBgmId((t.variables?.__bgmId as string) ?? '')
+        // 画布示例数据：用本条任务第一段的真实文案（含双语），拉不到就保留组件默认的示例文案。
+        const first = t.segments?.[0]
+        if (first) {
+          const beats = Array.isArray(first.captionBeats) ? (first.captionBeats as { zh?: unknown; en?: unknown }[]) : []
+          const beat0 = beats.find((b) => typeof b?.zh === 'string' && (b.zh as string).trim())
+          setSample((s) => ({
+            ...s,
+            caption: (beat0?.zh as string) || s.caption,
+            // 拿不到真英文就不给 captionEn——不塞占位英文，见上面 sample 初始值
+            // 那段注释里的失败场景。
+            captionEn: (typeof beat0?.en === 'string' && beat0.en.trim()) ? (beat0.en as string) : undefined,
+            bookTitle: first.bookTitle || s.bookTitle,
+            bookAuthor: first.bookAuthor || s.bookAuthor,
+          }))
+          if (first.imageUrl) setBg({ url: thumbUrl(first.imageUrl) })
+        }
+        // 判断「本条任务是否完全没有英文」：扫全部段落的全部 beat，而不只是
+        // 上面拿来做画布示例的第一段——第一段恰好没英文不代表整条任务都没有，
+        // 这条提示要的是「重渲会不会出现英文」这个准确判断，不能靠抽样。
+        const allBeats = (t.segments ?? []).flatMap((seg) =>
+          Array.isArray(seg.captionBeats) ? (seg.captionBeats as { en?: unknown }[]) : [],
+        )
+        const anyEn = allBeats.some((b) => typeof b?.en === 'string' && b.en.trim())
+        setEnMissing(allBeats.length > 0 && !anyEn)
+      })
+      .catch(() => {})
     api<Bgm[]>('/api/bgm').then(setBgms).catch(() => {})
   }, [id])
 
@@ -142,6 +208,45 @@ export default function StudioPage() {
       {err && <p className="pill pill-bad">{err}</p>}
       {msg && <p className="pill pill-ok">{msg}</p>}
       {locked && <p className="pill pill-warn">{info.blockReason}</p>}
+
+      {text && (
+        <section className="card space-y-3 p-4 lg:sticky lg:top-4">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">画面预览 · 可直接拖</p>
+            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+              onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
+              {busy === '画面' ? '保存中…' : '保存画面'}
+            </button>
+          </div>
+          <StageCanvas
+            width={BODY_SIZE.width} height={BODY_SIZE.height}
+            text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
+            scene={scene} onScene={setScene} bg={bg} onBg={setBg}
+            sample={sample}
+            selected={sel} onSelect={setSel}
+            onPosY={(layer, v) => {
+              if (locked) return
+              switch (layer) {
+                case 'caption': setCapPosY(v); break
+                case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
+                case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
+                case 'openTitle': setText({ ...text, openTitlePosY: v }); break
+                default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
+              }
+            }}
+            onSize={(layer, v) => {
+              if (locked) return
+              switch (layer) {
+                case 'caption': setText({ ...text, captionSizePx: v }); break
+                case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
+                case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
+                case 'openTitle': setText({ ...text, openTitleScale: v }); break
+                default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
+              }
+            }}
+          />
+        </section>
+      )}
 
       {info.override && (
         <div className="card flex flex-wrap items-center gap-3 p-4">
@@ -207,11 +312,17 @@ export default function StudioPage() {
         <div className="flex items-center justify-between">
           <p className="eyebrow">字幕样式</p>
           <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-            onClick={() => save({ body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '字幕样式')}>
+            onClick={() => save({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) }, '字幕样式')}>
             {busy === '字幕样式' ? '保存中…' : '保存字幕样式'}
           </button>
         </div>
-        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} disabled={locked} />
+        {text?.bilingual && enMissing && (
+          <p className="pill pill-warn text-xs">
+            本条生成时未开双语，字幕没有英文文本；重渲不会出现英文，需要重新生成文案。
+          </p>
+        )}
+        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
+          text={text} onText={setText} disabled={locked} />
       </section>
 
       {/* ── 文字层 ── */}
@@ -224,7 +335,7 @@ export default function StudioPage() {
               {busy === '文字层' ? '保存中…' : '保存文字层'}
             </button>
           </div>
-          <TextRows text={text} onChange={setText} disabled={locked} />
+          <TextRows text={text} onChange={setText} fonts={fonts} disabled={locked} />
         </section>
       )}
 

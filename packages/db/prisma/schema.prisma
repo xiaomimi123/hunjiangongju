@@ -248,6 +248,22 @@ model AiCapabilityConfig {
   @@map("ai_capability_config")
 }
 
+/// 运营上传的自定义字体。内置字体见 packages/db/src/booklist/fonts.ts（不入库）。
+model CustomFont {
+  id        String   @id @default(cuid())
+  /// 后台下拉里的显示名，运营填
+  label     String
+  /// 字体内部族名（name 表 name ID 1），上传时用 fontkit 解析。写进 ASS 的 Fontname
+  family    String
+  /// 字重，400 或 700。驱动 ASS 样式行的 Bold 位；不存的话上传的粗体字体选了不会加粗
+  weight    Int      @default(400)
+  /// data/fonts/ 下的文件名
+  fileName  String   @map("file_name")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("custom_fonts")
+}
+
 model BookLibrary {
   id        String   @id @default(uuid())
   title     String

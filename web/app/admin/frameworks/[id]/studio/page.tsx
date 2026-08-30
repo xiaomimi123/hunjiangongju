@@ -6,8 +6,12 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import {
   SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows, ScriptRows,
-  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type ScriptParams,
+  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type ScriptParams, type FontOption,
 } from '@/components/admin/paramControls'
+import { StageCanvas, type StageScene, type StageLayer, type StageBg } from '@/components/admin/StageCanvas'
+// 子模块路径导入（非 '@mixcut/db' 包索引）：见 stageGeometry.ts 顶部注释，走包索引会把
+// bullmq/ioredis 拖进浏览器 bundle 导致整页白屏。
+import { BODY_SIZE } from '@mixcut/db/src/booklist/bodySize'
 
 // 框架级剪辑工作台：调**这个模板以后所有片子**的节奏、转场、运镜、字幕、配乐。
 //
@@ -44,10 +48,21 @@ export default function FrameworkStudioPage() {
   const [text, setText] = useState<TextParams | null>(null)
   const [pace, setPace] = useState<PaceParams | null>(null)
   const [script, setScript] = useState<ScriptParams | null>(null)
+  const [fonts, setFonts] = useState<FontOption[]>([])
+  const [scene, setScene] = useState<StageScene>('body')
+  const [bg, setBg] = useState<StageBg>('placeholder')
+  const [sel, setSel] = useState<StageLayer | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const d = await api<Info>(`/api/frameworks/${id}/params`)
+      const [d, fontsRes] = await Promise.all([
+        api<Info>(`/api/frameworks/${id}/params`),
+        api<{ builtin: { id: string; label: string; family: string }[]; custom: { id: string; label: string; family: string }[] }>('/api/admin/fonts').catch(() => ({ builtin: [], custom: [] })),
+      ])
+      setFonts([
+        ...fontsRes.builtin.map((f) => ({ ...f, builtin: true })),
+        ...fontsRes.custom.map((f) => ({ ...f, builtin: false })),
+      ])
       setInfo(d)
       setSlots(d.effective.body.slotDurationsMs ?? [])
       setCycle(d.effective.transition.bodyCycle ?? [])
@@ -114,6 +129,46 @@ export default function FrameworkStudioPage() {
         <span className="text-ink">「保存为模板默认值」</span>写回这里——那样能看着成片改，不用凭空猜数值。
       </div>
 
+      {text && (
+        <section className="card space-y-3 p-4 lg:sticky lg:top-4">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">画面预览 · 可直接拖</p>
+            <button className="btn-ghost text-xs disabled:opacity-50" disabled={!!busy}
+              onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
+              {busy === '画面' ? '保存中…' : '保存画面'}
+            </button>
+          </div>
+          <StageCanvas
+            width={BODY_SIZE.width} height={BODY_SIZE.height}
+            text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
+            scene={scene} onScene={setScene} bg={bg} onBg={setBg}
+            sample={{
+              caption: '这是一句示例字幕', captionEn: 'This is a sample caption',
+              bookTitle: '活着', bookAuthor: '余华', openTitle: '今天分享的是',
+            }}
+            selected={sel} onSelect={setSel}
+            onPosY={(layer, v) => {
+              switch (layer) {
+                case 'caption': setCapPosY(v); break
+                case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
+                case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
+                case 'openTitle': setText({ ...text, openTitlePosY: v }); break
+                default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
+              }
+            }}
+            onSize={(layer, v) => {
+              switch (layer) {
+                case 'caption': setText({ ...text, captionSizePx: v }); break
+                case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
+                case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
+                case 'openTitle': setText({ ...text, openTitleScale: v }); break
+                default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
+              }
+            }}
+          />
+        </section>
+      )}
+
       <Section title="节奏 · 每段停留多久（默认值）" what="节奏"
         patch={() => ({ body: { slotDurationsMs: slots } })}>
         <p className="text-xs text-ink3">
@@ -135,14 +190,15 @@ export default function FrameworkStudioPage() {
       </Section>
 
       <Section title="字幕样式" what="字幕样式"
-        patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY } })}>
-        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY} />
+        patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) })}>
+        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
+          text={text} onText={setText} />
       </Section>
 
       {text && (
         <Section title="文字层 · 字号 / 描边 / 加粗 / 颜色" what="文字层"
           patch={() => ({ text })}>
-          <TextRows text={text} onChange={setText} />
+          <TextRows text={text} onChange={setText} fonts={fonts} />
         </Section>
       )}
 

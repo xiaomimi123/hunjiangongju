@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 
@@ -65,6 +66,11 @@ export default function SettingsPage() {
       <PageHeader title="系统设置" subtitle="充值二维码与邮件服务" />
       {err && <p className="pill pill-bad">{err}</p>}
       {msg && <p className="pill pill-ok">{msg}</p>}
+
+      <Link href="/admin/settings/fonts" className="card flex items-center justify-between p-5 hover:bg-surface2">
+        <span className="font-medium">字体管理 · 内置字体清单与自定义字体上传</span>
+        <span className="text-sm text-flame">进入 →</span>
+      </Link>
 
       <div className="card space-y-3 p-5">
         <p className="font-medium">学员充值二维码</p>

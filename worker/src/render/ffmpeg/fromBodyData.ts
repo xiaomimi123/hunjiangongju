@@ -12,6 +12,7 @@ import type { RenderFullOpts, FullFlashCard } from './renderFull'
 import type { RenderBodySegment } from './renderBody'
 import { DEFAULT_FONT_NAME, FONTS_DIR } from './fonts'
 import { selectPreset, hasGrain } from '../../../templates/booklist/theme'
+import { findBuiltinFont, FLASH_AUTHOR_RATIO } from '@mixcut/db'
 
 export interface FromBodyDataIo {
   /** hf 工作目录的绝对路径；images/covers 的相对路径以它为基准 */
@@ -21,6 +22,22 @@ export interface FromBodyDataIo {
   ripple?: { xmapAbs: string; ymapAbs: string }
   assAbs: string
   outAbs: string
+  /**
+   * 字幕烧录用的 fontsdir。缺省回退仓库内置的 FONTS_DIR（老调用零回归）。
+   *
+   * 调用方（renderPipeline）应该传一个**只装了本条片子真正用到的字体**的
+   * per-task 目录，而不是整个内置字体目录——见 fonts.ts 的 usedBuiltinFontIds
+   * 和 renderVisuals.ts 里的踩坑记录：libass 的 Bold=1 会在 fontsdir 里同时有
+   * 同族名 Regular/Bold 两个文件时选中真粗体字面，多余的字体文件不能进目录。
+   */
+  fontsDir?: string
+  /**
+   * 自定义字体 id → {族名, 字重}。由调用方（renderPipeline）查库（CustomFont 表）后传入；
+   * fromBodyData 是纯函数，不能自己查库。只需要放**认不出的 id**（即数据库 cuid）
+   * 对应的条目——内置字体走 findBuiltinFont，不必也不应该塞进这张表（见 fontMeta）。
+   * 缺省时未配置字体 id、或 id 既不在这张表也不是内置字体，一律回退默认字体。
+   */
+  fontFamilies?: Record<string, { family: string; weight: 400 | 700 }>
 }
 
 /** 相对路径 → 绝对路径。BodyData 里存的是 hf 目录内的相对路径（media/01.png） */
@@ -51,7 +68,10 @@ function abs(hfDir: string, rel: string): string {
  * 现在运营在剪辑工作台里就能调。
  */
 const DEFAULT_CAPTION_PX = 54
-const FS = { watermark: 22, flashAuthorRatio: 0.48 }
+// flashAuthorRatio 现从 @mixcut/db（bodySize.ts 的 FLASH_AUTHOR_RATIO）取，
+// 不再本地写死 0.48——与后台剪辑画布（stageGeometry.ts）共用同一份叶子模块常量，
+// 避免两边各存一份拷贝、改一处忘另一处导致画布悄悄偏离成片。
+const FS = { watermark: 22, flashAuthorRatio: FLASH_AUTHOR_RATIO }
 
 export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts {
   const p = data.templateParams
@@ -88,13 +108,31 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     ...(s.bookAuthor ? { bookAuthor: s.bookAuthor } : {}),
     ...(s.subtitle ? { subtitle: s.subtitle } : {}),
     ...(s.captionBeats?.length
-      ? { captionBeats: s.captionBeats.map((b) => ({ zh: b.zh, startMs: b.startMs, endMs: b.endMs })) }
+      ? { captionBeats: s.captionBeats.map((b) => ({ zh: b.zh, ...(b.en ? { en: b.en } : {}), startMs: b.startMs, endMs: b.endMs })) }
       : {}),
   }))
 
   const tx = p?.text
   const capPx = tx?.captionSizePx ?? DEFAULT_CAPTION_PX
   const px = (ratio: number) => Math.round(capPx * ratio)
+  // 字体 id → {族名, 字重}。内置与自定义走同一条路径：先查调用方喂进来的自定义表，
+  // 查不到再查内置表——不能分成两套 if/else，那样字重那条支路很容易漏掉自定义字体
+  // （Task 11 就是活生生的例子：族名走了合并路径，字重却只查了内置表）。
+  // 认不出就整体回退（undefined）：宁可字体没换，也不能渲染失败。
+  const fontMeta = (id: string | undefined): { family: string; weight: 400 | 700 } | undefined => {
+    if (!id) return undefined
+    const custom = io.fontFamilies?.[id]
+    if (custom) return custom
+    const b = findBuiltinFont(id)
+    return b ? { family: b.family, weight: b.weight } : undefined
+  }
+  const captionFont = fontMeta(tx?.captionFontId)?.family ?? DEFAULT_FONT_NAME
+  const titleFont = fontMeta(tx?.titleFontId)?.family
+  const enFont = fontMeta(tx?.enFontId)?.family
+  // ★ 正文字体解析到字重 700 的条目（内置或自定义）时置粗体位。ass.ts 的 cap/wm
+  // 样式行 Bold 位由它驱动——不设的话运营选了粗体字体当正文字体会毫无反应
+  // （族名相同，libass 会按 Bold=0 挑回 Regular），是典型的静默失效。
+  const captionFontBold = fontMeta(tx?.captionFontId)?.weight === 700
   // 开场标题：第 0 段是「开场 + 快闪」的时间窗，它的字幕就是这行开场白。
   // ffmpeg 迁移时 segs.slice(1) 把第 0 段整个丢掉了，成片开头一直没有这行字。
   const openTitleText = p?.open.titleText?.trim() || segs[0]?.subtitle?.trim() || ''
@@ -119,7 +157,9 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     flashBounceIn: p?.flash.bounceIn ?? true,
     ...(data.overlay.watermark ? { watermark: data.overlay.watermark } : {}),
     assStyle: {
-      fontName: DEFAULT_FONT_NAME,
+      fontName: captionFont,
+      ...(titleFont ? { titleFontName: titleFont } : {}),
+      ...(captionFontBold ? { captionFontBold: true } : {}),
       captionColor: p?.body.subtitleColor ?? '#ffffff',
       captionPosY: p?.body.subtitlePosY ?? 0.78,
       captionSizePx: capPx,
@@ -139,6 +179,15 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
       ...(tx?.captionFadeInMs !== undefined ? { captionFadeInMs: tx.captionFadeInMs } : {}),
       ...(tx?.captionFadeOutMs !== undefined ? { captionFadeOutMs: tx.captionFadeOutMs } : {}),
       ...(tx?.boldBordPx !== undefined ? { boldBordPx: tx.boldBordPx } : {}),
+      // 双语字幕。默认关：没配过的老框架 assStyle 里连 bilingual 这个键都不出现，
+      // buildAss 的输出逐字节不变。
+      ...(tx?.bilingual ? {
+        bilingual: true,
+        ...(tx.enScale !== undefined ? { enScale: tx.enScale } : {}),
+        ...(tx.enColor !== undefined ? { enColor: tx.enColor } : {}),
+        ...(tx.enGapPx !== undefined ? { enGapPx: tx.enGapPx } : {}),
+        ...(enFont ? { enFontName: enFont } : {}),
+      } : {}),
     },
     decor: {
       // 与 HyperFrames 模板的 .scrim（340px 高、底部最深 0.85）对齐
@@ -173,6 +222,6 @@ export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts
     ...(openTitle ? { openTitle } : {}),
     assAbs: io.assAbs,
     outAbs: io.outAbs,
-    fontsDir: FONTS_DIR,
+    fontsDir: io.fontsDir ?? FONTS_DIR,
   }
 }

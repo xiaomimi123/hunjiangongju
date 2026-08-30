@@ -246,6 +246,56 @@ describe('generateScript：单本模式接线', () => {
     expect(prompt).not.toContain('书序号')
   })
 
+  // ★ translateLine 是**逐拍一次 LLM 调用**（真金白银），英文只有在 text.bilingual 开启时
+  // 才会被渲染层消费（见 ass.ts / fromBodyData.ts）。关掉双语还翻译就是纯浪费。
+  // translateLine 内部先 getCapabilityConfig('llm') 判断是否 mock 模式再决定要不要调用
+  // llmComplete——这个 getCapabilityConfig 调用在本文件全程只被 translateLine 用到
+  // （文案生成本身走的是行 588 那次 llmComplete，不经过 getCapabilityConfig），
+  // 所以它的调用次数就是「逐拍翻译被调用了几次」的干净代理。
+  it('框架关了双语时不调用 translateLine（不产生逐拍翻译的 LLM 调用）', async () => {
+    const fw = await prisma.copyFramework.create({
+      data: {
+        frameworkText: '开头钩子+逐段展开，语气亲切',
+        overlayTemplate: { __templateParams: { mode: 'flash', open: { titleText: '今天分享的是' }, text: { bilingual: false } } } as never,
+        suggestedSegmentCount: 6,
+        maxLines: 10,
+        maxTotalChars: 200,
+      },
+    })
+    frameworkIds.push(fw.id)
+    const task = await makeTask(fw.id, { themeBook: { title: '活着', author: '余华' } })
+    mockLlmComplete.mockResolvedValue('今天分享的是\n正文二句\n正文三句\n正文四句\n正文五句\n正文六句')
+
+    await generateScript(task.id)
+
+    expect(mockGetCapabilityConfig).not.toHaveBeenCalled()
+    const segs = await segmentsOf(task.id)
+    expect(segs.every((s) => s.subtitleEn === '')).toBe(true)
+    expect(segs.every((s) => (s.captionBeats as { en: string }[]).every((b) => b.en === ''))).toBe(true)
+  })
+
+  it('框架开了双语时每拍都翻译', async () => {
+    const fw = await prisma.copyFramework.create({
+      data: {
+        frameworkText: '开头钩子+逐段展开，语气亲切',
+        overlayTemplate: { __templateParams: { mode: 'flash', open: { titleText: '今天分享的是' }, text: { bilingual: true } } } as never,
+        suggestedSegmentCount: 6,
+        maxLines: 10,
+        maxTotalChars: 200,
+      },
+    })
+    frameworkIds.push(fw.id)
+    const task = await makeTask(fw.id, { themeBook: { title: '活着', author: '余华' } })
+    mockLlmComplete.mockResolvedValue('今天分享的是\n正文二句\n正文三句\n正文四句\n正文五句\n正文六句')
+
+    await generateScript(task.id)
+
+    expect(mockGetCapabilityConfig).toHaveBeenCalled()
+    const segs = await segmentsOf(task.id)
+    expect(segs.some((s) => s.subtitleEn !== '')).toBe(true)
+    expect(segs.every((s) => (s.captionBeats as { en: string }[]).every((b) => b.en !== ''))).toBe(true)
+  })
+
   it('themeBook 缺失 → 走多本路径，书序号标记仍生效（行为与今天一致）', async () => {
     const fw = await makeFramework()
     const BOOKS = [{ title: '甲书', author: '甲作者' }, { title: '乙书', author: '乙作者' }, { title: '丙书' }]

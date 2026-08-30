@@ -5,11 +5,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawnSync } from 'child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, copyFileSync, mkdirSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { buildAss, subtitlesFilter, type AssCue } from './ass'
-import { FONTS_DIR, DEFAULT_FONT_NAME } from './fonts'
+import { FONTS_DIR, DEFAULT_FONT_NAME, usedBuiltinFontIds } from './fonts'
+import { BUILTIN_FONTS, DEFAULT_FONT_ID } from '@mixcut/db'
 
 const FFMPEG = process.env.FFMPEG_BIN ?? 'ffmpeg'
 const d = process.env.RENDER_E2E === '1' ? describe : describe.skip
@@ -105,11 +106,17 @@ d('真渲验收 —— ASS 文字层', () => {
     expect(inkRatio(out, 3, CAP_BAND)).toBeGreaterThan(0.015)
   })
 
-  // ★ 常驻书名的「加粗」是真的加粗，不是样式行上那个没人执行的 Bold=1。
+  // ★ 常驻书名的「加粗」不只是样式行上写死的 Bold=1。
   //
-  // 自带字体只有 Regular 字面，libass 不会给它合成假粗体——实测同一段文字
-  // Bold=0 与 Bold=1 渲染出来**完全一致**，那个标志位一直是摆设。真加粗靠
-  // ass.ts 里额外叠的那层同色描边（TITLE_BOLD_BORD）。
+  // 这里原来写的是「自带字体只有 Regular 字面，libass 不会合成假粗体，
+  // Bold=0/1 渲染完全一致，那个标志位是摆设」——**这句话已被证伪**：
+  // 真渲染实测（2026-08-30，libass 0.17.5）显示 Bold=1 会让 libass 走 FreeType
+  // 合成假粗体，隔离测量（去掉本条测的这层描边、只看 Style Bold 位）墨迹占比
+  // 0.011762 → 0.014757，相对差 25.4%（详见任务报告与 ass.ts 的 TITLE_BOLD_BORD 注释）。
+  // 也就是说 title 的观感其实是「libass 合成假粗」+「本条测的这层描边假粗」
+  // 两次加粗叠加的结果，只是过去没人把它俩拆开量过。
+  // 这条测的是后者（TITLE_BOLD_BORD 这层描边）：去掉它之后同一条带的墨迹
+  // 占比必须明显低于带着它的版本，Bold 位本身两次渲染都保持写死的 1 不变。
   //
   // 所以这条要在**像素上**比：把加粗层从 ASS 里删掉重渲一遍，同一条带的墨迹
   // 占比必须明显低于带加粗层的版本。只验字符串里有没有那行 Dialogue 是验不出
@@ -150,5 +157,259 @@ d('真渲验收 —— ASS 文字层', () => {
     const resolved = /fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC/
     expect(renderLog, `字体被替换成了别的族: ${/fontselect:[^\n]*/.exec(renderLog)?.[0]}`).toMatch(resolved)
     expect(renderLog).not.toMatch(/Glyph .* not found/i)
+  })
+})
+
+// 双语字幕：中文在上、英文紧贴其下，英文是**独立的** Dialogue 事件，靠 \an8+\pos
+// 精确定位在中文基线下方（见 ass.ts buildAss 的双语分支；早前合并成一条事件的
+// 方案因 e2e 实测中文行位移超标而被换掉，见任务报告）。
+// 单测只能证明拼出来的文本里有 \pos/\fs/\c 覆盖标签——标签写没写生效、
+// 英文字体解析得到还是回退成豆腐块、加了英文行之后中文会不会被顶飞，字符串测试一个都看不出来。
+d('双语字幕真渲', () => {
+  let dir = ''
+  let onOut = ''
+  let offOut = ''
+
+  const STYLE_BI = {
+    ...STYLE, captionPosY: 0.78, captionSizePx: 48,
+    bilingual: true, enScale: 0.6, enColor: '#dddddd', enGapPx: 8,
+  }
+  const STYLE_OFF = { ...STYLE, captionPosY: 0.78, captionSizePx: 48 }
+  const CUE: AssCue[] = [{ text: '这是一句中文字幕', en: 'This is one line of English', startMs: 200, endMs: 1800 }]
+
+  // 中文基线 y ≈ H*0.78=749。中文行紧贴基线之上，双语开启时英文行接着往下长。
+  // 带高留够两行字号(48px/29px)的余量，不贴着理论边界设——渲染字形有上下溢出。
+  const zhBand = `${W}:70:0:${Math.round(H * 0.78) - 60}`
+  const enBand = `${W}:60:0:${Math.round(H * 0.78) + 6}`
+
+  function renderOnce(ass: string, outName: string): string {
+    const assPath = path.join(dir, `${outName}.ass`)
+    const outPath = path.join(dir, `${outName}.mp4`)
+    writeFileSync(assPath, ass, 'utf8')
+    const r = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=2`,
+      '-vf', subtitlesFilter(assPath, FONTS_DIR), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', outPath])
+    if (!r.ok) throw new Error(`烧字幕失败(${outName}): ${r.out.slice(-800)}`)
+    return outPath
+  }
+
+  /**
+   * 在 [yFrom, yTo] 区间按 step 步长向下扫，找第一条「亮起来」的横条，近似定位
+   * 文字块的上边缘。用来把「位置有没有变」从「面积有没有变」里剥离出来：
+   * zhBand 那样的大面积带留了几十像素余量，小幅位移根本不会碰到边界、
+   * 聚合墨迹占比纹丝不动——真要验位移必须直接量边缘在哪。
+   */
+  function findTopEdge(mp4: string, atSec: number, yFrom: number, yTo: number, step = 1, threshold = 0.01): number | null {
+    for (let y = yFrom; y <= yTo; y += step) {
+      if (inkRatio(mp4, atSec, `${W}:${step}:0:${y}`) > threshold) return y
+    }
+    return null
+  }
+
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-ass-bi-'))
+    const onAss = buildAss({ width: W, height: H, captions: CUE, totalMs: 2000, style: STYLE_BI } as never)
+    const offAss = buildAss({ width: W, height: H, captions: CUE, totalMs: 2000, style: STYLE_OFF } as never)
+    onOut = renderOnce(onAss, 'on')
+    offOut = renderOnce(offAss, 'off')
+  })
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('中文行与英文行都真的有墨，且英文在中文下方', () => {
+    // 阈值 0.002：实测中文带 ≈0.048、英文带 ≈0.023，都留了一个数量级以上的余量——
+    // 不贴实测值，是为了在"英文只画出一部分字符/字号被进一步压缩"这类退化
+    // (墨迹变少但没到 0)时仍然报错，而不是刚好卡在实测值附近变成测不出来。
+    // 时段内两条带都要有墨——只测其中一条测不出「英文行整行空白」这种坏法
+    // （中文字体是自带的稳字体，容易绿；\fs\c\fn 标签没生效导致英文渲染失败更容易漏）。
+    expect(inkRatio(onOut, 1.0, zhBand), '中文带没墨').toBeGreaterThan(0.002)
+    expect(inkRatio(onOut, 1.0, enBand), '英文带没墨(标签没生效或字体回退成空白)').toBeGreaterThan(0.002)
+    // 反证：字幕开始前(0.05s，早于 startMs=200ms)两条带必须干净——
+    // 否则说明量到的根本不是这条字幕，而是常驻的别的什么东西。
+    expect(inkRatio(onOut, 0.05, zhBand), '字幕还没开始就有墨，测量对象不对').toBe(0)
+    expect(inkRatio(onOut, 0.05, enBand), '字幕还没开始就有墨，测量对象不对').toBe(0)
+  })
+
+  it('关闭双语时英文带上完全没有墨', () => {
+    // 反证上一条：开双语时英文带有墨不是巧合测量误差，因为关掉开关后同一条带
+    // 在同一时刻必须绝对干净（不是「变少」，是 0）——这才说明那条带测的确实是英文行。
+    expect(inkRatio(offOut, 1.0, enBand)).toBe(0)
+  })
+
+  it('★ 中文行位置与关闭双语时一致（顶边容差 ≤1px）', () => {
+    // 为什么不直接比 zhBand 里的聚合墨迹占比：那条带比一行字高出几十像素的余量，
+    // 中文行位移几像素，聚合占比根本不会变——这条断言会在位置真的错了的时候
+    // 照样绿，等于没测。必须直接找中文行的上边缘在哪一行。
+    //
+    // 扫描窗口：实测关闭双语时中文行顶边在 baseline(749)-37≈712，字形实际占高
+    // 比字号本身留的行盒矮不少(汉字字面比字号本身留白小)。窗口按实测结果两侧
+    // 各留 30px 余量(679~739)，既不会因为太窄而找不到边缘，
+    // 也不会宽到把上一行/别的东西也扫进来。
+    //
+    // ★ 容差从 6px 收紧到 1px：现在英文行是独立 Dialogue + \pos 定位，中文行的
+    // Style/Dialogue 与关闭双语时逐字节相同（见 ass.test.ts 的静态断言），
+    // 顶边理论上就该是 0 位移，1px 只是留给像素/编码的量化误差，不是给系数误差
+    // 留的余量——如果这条不为 0，说明拆分方案本身有问题，不能靠调阈值糊过去。
+    const baseline = Math.round(H * 0.78)
+    const yFrom = baseline - 70
+    const yTo = baseline - 10
+    const topOff = findTopEdge(offOut, 1.0, yFrom, yTo)
+    const topOn = findTopEdge(onOut, 1.0, yFrom, yTo)
+    expect(topOff, `扫描窗口[${yFrom},${yTo}]里没找到关闭双语时的中文行顶边，窗口要调`).not.toBeNull()
+    expect(topOn, `扫描窗口[${yFrom},${yTo}]里没找到开启双语时的中文行顶边，窗口要调`).not.toBeNull()
+    expect(Math.abs((topOn as number) - (topOff as number)),
+      `中文行顶边位移: 关闭=${topOff} 开启=${topOn}`).toBeLessThanOrEqual(1)
+  })
+})
+
+// per-task fontsdir 安全前置：证明「fontsdir 只装用到的字体文件」这条路径本身
+// 不会破坏渲染——字体照样解析得到，成片跟用整个内置字体目录时逐字节等价的墨迹表现。
+//
+// 本仓库目前只有一款内置字体（noto-sc），造不出「同族名不同字重两个真实文件」
+// 的 B 组场景（下一个任务加够字体后才能补上「加了字体但没选中它时墨迹不变」的
+// 真验收）。所以本条测的是能立刻验证、且有牙齿的那一半：
+//   1. usedBuiltinFontIds() 的产出确实只含被选中的字体（这里退化成只含默认字体）；
+//   2. 拿它对应的字体文件单独建一个**不是 FONTS_DIR 本身**的临时 fontsdir，
+//      传给 subtitlesFilter 渲染，字体必须照样被解析到、且墨迹表现与用完整
+//      FONTS_DIR 时的既有断言（见上面「字幕时段内该区域出现墨迹」等）一致——
+//      这证明 renderPipeline.prepareFontsDir「只拷选中的文件」这条路径是可行的，
+//      不是靠「反正整个目录都在」才蒙对的。
+d('per-task fontsdir：只装选中字体不影响渲染', () => {
+  let dir = ''
+  let miniFontsDir = ''
+  let out = ''
+  let renderLog = ''
+  const CUES: AssCue[] = [{ text: '如果你总困在过往的遗憾', startMs: 2000, endMs: 4000 }]
+  const CAP_BAND = `${W}:200:0:${Math.round(H * 0.78) - 160}`
+
+  beforeAll(() => {
+    // 1) usedBuiltinFontIds 的产出只含被选中（这里等于没选，退化成默认）的字体
+    const ids = usedBuiltinFontIds([])
+    expect(ids).toEqual([DEFAULT_FONT_ID])
+
+    // 2) 只拷这些 id 对应的文件到一个全新的临时目录——不是 FONTS_DIR 本身
+    dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-ass-mini-'))
+    miniFontsDir = path.join(dir, 'fonts')
+    mkdirSync(miniFontsDir, { recursive: true })
+    for (const id of ids) {
+      const entry = BUILTIN_FONTS.find((f) => f.id === id)
+      if (!entry) throw new Error(`usedBuiltinFontIds 返回了认不出的 id: ${id}`)
+      copyFileSync(path.join(FONTS_DIR, entry.file), path.join(miniFontsDir, entry.file))
+    }
+    expect(miniFontsDir).not.toBe(FONTS_DIR)
+
+    const assPath = path.join(dir, 's.ass')
+    out = path.join(dir, 'o.mp4')
+    writeFileSync(assPath, buildAss({
+      width: W, height: H, totalMs: 6000, style: STYLE, captions: CUES,
+      bookTitles: [{ text: '《简爱》', startMs: 0, endMs: 6000 }],
+      watermark: '@读书号',
+    }), 'utf8')
+    const r = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(assPath, miniFontsDir), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', out])
+    if (!r.ok) throw new Error(`用 per-task fontsdir 烧字幕失败: ${r.out.slice(-800)}`)
+    renderLog = r.out
+  })
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('用只装了选中字体的 fontsdir，字幕照样出现墨迹', () => {
+    expect(inkRatio(out, 3, CAP_BAND)).toBeGreaterThan(0.005)
+  })
+
+  it('字体被真正解析到，没有静默回退成豆腐块（证明不是靠 fontconfig 兜底蒙对的）', () => {
+    const resolved = /fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC/
+    expect(renderLog, `字体被替换成了别的族: ${/fontselect:[^\n]*/.exec(renderLog)?.[0]}`).toMatch(resolved)
+    expect(renderLog).not.toMatch(/Glyph .* not found/i)
+  })
+})
+
+// ★ 本任务的核心验收：现在仓库里真的有了「同 family、不同字重」的两个文件
+// （Noto Sans SC Regular 与 Bold），可以直接实测上面 fonts.ts 注释里说的那个坑：
+// title/ot/ft/fa 四层 Style 写死 Bold=1，如果 fontsdir 里同时摆着 Regular 与
+// Bold 两个文件，libass 的 fontselect 会选中真正的 Bold 文件，而不是像只有
+// Regular 时那样退化成"啥都不做"——存量框架（没在后台选过任何字体）的书名
+// 会无声变粗。per-task fontsdir（上一个任务，commit 020a66d）只装 usedBuiltinFontIds()
+// 选中的字体，从而把 Bold 面排除在存量框架的 fontsdir 之外——这条测的就是这道
+// 防线真的挡住了，不是空对空。
+d('存量框架 fontsdir 隔离：Bold 面不会串号 —— Regular/Bold 双面对照', () => {
+  let dir = ''
+  let outA = ''
+  let outB = ''
+  let logA = ''
+  let logB = ''
+  let fontsDirA = ''
+  let fontsDirB = ''
+  const CUES: AssCue[] = [{ text: '如果你总困在过往的遗憾', startMs: 2000, endMs: 4000 }]
+
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-ass-boldleak-'))
+
+    // 场景 A：模拟存量框架，没选任何字体 —— fontsdir 只装 usedBuiltinFontIds([]) 选中的文件，
+    // 即只有 Regular。
+    fontsDirA = path.join(dir, 'fonts-a')
+    mkdirSync(fontsDirA, { recursive: true })
+    copyFileSync(path.join(FONTS_DIR, 'NotoSansSC-Regular.otf'), path.join(fontsDirA, 'NotoSansSC-Regular.otf'))
+
+    // 场景 B：危险场景 —— fontsdir 同时含 Regular + Bold（模拟 per-task 隔离失效、
+    // 或者干脆直接把整个内置字体目录当 fontsdir 用的坏用法）。
+    fontsDirB = path.join(dir, 'fonts-b')
+    mkdirSync(fontsDirB, { recursive: true })
+    copyFileSync(path.join(FONTS_DIR, 'NotoSansSC-Regular.otf'), path.join(fontsDirB, 'NotoSansSC-Regular.otf'))
+    copyFileSync(path.join(FONTS_DIR, 'NotoSansSC-Bold.otf'), path.join(fontsDirB, 'NotoSansSC-Bold.otf'))
+
+    // 两边用同一份 ASS：带常驻书名（title 层 Bold=1）+ 正文字幕。
+    const assPath = path.join(dir, 's.ass')
+    writeFileSync(assPath, buildAss({
+      width: W, height: H, totalMs: 6000, style: STYLE, captions: CUES,
+      bookTitles: [{ text: '《简爱》', startMs: 0, endMs: 6000 }],
+      watermark: '@读书号',
+    }), 'utf8')
+
+    outA = path.join(dir, 'a.mp4')
+    const rA = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(assPath, fontsDirA), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', outA])
+    if (!rA.ok) throw new Error(`场景 A 渲染失败: ${rA.out.slice(-800)}`)
+    logA = rA.out
+
+    outB = path.join(dir, 'b.mp4')
+    const rB = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(assPath, fontsDirB), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', outB])
+    if (!rB.ok) throw new Error(`场景 B 渲染失败: ${rB.out.slice(-800)}`)
+    logB = rB.out
+  })
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('场景 A（fontsdir 只有 Regular）：fontselect 命中 NotoSansSC-Regular', () => {
+    expect(logA).toMatch(/fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC-Regular/)
+    expect(logA).not.toMatch(/fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC-Bold/)
+  })
+
+  it('场景 B（fontsdir 同时有 Regular+Bold）：fontselect 命中 NotoSansSC-Bold（证明危险是真的存在）', () => {
+    expect(logB, `没命中 Bold，fontselect 日志: ${/fontselect:[^\n]*/.exec(logB)?.[0]}`)
+      .toMatch(/fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC-Bold/)
+  })
+
+  it('两者 TITLE_BAND 墨迹占比明显不同（证明上面两条 fontselect 断言有牙齿，不是日志巧合）', () => {
+    const inkA = inkRatio(outA, 1, TITLE_BAND)
+    const inkB = inkRatio(outB, 1, TITLE_BAND)
+    // 阈值来历：实测 A=0.0289、B=0.0307，相对差 6.09%（跑了 3 次，逐位一致，
+    // 不是噪声）。比「常驻书名有加粗层」那条描边效应（25.4%）小得多——预期之中：
+    // 那条测的是整层描边的有无，这条测的是同一层里"合成假粗"换成"真粗体字面"
+    // 这一步增量，TITLE_BAND(720x160) 里大半是空白背景，四个字的笔画变化被稀释了。
+    // 阈值定在 1.03（低于实测 1.0609、高于 1.0 的噪声地板），跑 3 次结果逐位相同，
+    // 说明这不是测量抖动，1.03 足够稳。
+    expect(inkB / inkA, `场景 A=${inkA.toFixed(4)} 场景 B=${inkB.toFixed(4)}，没有明显差异`)
+      .toBeGreaterThan(1.03)
+  })
+
+  it('usedBuiltinFontIds([])（存量框架）不含 noto-sc-bold —— per-task fontsdir 挡住了它', () => {
+    const ids = usedBuiltinFontIds([])
+    expect(ids).not.toContain('noto-sc-bold')
+    expect(ids).toEqual([DEFAULT_FONT_ID])
   })
 })

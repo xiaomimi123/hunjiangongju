@@ -51,6 +51,16 @@ describe('captionCues', () => {
   it('空文本被丢弃', () => {
     expect(captionCues([seg({ startMs: 0, endMs: 1000 })])).toEqual([])
   })
+  it('把每拍的 en 一起带出来', () => {
+    const cues = captionCues([seg({ startMs: 0, endMs: 2000, captionBeats: [
+      { zh: '第一拍', en: 'Beat one', startMs: 0, endMs: 1000 },
+      { zh: '第二拍', startMs: 1000, endMs: 2000 },
+    ] })])
+    expect(cues).toEqual([
+      { text: '第一拍', en: 'Beat one', startMs: 0, endMs: 1000 },
+      { text: '第二拍', startMs: 1000, endMs: 2000 },
+    ])
+  })
 })
 
 describe('buildRenderBodyPlan', () => {

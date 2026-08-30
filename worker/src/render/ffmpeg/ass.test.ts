@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildAss, toAssColor, toAssTime, escapeAssText, subtitlesFilter, type AssOpts } from './ass'
+import { buildAss, toAssColor, toAssTime, escapeAssText, subtitlesFilter, bilingualExtraPx, type AssOpts } from './ass'
 
 const style = {
   fontName: 'Noto Sans CJK SC',
@@ -256,5 +256,68 @@ describe('字幕渐入渐出（\\fad）', () => {
       captions: [{ text: '正文一句', startMs: 1000, endMs: 3000 }],
     })
     expect(a).not.toContain('\\fad')
+  })
+})
+
+describe('双语字幕', () => {
+  const base = {
+    fontName: 'Noto Sans SC', captionColor: '#ffffff', captionPosY: 0.78,
+    captionSizePx: 50, titleSizePx: 60, titleColor: '#ffe9c0', watermarkSizePx: 22,
+  }
+  const cue = { text: '这是一句中文', en: 'This is Chinese', startMs: 0, endMs: 2000 }
+  const opts = (style: Record<string, unknown>) =>
+    ({ width: 720, height: 1280, captions: [cue], totalMs: 2000, style: { ...base, ...style } })
+
+  it('默认（不开双语）逐字节等于没有 en 字段时的输出', () => {
+    const withEn = buildAss(opts({}) as never)
+    const withoutEn = buildAss(opts({}) as never)
+    expect(withEn).toBe(withoutEn)
+    expect(withEn).not.toContain('This is Chinese')
+  })
+
+  it('开启后英文跟在中文之后，用 \\N 换行并内联覆盖字号/颜色', () => {
+    const ass = buildAss(opts({ bilingual: true, enScale: 0.6, enColor: '#dddddd', enGapPx: 0 }) as never)
+    // 50 * 0.6 = 30
+    expect(ass).toContain('这是一句中文\\N{\\fs30\\c&HDDDDDD&}This is Chinese')
+  })
+
+  it('enGapPx > 0 时插一行等高的硬空格撑出行间距', () => {
+    const ass = buildAss(opts({ bilingual: true, enScale: 0.6, enGapPx: 8 }) as never)
+    expect(ass).toContain('这是一句中文\\N{\\fs8}\\h\\N{\\fs30')
+  })
+
+  it('enFontName 给了就内联换字体', () => {
+    const ass = buildAss(opts({ bilingual: true, enFontName: 'Space Grotesk' }) as never)
+    expect(ass).toContain('\\fnSpace Grotesk}')
+  })
+
+  it('英文为空的拍不产出英文段', () => {
+    const ass = buildAss({
+      width: 720, height: 1280, totalMs: 2000,
+      captions: [{ text: '只有中文', startMs: 0, endMs: 1000 }],
+      style: { ...base, bilingual: true },
+    } as never)
+    expect(ass).toContain('只有中文')
+    expect(ass).not.toContain('\\N{\\fs')
+  })
+
+  it('★ 开双语时 cap 样式的 MarginV 减去英文块高度，中文行不被顶上去', () => {
+    const off = buildAss(opts({}) as never)
+    const on = buildAss(opts({ bilingual: true, enScale: 0.6, enGapPx: 8 }) as never)
+    const marginV = (ass: string) => Number(/^Style: cap,.*,(\d+),1$/m.exec(ass)![1])
+    // 1280 * (1 - 0.78) = 281.6 → 282
+    expect(marginV(off)).toBe(282)
+    // 英文块高 = round((30 + 8) * 1.2) = 46
+    expect(marginV(on)).toBe(282 - 46)
+  })
+
+  it('bilingualExtraPx：不开双语恒为 0', () => {
+    expect(bilingualExtraPx({ ...base, bilingual: false } as never)).toBe(0)
+    expect(bilingualExtraPx({ ...base, bilingual: true, enScale: 0.6, enGapPx: 8 } as never)).toBe(46)
+  })
+
+  it('MarginV 不会被减成负数', () => {
+    const ass = buildAss(opts({ captionPosY: 0.999, bilingual: true, enScale: 1, enGapPx: 40 }) as never)
+    expect(Number(/^Style: cap,.*,(\d+),1$/m.exec(ass)![1])).toBe(0)
   })
 })

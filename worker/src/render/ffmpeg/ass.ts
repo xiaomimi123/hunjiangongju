@@ -9,6 +9,8 @@
 
 export interface AssCue {
   text: string
+  /** 双语字幕的英文行。不开双语时忽略。 */
+  en?: string
   startMs: number
   endMs: number
 }
@@ -64,6 +66,21 @@ export interface AssStyleOpts {
   /** 正文字幕渐入/渐出（ms）。缺省 0 = 瞬间出现（老调用零回归） */
   captionFadeInMs?: number
   captionFadeOutMs?: number
+  /**
+   * 双语字幕：中文在上、英文紧贴其下。
+   *
+   * 英文早就逐拍生成好了（generateScript 的 translateLine → captionBeats[].en），
+   * 只是一直没被渲染层消费。默认 false = 老框架逐字节零回归。
+   */
+  bilingual?: boolean
+  /** 英文行字号 = captionSizePx × enScale。缺省 0.6 */
+  enScale?: number
+  /** 英文行颜色 #rrggbb。缺省 #dddddd */
+  enColor?: string
+  /** 中英两行之间的额外行间距（px）。0 = 紧贴。缺省 8 */
+  enGapPx?: number
+  /** 英文行字体族名。不给则跟随正文字体 */
+  enFontName?: string
 }
 
 export interface AssOpts {
@@ -154,6 +171,27 @@ function inlineColor(hex: string): string {
   return `&H${full.slice(4)}&`
 }
 
+/**
+ * libass 的行距约等于字号的 1.2 倍（无 ASS 标签可直接设行距，只能按经验系数反推）。
+ * 用来算双语时英文块占掉的高度，好把中文行顶回原位。
+ */
+const LINE_H = 1.2
+
+/**
+ * 双语时英文块在中文行**下方**占掉的高度（px）。
+ *
+ * 为什么必须算它：正文字幕是 an2（底边锚点），captionPosY 定的是中文行基线的位置，
+ * MarginV = 画面高 - 基线位置。加了英文行后整块变高，同一个 captionPosY 下
+ * **中文行会被英文行顶上去**——运营开关一次双语就会发现"字幕位置自己变了"。
+ * 把这块高度从 MarginV 里减掉，中文行位置就与关闭双语时一致，英文往下长。
+ */
+export function bilingualExtraPx(st: AssStyleOpts): number {
+  if (!st.bilingual) return 0
+  const enPx = Math.round(st.captionSizePx * (st.enScale ?? 0.6))
+  const gap = Math.max(0, Math.round(st.enGapPx ?? 8))
+  return Math.round((enPx + gap) * LINE_H)
+}
+
 export function fitSizePx(text: string, basePx: number, widthPx: number, marginPx = 40): number {
   // ★ 按**最长的那一行**量，不是整串。
   // 第一版把整串当一行：常驻大标题的文本是「《书名》\N作者」，连 ASS 的换行转义一起算进去，
@@ -172,7 +210,7 @@ export function buildAss(o: AssOpts): string {
   const st = o.style
   // 正文字幕：底部居中(an2)。posY 给的是「基线在画面高度的哪个位置」，
   // an2 的锚点在底边，所以边距 = 画面高 - 基线位置。
-  const capMarginV = Math.max(0, Math.round(o.height * (1 - st.captionPosY)))
+  const capMarginV = Math.max(0, Math.round(o.height * (1 - st.captionPosY)) - bilingualExtraPx(st))
   // 描边宽度：缺省 3 = 把它放开之前写死的值，老调用逐字节不变
   const bord = Math.max(0, st.outlinePx ?? 3)
   const boldBord = Math.max(0, st.boldBordPx ?? TITLE_BOLD_BORD)
@@ -213,8 +251,8 @@ export function buildAss(o: AssOpts): string {
   const ev: string[] = []
   // tag：拼在**转义之后**的覆盖标签（如 \fad）。拼在 c.text 里会被 escapeAssText
   // 把大括号转义成字面文本——标签原样显示在画面上而不是生效。
-  const line = (layer: number, c: AssCue, style: string, tag = '') => {
-    const text = escapeAssText(c.text)
+  const line = (layer: number, c: AssCue, style: string, tag = '', preEscaped = false) => {
+    const text = preEscaped ? c.text : escapeAssText(c.text)
     if (!text) return
     if (!(c.endMs > c.startMs)) return // 零长/负长事件 libass 直接不显示，早点丢掉更清楚
     ev.push(`Dialogue: ${layer},${toAssTime(c.startMs)},${toAssTime(c.endMs)},${style},,0,0,0,,${tag}${text}`)
@@ -270,7 +308,25 @@ export function buildAss(o: AssOpts): string {
   const fadIn = Math.max(0, Math.round(st.captionFadeInMs ?? 0))
   const fadOut = Math.max(0, Math.round(st.captionFadeOutMs ?? 0))
   const fad = fadIn > 0 || fadOut > 0 ? `{\\fad(${fadIn},${fadOut})}` : ''
-  for (const c of o.captions) line(1, c, 'cap', fad)
+  // 中英合并成**一条** Dialogue 事件：时序天然一致，\fad 也自动同时作用于两行，
+  // 不需要在两个独立事件之间做对齐。
+  const enPx = Math.round(st.captionSizePx * (st.enScale ?? 0.6))
+  const enGap = Math.max(0, Math.round(st.enGapPx ?? 8))
+  const enTags = `{\\fs${enPx}\\c${inlineColor(st.enColor ?? '#dddddd')}${st.enFontName ? `\\fn${st.enFontName}` : ''}}`
+  // 行间距：ASS 没有行距标签（\fsp 是字距）。插一行只含硬空格 \h 的小字号行来撑高度。
+  const gapLine = enGap > 0 ? `{\\fs${enGap}}\\h\\N` : ''
+  const withEn = (c: AssCue): AssCue => {
+    if (!st.bilingual) return c
+    const en = escapeAssText(c.en ?? '')
+    if (!en) return c
+    // 中文段先转义，英文段单独转义后拼在标签之后——整串一起转义会把覆盖标签的
+    // 大括号也转掉，标签会原样显示在画面上。
+    return { ...c, text: `${escapeAssText(c.text)}\\N${gapLine}${enTags}${en}`, en: undefined }
+  }
+  for (const c of o.captions) {
+    const merged = withEn(c)
+    line(1, merged, 'cap', fad, merged !== c)
+  }
   if (o.watermark && o.watermark.trim() && o.totalMs > 0) {
     line(2, { text: o.watermark, startMs: 0, endMs: o.totalMs }, 'wm')
   }

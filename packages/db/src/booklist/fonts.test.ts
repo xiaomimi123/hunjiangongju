@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import * as fontkit from 'fontkit'
 import { BUILTIN_FONTS, DEFAULT_FONT_ID, findBuiltinFont } from './fonts'
+import { readFontMeta } from './fontFamily'
 
 // 注册表到磁盘字体目录的相对路径：packages/db/src/booklist -> worker/templates/booklist/fonts
 const FONTS_DIR = join(__dirname, '../../../../worker/templates/booklist/fonts')
@@ -39,14 +39,21 @@ describe('字体注册表', () => {
   })
 
   // ★ 族名填错的后果是成片静默回退默认字体——渲染日志毫无异常，看起来「字体没换」。
-  // 这条测试用 fontkit 逐字比对磁盘文件的真实 familyName 与注册表，锁住这个坑。
+  // 字重填错的后果同样静默：noto-sc 与 noto-sc-bold 族名相同、只靠 weight 区分，
+  // 两条记录的 weight 写反了，libass 会挑错字面，界面上却看不出任何异常。
+  //
+  // 用 readFontMeta（packages/db/src/booklist/fontFamily.ts）而不是直接调 fontkit：
+  // 后者 openSync 的返回类型是 Font | FontCollection，.ttc 字体集合没有 familyName，
+  // 直接取会被 TS 拒绝（也是真实的运行时坑）；readFontMeta 已经处理了这个窄化
+  // （集合文件直接拒收抛错），这里复用它，不重复实现一遍更差的版本。
   describe('注册表与磁盘一致', () => {
     for (const entry of BUILTIN_FONTS) {
-      it(`${entry.id}: 文件存在且 family 与磁盘字体的 familyName 逐字相同`, () => {
+      it(`${entry.id}: 文件存在，family 与 weight 都与磁盘字体解析结果逐字/逐值相同`, () => {
         const filePath = join(FONTS_DIR, entry.file)
         expect(existsSync(filePath)).toBe(true)
-        const font = fontkit.openSync(filePath)
-        expect(font.familyName).toBe(entry.family)
+        const meta = readFontMeta(filePath)
+        expect(meta.family).toBe(entry.family)
+        expect(meta.weight).toBe(entry.weight)
       })
     }
   })

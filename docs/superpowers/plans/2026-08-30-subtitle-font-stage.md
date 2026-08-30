@@ -780,6 +780,10 @@ git commit -m "docs(readme): 补充中英双语字幕说明"
 > **⚠️ 开工前必须做的事**：内置字体清单要跟用户确认。每款 5~15MB 会永久进仓库。
 > 候选：思源黑体 Bold（SIL OFL，解决「书名不够粗只能靠同色描边硬撑」）、思源宋体 Regular（SIL OFL）、
 > 霞鹜文楷（SIL OFL）、站酷快乐体（免费商用）。**清单没确认前不要执行 Task 9。**
+>
+> **⚠️ 执行顺序**：Task 12（per-task 字体目录）要读 `prisma.customFont`，而该表在 Task 13 才建。
+> 所以实际执行顺序是 **8 → 9 → 10 → 11 → 13 → 12 → 14 → 15 → 16 → 17**。
+> `fontkit` 依赖在 Task 8 就装好（Task 9 的族名断言要用）。
 
 ## Task 8: 字体注册表
 
@@ -796,6 +800,15 @@ git commit -m "docs(readme): 补充中英双语字幕说明"
   export const DEFAULT_FONT_ID = 'noto-sc'
   export function findBuiltinFont(id: string | undefined): FontEntry | undefined
   ```
+
+- [ ] **Step 0: 装 fontkit**
+
+Task 9 的族名断言与 Task 13 的上传解析都要用它，一次装好。
+
+```bash
+npm i fontkit -w packages/db
+npm i -D @types/fontkit -w packages/db
+```
 
 - [ ] **Step 1: 写失败测试**
 
@@ -930,7 +943,7 @@ it('每款内置字体的文件都真实存在，且族名与实测一致', () =
 })
 ```
 
-（需要 `import fs from 'fs'`、`import path from 'path'`、`import fontkit from 'fontkit'`。fontkit 在 Task 13 才装 —— 若此时还没装，先执行 Task 13 的 Step「装 fontkit」，或本条改成只断言文件存在、族名断言留到 Task 13 之后补。**更简单的做法：把 Task 13 的装依赖步骤提到这里**。）
+（需要 `import fs from 'fs'`、`import path from 'path'`、`import fontkit from 'fontkit'` —— 依赖已在 Task 8 Step 0 装好。）
 
 - [ ] **Step 3: 跑测试确认失败 → 补齐 BUILTIN_FONTS → 再跑通过**
 
@@ -1175,8 +1188,10 @@ git commit -m "feat(params): 字体 id 入白名单并映射成 ASS 族名"
 - Modify: `worker/src/render/ffmpeg/fromBodyData.ts:176`（`fontsDir` 改为可注入）
 - Test: `worker/src/render/ffmpeg/fromBodyData.test.ts`
 
+**⚠️ 前置：必须先完成 Task 13**（本任务要读 `prisma.customFont`，该表在 Task 13 建）。
+
 **Interfaces:**
-- Consumes: Task 11 的 `io.fontFamilies`
+- Consumes: Task 11 的 `io.fontFamilies`；Task 13 的 `prisma.customFont`
 - Produces: `FromBodyDataIo.fontsDir?: string`（缺省仍为 `FONTS_DIR`）
 
 **为什么要 per-task 目录**：`subtitlesFilter` 只接受**一个** `fontsdir`，而一条片子可能同时用到内置字体和自定义字体（后者落在 `data/fonts/`，不在仓库里）。把本条用到的 1~3 个字体文件拷进任务目录，`fontsdir` 指它——干净、确定性、不污染仓库内置目录。
@@ -1219,12 +1234,6 @@ if (usedIds.length) {
 }
 ```
 
-> `prisma.customFont` 要等 Task 13 建表之后才存在。**执行顺序**：先做 Task 13 建表迁移，再回来做这一步；或先只写 `fontFamilies` 的内置部分、把自定义部分留到 Task 13 的收尾步骤。计划里按前者执行 —— 见下方 Step 3.5。
-
-- [ ] **Step 3.5: 如果 `CustomFont` 表还不存在**
-
-先跳到 **Task 13** 完成建表，再回来。本步骤不允许写 `// TODO` 占位。
-
 3c. 把 `taskFontsDir` 与 `fontFamilies` 传进 `fromBodyData` 的 io（找到 `renderBodyWithFfmpeg` / `fromBodyData` 的实际调用点，把两个字段加进去）。
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -1255,14 +1264,9 @@ git commit -m "feat(render): per-task 字体目录 —— 内置与自定义字�
 **Interfaces:**
 - Produces: `export function readFontFamily(fileAbs: string): string` —— 解析失败抛 `Error`
 
-- [ ] **Step 1: 装依赖**
+> `fontkit` 已在 Task 8 Step 0 装好。
 
-```bash
-npm i fontkit -w packages/db
-npm i -D @types/fontkit -w packages/db
-```
-
-- [ ] **Step 2: 写失败测试**
+- [ ] **Step 1: 写失败测试**
 
 `packages/db/src/booklist/fontFamily.test.ts`：
 
@@ -1288,11 +1292,11 @@ describe('readFontFamily', () => {
 })
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [ ] **Step 2: 跑测试确认失败**
 
 Run: `npx vitest run packages/db/src/booklist/fontFamily.test.ts`
 
-- [ ] **Step 4: 实现**
+- [ ] **Step 3: 实现**
 
 `packages/db/src/booklist/fontFamily.ts`：
 
@@ -1338,12 +1342,12 @@ npx prisma migrate dev --name custom_font --schema packages/db/prisma/schema.pri
 
 在 `packages/db/src/index.ts` 加 `export * from './booklist/fontFamily'`。
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 4: 跑测试确认通过**
 
 Run: `npm test`
 Expected: 全绿
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
 git add packages/db/

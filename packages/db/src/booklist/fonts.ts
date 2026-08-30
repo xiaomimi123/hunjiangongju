@@ -28,6 +28,10 @@ export type FontEntry = {
 
 export const BUILTIN_FONTS: readonly FontEntry[] = [
   { id: 'noto-sc', family: 'Noto Sans SC', weight: 400, file: 'NotoSansSC-Regular.otf', label: '思源黑体 Regular' },
+  { id: 'noto-sc-bold', family: 'Noto Sans SC', weight: 700, file: 'NotoSansSC-Bold.otf', label: '思源黑体 Bold' },
+  { id: 'noto-serif-sc', family: 'Noto Serif SC', weight: 400, file: 'NotoSerifSC-Regular.otf', label: '思源宋体' },
+  { id: 'lxgw-wenkai', family: 'LXGW WenKai', weight: 400, file: 'LXGWWenKai-Regular.ttf', label: '霞鹜文楷' },
+  { id: 'zcool-kuaile', family: 'ZCOOL KuaiLe', weight: 400, file: 'ZCOOLKuaiLe-Regular.ttf', label: '站酷快乐体' },
 ] as const
 
 /** 一个字体都没配时用它。与 worker 的 DEFAULT_FONT_NAME 指同一款。 */

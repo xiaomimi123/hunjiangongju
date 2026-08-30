@@ -324,3 +324,92 @@ d('per-task fontsdir：只装选中字体不影响渲染', () => {
     expect(renderLog).not.toMatch(/Glyph .* not found/i)
   })
 })
+
+// ★ 本任务的核心验收：现在仓库里真的有了「同 family、不同字重」的两个文件
+// （Noto Sans SC Regular 与 Bold），可以直接实测上面 fonts.ts 注释里说的那个坑：
+// title/ot/ft/fa 四层 Style 写死 Bold=1，如果 fontsdir 里同时摆着 Regular 与
+// Bold 两个文件，libass 的 fontselect 会选中真正的 Bold 文件，而不是像只有
+// Regular 时那样退化成"啥都不做"——存量框架（没在后台选过任何字体）的书名
+// 会无声变粗。per-task fontsdir（上一个任务，commit 020a66d）只装 usedBuiltinFontIds()
+// 选中的字体，从而把 Bold 面排除在存量框架的 fontsdir 之外——这条测的就是这道
+// 防线真的挡住了，不是空对空。
+d('存量框架 fontsdir 隔离：Bold 面不会串号 —— Regular/Bold 双面对照', () => {
+  let dir = ''
+  let outA = ''
+  let outB = ''
+  let logA = ''
+  let logB = ''
+  let fontsDirA = ''
+  let fontsDirB = ''
+  const CUES: AssCue[] = [{ text: '如果你总困在过往的遗憾', startMs: 2000, endMs: 4000 }]
+
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-ass-boldleak-'))
+
+    // 场景 A：模拟存量框架，没选任何字体 —— fontsdir 只装 usedBuiltinFontIds([]) 选中的文件，
+    // 即只有 Regular。
+    fontsDirA = path.join(dir, 'fonts-a')
+    mkdirSync(fontsDirA, { recursive: true })
+    copyFileSync(path.join(FONTS_DIR, 'NotoSansSC-Regular.otf'), path.join(fontsDirA, 'NotoSansSC-Regular.otf'))
+
+    // 场景 B：危险场景 —— fontsdir 同时含 Regular + Bold（模拟 per-task 隔离失效、
+    // 或者干脆直接把整个内置字体目录当 fontsdir 用的坏用法）。
+    fontsDirB = path.join(dir, 'fonts-b')
+    mkdirSync(fontsDirB, { recursive: true })
+    copyFileSync(path.join(FONTS_DIR, 'NotoSansSC-Regular.otf'), path.join(fontsDirB, 'NotoSansSC-Regular.otf'))
+    copyFileSync(path.join(FONTS_DIR, 'NotoSansSC-Bold.otf'), path.join(fontsDirB, 'NotoSansSC-Bold.otf'))
+
+    // 两边用同一份 ASS：带常驻书名（title 层 Bold=1）+ 正文字幕。
+    const assPath = path.join(dir, 's.ass')
+    writeFileSync(assPath, buildAss({
+      width: W, height: H, totalMs: 6000, style: STYLE, captions: CUES,
+      bookTitles: [{ text: '《简爱》', startMs: 0, endMs: 6000 }],
+      watermark: '@读书号',
+    }), 'utf8')
+
+    outA = path.join(dir, 'a.mp4')
+    const rA = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(assPath, fontsDirA), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', outA])
+    if (!rA.ok) throw new Error(`场景 A 渲染失败: ${rA.out.slice(-800)}`)
+    logA = rA.out
+
+    outB = path.join(dir, 'b.mp4')
+    const rB = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=6`,
+      '-vf', subtitlesFilter(assPath, fontsDirB), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', outB])
+    if (!rB.ok) throw new Error(`场景 B 渲染失败: ${rB.out.slice(-800)}`)
+    logB = rB.out
+  })
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('场景 A（fontsdir 只有 Regular）：fontselect 命中 NotoSansSC-Regular', () => {
+    expect(logA).toMatch(/fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC-Regular/)
+    expect(logA).not.toMatch(/fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC-Bold/)
+  })
+
+  it('场景 B（fontsdir 同时有 Regular+Bold）：fontselect 命中 NotoSansSC-Bold（证明危险是真的存在）', () => {
+    expect(logB, `没命中 Bold，fontselect 日志: ${/fontselect:[^\n]*/.exec(logB)?.[0]}`)
+      .toMatch(/fontselect: \(Noto Sans SC,[^)]*\) -> [^\n]*NotoSansSC-Bold/)
+  })
+
+  it('两者 TITLE_BAND 墨迹占比明显不同（证明上面两条 fontselect 断言有牙齿，不是日志巧合）', () => {
+    const inkA = inkRatio(outA, 1, TITLE_BAND)
+    const inkB = inkRatio(outB, 1, TITLE_BAND)
+    // 阈值来历：实测 A=0.0289、B=0.0307，相对差 6.09%（跑了 3 次，逐位一致，
+    // 不是噪声）。比「常驻书名有加粗层」那条描边效应（25.4%）小得多——预期之中：
+    // 那条测的是整层描边的有无，这条测的是同一层里"合成假粗"换成"真粗体字面"
+    // 这一步增量，TITLE_BAND(720x160) 里大半是空白背景，四个字的笔画变化被稀释了。
+    // 阈值定在 1.03（低于实测 1.0609、高于 1.0 的噪声地板），跑 3 次结果逐位相同，
+    // 说明这不是测量抖动，1.03 足够稳。
+    expect(inkB / inkA, `场景 A=${inkA.toFixed(4)} 场景 B=${inkB.toFixed(4)}，没有明显差异`)
+      .toBeGreaterThan(1.03)
+  })
+
+  it('usedBuiltinFontIds([])（存量框架）不含 noto-sc-bold —— per-task fontsdir 挡住了它', () => {
+    const ids = usedBuiltinFontIds([])
+    expect(ids).not.toContain('noto-sc-bold')
+    expect(ids).toEqual([DEFAULT_FONT_ID])
+  })
+})

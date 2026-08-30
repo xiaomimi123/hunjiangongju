@@ -7,9 +7,13 @@
 // 把字体文件放进仓库、渲染时用 fontsdir 指过去，本地与服务器就用同一个二进制字体，
 // 字体解析变成确定性的，本地即可完整验收。
 //
-// 字体：Noto Sans SC Regular（SIL Open Font License 1.1，允许随产品分发）。
-// **只带 Regular**：粗体由 libass 合成（大字号下观感可接受）。再带一个 Bold 面
-// 会让仓库多 8MB，等真有人反馈标题不够粗再说。
+// 字体注册表见 @mixcut/db 的 BUILTIN_FONTS（worker/templates/booklist/fonts/README.md
+// 有每款的许可与来源登记）。其中 Noto Sans SC 同时带 Regular 与 Bold 两个真实文件——
+// 二者 family 相同（这是字体格式本身的设计，见 fonts.ts 类型注释），靠 (family, weight)
+// 区分。这带来一个真实的坑：fontsdir 里如果同时放着这两个文件，ASS 样式行写死的
+// Bold=1 会让 libass 选中真粗体，而不是像只有 Regular 时那样啥都不做/合成假粗体。
+// 这正是 per-task fontsdir（只装本条片子选中的字体）存在的原因——见 ass.e2e.test.ts
+// 「per-task fontsdir 挡住了 Bold 串号」一节的真渲染验证。
 
 import path from 'path'
 import { findBuiltinFont, DEFAULT_FONT_ID } from '@mixcut/db'

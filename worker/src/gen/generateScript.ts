@@ -713,18 +713,22 @@ export async function generateScript(genTaskId: string): Promise<void> {
     subtitleEn: string
     captionBeats: { zh: string; en: string }[]
   }[] = []
+  // 双语关掉时不翻译：translateLine 是**逐拍一次 LLM 调用**，
+  // 而英文只有在 text.bilingual 开启时才会被渲染层消费（见 ass.ts）。
+  // 关掉双语还翻译就是纯浪费。
+  const wantEn = tp.text?.bilingual === true
   for (let i = 0; i < assignedFinal.length; i++) {
     const { scriptText, bookTitle, bookAuthor } = assignedFinal[i]
     const phrases = splitCaptionPhrases(scriptText, { max: tp.script?.captionMaxChars ?? 12 })
     const beats: { zh: string; en: string }[] = []
-    for (const zh of phrases) beats.push({ zh, en: await translateLine(zh) })
+    for (const zh of phrases) beats.push({ zh, en: wantEn ? await translateLine(zh) : '' })
     segments.push({
       generationTaskId: genTaskId,
       seqNo: i + 1,
       scriptText,
       ...(bookTitle ? { bookTitle } : {}),
       ...(bookAuthor ? { bookAuthor } : {}),
-      subtitleEn: beats.map((b) => b.en).join(' '), // 整段英文=各拍拼接，供回退单条字幕用
+      subtitleEn: wantEn ? beats.map((b) => b.en).join(' ') : '', // 整段英文=各拍拼接，供回退单条字幕用；关闭双语时收紧为空
       captionBeats: beats,
     })
   }

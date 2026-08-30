@@ -170,7 +170,10 @@ export async function prepareFontsDir(
   const builtinIds = usedBuiltinFontIds(usedIds)
   for (const id of builtinIds) {
     const entry = BUILTIN_FONTS.find((f) => f.id === id)
-    if (!entry) continue // usedBuiltinFontIds 已经过滤过，这里只是防御
+    // 理论上不可达（usedBuiltinFontIds 已经过滤过），但按本函数「缺字体应响亮
+    // 失败，不能静默」的口径，不可达分支也不能悄悄 continue——万一 usedBuiltinFontIds
+    // 以后改坏了，这里必须炸出来，而不是悄悄漏拷一个字体、成片渲成豆腐块。
+    if (!entry) throw new Error(`prepareFontsDir: 内置字体 id "${id}" 在 BUILTIN_FONTS 里找不到`)
     await fs.copyFile(path.join(FONTS_DIR, entry.file), path.join(dir, entry.file))
   }
 

@@ -12,7 +12,7 @@ import type { RenderFullOpts, FullFlashCard } from './renderFull'
 import type { RenderBodySegment } from './renderBody'
 import { DEFAULT_FONT_NAME, FONTS_DIR } from './fonts'
 import { selectPreset, hasGrain } from '../../../templates/booklist/theme'
-import { findBuiltinFont } from '@mixcut/db'
+import { findBuiltinFont, FLASH_AUTHOR_RATIO } from '@mixcut/db'
 
 export interface FromBodyDataIo {
   /** hf 工作目录的绝对路径；images/covers 的相对路径以它为基准 */
@@ -68,7 +68,10 @@ function abs(hfDir: string, rel: string): string {
  * 现在运营在剪辑工作台里就能调。
  */
 const DEFAULT_CAPTION_PX = 54
-const FS = { watermark: 22, flashAuthorRatio: 0.48 }
+// flashAuthorRatio 现从 @mixcut/db（bodySize.ts 的 FLASH_AUTHOR_RATIO）取，
+// 不再本地写死 0.48——与后台剪辑画布（stageGeometry.ts）共用同一份叶子模块常量，
+// 避免两边各存一份拷贝、改一处忘另一处导致画布悄悄偏离成片。
+const FS = { watermark: 22, flashAuthorRatio: FLASH_AUTHOR_RATIO }
 
 export function fromBodyData(data: BodyData, io: FromBodyDataIo): RenderFullOpts {
   const p = data.templateParams

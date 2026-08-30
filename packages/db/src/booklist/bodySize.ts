@@ -11,3 +11,11 @@
 //（'body.mp4 尺寸异常' / 'final.mp4 尺寸异常'），改错了这里两边渲染都会直接报错
 // 而不是悄悄出一个尺寸不对的成片。
 export const BODY_SIZE = { width: 720, height: 960 } as const
+
+// 快闪作者字号相对快闪书名字号的比例 —— worker（fromBodyData.ts 的
+// `FS.flashAuthorRatio`）与后台剪辑画布（web/components/admin/stageGeometry.ts
+// 的 flashAuthorFontSizePx）曾经各存一份 0.48 的字面量拷贝，且没有任何断言兜底：
+// 改了一处忘了另一处，画布上算出的快闪作者字号会悄悄偏离成片，且没有任何报错。
+// 与 BODY_SIZE 同一个道理——凡是「两边必须一致否则静默漂」的数字，都收进这个
+// 叶子模块，两边各自 import，不再各写一份。
+export const FLASH_AUTHOR_RATIO = 0.48

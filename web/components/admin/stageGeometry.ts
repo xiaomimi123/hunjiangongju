@@ -22,6 +22,7 @@
 // 沿用 web/app/admin/generate/page.tsx:6-7、jianying/page.tsx、frameworks/page.tsx
 // 里同样的写法与注释。
 import { fitSizePx } from '@mixcut/db/src/booklist/fitSize'
+import { FLASH_AUTHOR_RATIO } from '@mixcut/db/src/booklist/bodySize'
 import type { TextParams } from './paramControls'
 
 export { fitSizePx }
@@ -179,10 +180,10 @@ export function flashAuthorTop(flashTitleTopPx: number, text: TextParams): numbe
  *   `const FS = { watermark: 22, flashAuthorRatio: 0.48 }`
  *   `flashAuthorSizePx: Math.round(capPx * (tx?.flashTitleScale ?? 1.96) * FS.flashAuthorRatio)`
  * ass.ts 本身只是把这个算好的值原样塞进 Style 定义（`st.flashAuthorSizePx ?? 28`），
- * 并不在 ass.ts 内部重新计算。0.48 这个常量目前没有从 fromBodyData.ts 导出，
- * 这里按同样的口径重复一份字面量——如果 fromBodyData.ts 改了这个比例，这里要同步改。
+ * 并不在 ass.ts 内部重新计算。0.48 这个比例现从 @mixcut/db（bodySize.ts 的
+ * FLASH_AUTHOR_RATIO）取，与 fromBodyData.ts 共用同一份叶子模块常量，不再各存
+ * 一份字面量拷贝——改一处忘另一处会让画布悄悄偏离成片，且没有任何断言兜底。
  */
-const FLASH_AUTHOR_RATIO = 0.48
 export function flashAuthorFontSizePx(text: TextParams): number {
   return Math.round(text.captionSizePx * text.flashTitleScale * FLASH_AUTHOR_RATIO)
 }
@@ -203,14 +204,7 @@ export function openTitleFontSizePx(text: TextParams): number {
  */
 const WATERMARK = { top: 24, right: 24, fontSizePx: 22, opacity: 0.62 }
 
-/**
- * 按场景与素材，产出这一帧画布要画的全部图层几何。
- *
- * 场景划分（各文字层在时间上并不同时出现，全画反而失真）：
- *   - open：开场标题
- *   - flash：快闪书名 + 作者
- *   - body：常驻书名大标题 + 正文字幕（含双语英文行）+ 水印
- */
+/** 把 v 夹到 [lo, hi] 区间内，供下面几个拖拽换算函数复用。 */
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v))
 }
@@ -256,6 +250,14 @@ export function nextLayerScale(startScale: number, deltaClientY: number, scale: 
   return clamp(startScale + deltaClientY / scale / captionSizePx, 0.2, 5)
 }
 
+/**
+ * 按场景与素材，产出这一帧画布要画的全部图层几何。
+ *
+ * 场景划分（各文字层在时间上并不同时出现，全画反而失真）：
+ *   - open：开场标题
+ *   - flash：快闪书名 + 作者
+ *   - body：常驻书名大标题 + 正文字幕（含双语英文行）+ 水印
+ */
 export function computeStageLayers(input: StageGeometryInput): StageLayerGeom[] {
   const { width, height, scene, text, captionPosY, sample } = input
   const out: StageLayerGeom[] = []

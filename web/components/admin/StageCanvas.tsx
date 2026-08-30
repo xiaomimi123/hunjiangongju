@@ -151,9 +151,14 @@ export function StageCanvas(props: {
 
   /**
    * 各图层当前的 posY（0..1），拖拽起点。
-   * flashAuthor / watermark 没有独立的 posY 参数——flashAuthor 的位置完全由
-   * flashTitle 的 top + 固定偏移派生（见 stageGeometry.ts flashAuthorTop），
-   * watermark 固定右上角——这两层不支持位置拖拽，返回 undefined。
+   * flashAuthor / watermark 没有独立的 posY 参数，返回 undefined，不支持位置拖拽：
+   *   - flashAuthor 的位置完全由 flashTitle 的 top + 固定偏移派生
+   *     （见 stageGeometry.ts flashAuthorTop），`TextParams` 里没有
+   *     `flashAuthorPosY` 这个字段——给它挂拖拽会是纯粹的空操作：运营拖了、
+   *     看着动了，松手后其实什么都没存进参数，成片不会变。这种「拖了没反应」
+   *     比「不能拖」更糟，所以 flashAuthor 在下方 JSX 里不挂 selectable /
+   *     onPointerDown，只展示、不可选、不可拖。
+   *   - watermark 固定右上角。
    */
   const posYOf = (layer: StageLayer): number | undefined => {
     switch (layer) {
@@ -173,11 +178,17 @@ export function StageCanvas(props: {
   /**
    * 拖字号把手的起始值。caption 是绝对像素（captionSizePx），
    * 其余层是各自的 *Scale 倍数。
-   * flashAuthor 没有独立的字号参数——它的字号由 `captionSizePx * flashTitleScale *
-   * 0.48`（fromBodyData.ts 的 FS.flashAuthorRatio）派生，见 stageGeometry.ts
-   * flashAuthorFontSizePx——所以拖 flashAuthor 把手复用 flashTitleScale
-   * 作为起始值/写回目标：视觉上调它俩本来就联动，也没有更独立的参数可改。
-   * watermark 固定字号，不支持拖拽，返回 undefined。
+   * flashAuthor / watermark 没有独立的字号参数，返回 undefined，不提供把手：
+   *   - flashAuthor 的字号由 `captionSizePx * flashTitleScale * 0.48`
+   *     （fromBodyData.ts 的 FS.flashAuthorRatio）派生，见 stageGeometry.ts
+   *     flashAuthorFontSizePx；`TextParams` / paramsWhitelist.ts 里它只有
+   *     `flashAuthorColor`，没有独立的 posY 或 scale 字段可写回。
+   *     ★ 曾经让它的把手复用 flashTitleScale——但那样拖它会连带把快闪书名
+   *     一起改大改小，运营根本想不到；给一个「拖了却改到别的东西」的控件
+   *     比不给控件更糟，所以改成不可选、不可拖（见下方 JSX，flashAuthor
+   *     分支不再挂 selectable / onPointerDown / 把手）。将来如果给它补了
+   *     独立参数，再放开这条分支即可。
+   *   - watermark 固定字号，不支持拖拽。
    */
   const sizeStartOf = (layer: StageLayer): number | undefined => {
     switch (layer) {
@@ -186,8 +197,6 @@ export function StageCanvas(props: {
       case 'bookTitle':
         return text.bookTitleScale
       case 'flashTitle':
-        return text.flashTitleScale
-      case 'flashAuthor':
         return text.flashTitleScale
       case 'openTitle':
         return text.openTitleScale
@@ -411,42 +420,28 @@ export function StageCanvas(props: {
               )
             }
             case 'flashAuthor': {
+              // ★ 只展示，不可选、不可拖：TextParams / paramsWhitelist.ts 里 flashAuthor
+              // 只有 flashAuthorColor，没有独立的 posY / scale 字段——它的位置跟随
+              // flashTitle 下方固定偏移、字号是 flashTitleScale 的 0.48 倍（见
+              // stageGeometry.ts 的 flashAuthorTop / flashAuthorFontSizePx）。
+              // 给它做可拖控件等于骗运营：要么拖了没反应，要么拖了却改到 flashTitle
+              // 头上，两种都比不给控件更糟。不挂 selectable，不设 cursor，保持默认光标。
               return (
-                <div key="flashAuthor">
-                  <div
-                    data-testid="layer-flashAuthor"
-                    {...selectable('flashAuthor')}
-                    onPointerDown={(e) => beginPosDrag('flashAuthor', e)}
-                    className="absolute whitespace-nowrap"
-                    style={{
-                      left: '50%',
-                      top: l.top,
-                      transform: 'translate(-50%, -50%)',
-                      fontSize: l.fontSizePx,
-                      color: text.flashAuthorColor,
-                      fontFamily: titleFamily,
-                      ...textStroke,
-                    }}
-                  >
-                    {l.text}
-                  </div>
-                  {props.selected === 'flashAuthor' && (
-                    <div
-                      data-testid="handle-flashAuthor"
-                      onPointerDown={(e) => beginSizeDrag('flashAuthor', e)}
-                      className="absolute"
-                      style={{
-                        left: '50%',
-                        top: l.top + l.fontSizePx / 2 + 4,
-                        width: 120,
-                        height: 8,
-                        transform: 'translate(-50%, 0)',
-                        cursor: 'ns-resize',
-                        background: 'rgba(255, 138, 61, 0.85)',
-                        borderRadius: 4,
-                      }}
-                    />
-                  )}
+                <div
+                  key="flashAuthor"
+                  data-testid="layer-flashAuthor"
+                  className="absolute whitespace-nowrap"
+                  style={{
+                    left: '50%',
+                    top: l.top,
+                    transform: 'translate(-50%, -50%)',
+                    fontSize: l.fontSizePx,
+                    color: text.flashAuthorColor,
+                    fontFamily: titleFamily,
+                    ...textStroke,
+                  }}
+                >
+                  {l.text}
                 </div>
               )
             }
@@ -467,8 +462,13 @@ export function StageCanvas(props: {
           })}
         </div>
       </div>
-      <div className="mt-1 text-right">
-        <span className="text-[10px] text-ink3">示意预览，最终以成片为准</span>
+      <div className="mt-1 flex items-center justify-between">
+        {scene === 'flash' && (
+          <span className="text-[10px] text-ink3" data-testid="flash-author-hint">
+            作者行的位置与大小跟随快闪书名（位置在其下方、字号为其 0.48 倍），没有独立参数，画布上不可单独拖动
+          </span>
+        )}
+        <span className="ml-auto text-[10px] text-ink3">示意预览，最终以成片为准</span>
       </div>
     </div>
   )

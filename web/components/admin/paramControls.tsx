@@ -222,6 +222,9 @@ export type TextParams = {
   enScale: number
   enColor: string
   enGapPx: number
+  captionFontId: string
+  titleFontId: string
+  enFontId: string
 }
 export type PaceParams = { bookTitleLeadMs: number; bookTitleTailMs: number; speechCharsPerSec: number; maxTempo: number }
 export type ScriptParams = { openingTitleOnly: boolean; titleInOpening: boolean; titleSegment: number; chineseTitlesOnly: boolean; extraRules: string; captionMaxChars: number }
@@ -237,14 +240,49 @@ function ColorRow(props: { label: string; value: string; onChange: (v: string) =
   )
 }
 
+export type FontOption = { id: string; label: string; family: string; builtin: boolean }
+
+/**
+ * 字体下拉。allowInherit 时空值项文案是「跟随正文字体」，否则是「默认（思源黑体）」——
+ * 后者对应正文字幕本身，没有「跟随」一说。
+ *
+ * 下拉里用 label 区分选项而不是 family：内置字体里思源黑体 Regular / Bold 两条
+ * family 相同（都是 Noto Sans SC，靠 weight 区分字重），用 family 展示会看不出是哪条。
+ */
+export function FontSelect(props: {
+  label: string; value: string; onChange: (v: string) => void
+  fonts: FontOption[]; allowInherit?: boolean; disabled?: boolean
+}) {
+  return (
+    <label className="flex items-center gap-3 py-1">
+      <span className="w-40 shrink-0 text-xs text-ink3">{props.label}</span>
+      <select className="field w-56 text-sm" disabled={props.disabled}
+        value={props.value} onChange={(e) => props.onChange(e.target.value)}>
+        <option value="">{props.allowInherit ? '跟随正文字体' : '默认（思源黑体）'}</option>
+        {props.fonts.map((f) => (
+          <option key={f.id} value={f.id}>{f.builtin ? f.label : `${f.label}（上传）`}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 /** 文字层全套：字号锚点、各层放大倍数、描边、加粗、颜色。线上「字太小/要加粗/看不清」的反馈全在这里解决。 */
 export function TextRows(props: {
-  text: TextParams; onChange: (v: TextParams) => void; disabled?: boolean
+  text: TextParams; onChange: (v: TextParams) => void; fonts: FontOption[]; disabled?: boolean
 }) {
   const set = (patch: Partial<TextParams>) => props.onChange({ ...props.text, ...patch })
   const t = props.text
   return (
     <>
+      <FontSelect label="正文字幕字体" value={t.captionFontId} fonts={props.fonts} disabled={props.disabled}
+        onChange={(v) => set({ captionFontId: v })} />
+      <FontSelect label="标题类字体" value={t.titleFontId} fonts={props.fonts} allowInherit disabled={props.disabled}
+        onChange={(v) => set({ titleFontId: v })} />
+      {t.bilingual && (
+        <FontSelect label="英文行字体" value={t.enFontId} fonts={props.fonts} allowInherit disabled={props.disabled}
+          onChange={(v) => set({ enFontId: v })} />
+      )}
       <NumRow label="正文字号（锚点）" value={t.captionSizePx} disabled={props.disabled}
         min={20} max={120} step={2} unit="px" hint="其余各层字号都按它的倍数派生"
         onChange={(v) => set({ captionSizePx: v })} />

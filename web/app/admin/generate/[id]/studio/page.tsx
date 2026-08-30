@@ -6,7 +6,7 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import {
   SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows,
-  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams,
+  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type FontOption,
 } from '@/components/admin/paramControls'
 
 // 剪辑工作台：调这一条片子的节奏、字幕样式、配乐，然后重渲。
@@ -55,10 +55,18 @@ export default function StudioPage() {
   const [capPosY, setCapPosY] = useState(0.78)
   const [text, setText] = useState<TextParams | null>(null)
   const [pace, setPace] = useState<PaceParams | null>(null)
+  const [fonts, setFonts] = useState<FontOption[]>([])
 
   const load = useCallback(async () => {
     try {
-      const d = await api<Info>(`/api/generate/${id}/params`)
+      const [d, fontsRes] = await Promise.all([
+        api<Info>(`/api/generate/${id}/params`),
+        api<{ builtin: { id: string; label: string; family: string }[]; custom: { id: string; label: string; family: string }[] }>('/api/admin/fonts').catch(() => ({ builtin: [], custom: [] })),
+      ])
+      setFonts([
+        ...fontsRes.builtin.map((f) => ({ ...f, builtin: true })),
+        ...fontsRes.custom.map((f) => ({ ...f, builtin: false })),
+      ])
       setInfo(d)
       const e = d.effective
       // 分镜时长的当前值优先取 bodyTimings —— 画面实际就是按它切的；
@@ -225,7 +233,7 @@ export default function StudioPage() {
               {busy === '文字层' ? '保存中…' : '保存文字层'}
             </button>
           </div>
-          <TextRows text={text} onChange={setText} disabled={locked} />
+          <TextRows text={text} onChange={setText} fonts={fonts} disabled={locked} />
         </section>
       )}
 

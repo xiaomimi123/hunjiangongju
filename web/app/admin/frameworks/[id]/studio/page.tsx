@@ -6,7 +6,7 @@ import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import {
   SlotRows, TransitionRows, MotionRows, CaptionStyleRows, AudioRows, TextRows, PaceRows, ScriptRows,
-  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type ScriptParams,
+  type Cycle, type Keyframe, type AudioParams, type TextParams, type PaceParams, type ScriptParams, type FontOption,
 } from '@/components/admin/paramControls'
 
 // 框架级剪辑工作台：调**这个模板以后所有片子**的节奏、转场、运镜、字幕、配乐。
@@ -44,10 +44,18 @@ export default function FrameworkStudioPage() {
   const [text, setText] = useState<TextParams | null>(null)
   const [pace, setPace] = useState<PaceParams | null>(null)
   const [script, setScript] = useState<ScriptParams | null>(null)
+  const [fonts, setFonts] = useState<FontOption[]>([])
 
   const load = useCallback(async () => {
     try {
-      const d = await api<Info>(`/api/frameworks/${id}/params`)
+      const [d, fontsRes] = await Promise.all([
+        api<Info>(`/api/frameworks/${id}/params`),
+        api<{ builtin: { id: string; label: string; family: string }[]; custom: { id: string; label: string; family: string }[] }>('/api/admin/fonts').catch(() => ({ builtin: [], custom: [] })),
+      ])
+      setFonts([
+        ...fontsRes.builtin.map((f) => ({ ...f, builtin: true })),
+        ...fontsRes.custom.map((f) => ({ ...f, builtin: false })),
+      ])
       setInfo(d)
       setSlots(d.effective.body.slotDurationsMs ?? [])
       setCycle(d.effective.transition.bodyCycle ?? [])
@@ -143,7 +151,7 @@ export default function FrameworkStudioPage() {
       {text && (
         <Section title="文字层 · 字号 / 描边 / 加粗 / 颜色" what="文字层"
           patch={() => ({ text })}>
-          <TextRows text={text} onChange={setText} />
+          <TextRows text={text} onChange={setText} fonts={fonts} />
         </Section>
       )}
 

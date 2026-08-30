@@ -24,7 +24,10 @@
 //   - 只读 clientY，完全不读 clientX——ass.ts 里所有文字层都是居中锚定
 //     （an2 / an5 + \pos(cx, y)），横向坐标从不参与渲染，给横向拖拽自由度
 //     只会让运营以为拖了、成片却纹丝不动。
-// 仍不接入两个 studio 页（下一个任务）。
+// 已接入两个 studio 页（web/app/admin/generate/[id]/studio、
+// web/app/admin/frameworks/[id]/studio），不是"下一个任务"了——本文件上一版
+// 注释在这块留过一句过期的"仍不接入"，被审阅点名（这个项目已经被错注释坑过
+// 两次，错注释比没注释更危险），这里改成准确说法。
 
 import { useEffect, useRef, useState } from 'react'
 import type { TextParams, FontOption } from './paramControls'
@@ -67,10 +70,26 @@ function bgStyle(bg: StageBg): React.CSSProperties {
   return { backgroundImage: `url(${bg.url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
 }
 
-/** 字体族名：按 id 在 fonts 里查，查不到回退 undefined（浏览器默认字体） */
+/**
+ * 画布上给某个字体条目起的**别名**，与真实 family 名脱钩，按字体 id 拼出来。
+ *
+ * 为什么不能直接用真实 family：内置字体里 noto-sc（思源黑体 Regular，weight 400）
+ * 与 noto-sc-bold（思源黑体 Bold，weight 700）**族名完全相同**，都是
+ * 'Noto Sans SC'（见 packages/db/src/booklist/fonts.ts 的注释，这是字体格式
+ * 本身的设计，不是撞名）。如果两个 FontFace 用同一个 family 注册进
+ * document.fonts，最终哪个生效取决于两次异步 load() 谁先完成——非确定性：
+ * 运营选思源黑体 Bold，画布可能显示 Regular；选 Regular 的框架也可能被后到的
+ * Bold 面顶掉。按字体 id 起唯一别名注册，就让每个字体条目在画布上都是独立的
+ * 一款，Regular 与 Bold 不再互相打架。
+ */
+function stageAlias(id: string): string {
+  return `mixcut-${id}`
+}
+
+/** 画布上实际要用的 font-family：按字体 id 查，查不到回退 undefined（浏览器默认字体） */
 function familyOf(fonts: FontOption[], id: string | undefined): string | undefined {
   if (!id) return undefined
-  return fonts.find((f) => f.id === id)?.family
+  return fonts.find((f) => f.id === id) ? stageAlias(id) : undefined
 }
 
 export function StageCanvas(props: {
@@ -97,6 +116,17 @@ export function StageCanvas(props: {
   const boxRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(1)
   const [fileBgUrl, setFileBgUrl] = useState<string | null>(null)
+  // 组件卸载时也要 revoke 本地上传底图的 object URL——换图时已经在 onChange
+  // 里 revoke 了上一张，但如果运营上传一张图后直接离开页面（没有再换一次图），
+  // 那张就会一直漏在内存里没人 revoke。用 ref 存最新值，避免 effect 依赖
+  // fileBgUrl 导致每次换图都重新挂一次 unmount 监听。
+  const fileBgUrlRef = useRef<string | null>(null)
+  fileBgUrlRef.current = fileBgUrl
+  useEffect(() => {
+    return () => {
+      if (fileBgUrlRef.current) URL.revokeObjectURL(fileBgUrlRef.current)
+    }
+  }, [])
 
   // 坐标 1:1：缩放只发生在这一层，内部 children 全部用真实像素定位。
   //
@@ -127,10 +157,15 @@ export function StageCanvas(props: {
   }, [width, height])
 
   // 同一份字体二进制：与 worker fontsdir 里的文件一致，动态注册后渲染。
+  //
+  // 按 stageAlias(f.id) 注册，不用 f.family：见 stageAlias 注释——内置的
+  // noto-sc / noto-sc-bold 族名相同，直接用 family 注册会导致两个 FontFace
+  // 用相同 (family, weight, style) 竞争 document.fonts，谁生效由异步 load()
+  // 的完成顺序决定，非确定性。别名与 familyOf() 的取名逻辑必须保持一致。
   useEffect(() => {
     let cancelled = false
     for (const f of fonts) {
-      const face = new FontFace(f.family, `url(/api/fonts/${f.id}/file)`)
+      const face = new FontFace(stageAlias(f.id), `url(/api/fonts/${f.id}/file)`)
       face
         .load()
         .then((loaded) => {

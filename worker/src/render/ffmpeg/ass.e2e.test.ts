@@ -152,3 +152,105 @@ d('真渲验收 —— ASS 文字层', () => {
     expect(renderLog).not.toMatch(/Glyph .* not found/i)
   })
 })
+
+// 双语字幕：中文在上、英文紧贴其下，作为一条 Dialogue 一起进 ASS（见 ass.ts withEn）。
+// 单测只能证明拼出来的文本里有 \N 和英文覆盖标签——标签写没写生效、
+// 英文字体解析得到还是回退成豆腐块、加了英文行之后中文会不会被顶飞，字符串测试一个都看不出来。
+d('双语字幕真渲', () => {
+  let dir = ''
+  let onOut = ''
+  let offOut = ''
+
+  const STYLE_BI = {
+    ...STYLE, captionPosY: 0.78, captionSizePx: 48,
+    bilingual: true, enScale: 0.6, enColor: '#dddddd', enGapPx: 8,
+  }
+  const STYLE_OFF = { ...STYLE, captionPosY: 0.78, captionSizePx: 48 }
+  const CUE: AssCue[] = [{ text: '这是一句中文字幕', en: 'This is one line of English', startMs: 200, endMs: 1800 }]
+
+  // 中文基线 y ≈ H*0.78=749。中文行紧贴基线之上，双语开启时英文行接着往下长。
+  // 带高留够两行字号(48px/29px)的余量，不贴着理论边界设——渲染字形有上下溢出。
+  const zhBand = `${W}:70:0:${Math.round(H * 0.78) - 60}`
+  const enBand = `${W}:60:0:${Math.round(H * 0.78) + 6}`
+
+  function renderOnce(ass: string, outName: string): string {
+    const assPath = path.join(dir, `${outName}.ass`)
+    const outPath = path.join(dir, `${outName}.mp4`)
+    writeFileSync(assPath, ass, 'utf8')
+    const r = ff(['-y', '-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=30:d=2`,
+      '-vf', subtitlesFilter(assPath, FONTS_DIR), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p', outPath])
+    if (!r.ok) throw new Error(`烧字幕失败(${outName}): ${r.out.slice(-800)}`)
+    return outPath
+  }
+
+  /**
+   * 在 [yFrom, yTo] 区间按 step 步长向下扫，找第一条「亮起来」的横条，近似定位
+   * 文字块的上边缘。用来把「位置有没有变」从「面积有没有变」里剥离出来：
+   * zhBand 那样的大面积带留了几十像素余量，小幅位移根本不会碰到边界、
+   * 聚合墨迹占比纹丝不动——真要验位移必须直接量边缘在哪。
+   */
+  function findTopEdge(mp4: string, atSec: number, yFrom: number, yTo: number, step = 1, threshold = 0.01): number | null {
+    for (let y = yFrom; y <= yTo; y += step) {
+      if (inkRatio(mp4, atSec, `${W}:${step}:0:${y}`) > threshold) return y
+    }
+    return null
+  }
+
+  beforeAll(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'mixcut-ass-bi-'))
+    const onAss = buildAss({ width: W, height: H, captions: CUE, totalMs: 2000, style: STYLE_BI } as never)
+    const offAss = buildAss({ width: W, height: H, captions: CUE, totalMs: 2000, style: STYLE_OFF } as never)
+    onOut = renderOnce(onAss, 'on')
+    offOut = renderOnce(offAss, 'off')
+  })
+
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }) })
+
+  it('中文行与英文行都真的有墨，且英文在中文下方', () => {
+    // 阈值 0.002：实测中文带 ≈0.048、英文带 ≈0.023，都留了一个数量级以上的余量——
+    // 不贴实测值，是为了在"英文只画出一部分字符/字号被进一步压缩"这类退化
+    // (墨迹变少但没到 0)时仍然报错，而不是刚好卡在实测值附近变成测不出来。
+    // 时段内两条带都要有墨——只测其中一条测不出「英文行整行空白」这种坏法
+    // （中文字体是自带的稳字体，容易绿；\fs\c\fn 标签没生效导致英文渲染失败更容易漏）。
+    expect(inkRatio(onOut, 1.0, zhBand), '中文带没墨').toBeGreaterThan(0.002)
+    expect(inkRatio(onOut, 1.0, enBand), '英文带没墨(标签没生效或字体回退成空白)').toBeGreaterThan(0.002)
+    // 反证：字幕开始前(0.05s，早于 startMs=200ms)两条带必须干净——
+    // 否则说明量到的根本不是这条字幕，而是常驻的别的什么东西。
+    expect(inkRatio(onOut, 0.05, zhBand), '字幕还没开始就有墨，测量对象不对').toBe(0)
+    expect(inkRatio(onOut, 0.05, enBand), '字幕还没开始就有墨，测量对象不对').toBe(0)
+  })
+
+  it('关闭双语时英文带上完全没有墨', () => {
+    // 反证上一条：开双语时英文带有墨不是巧合测量误差，因为关掉开关后同一条带
+    // 在同一时刻必须绝对干净（不是「变少」，是 0）——这才说明那条带测的确实是英文行。
+    expect(inkRatio(offOut, 1.0, enBand)).toBe(0)
+  })
+
+  it('★ 中文行位置与关闭双语时一致（顶边容差 6px 内）', () => {
+    // 为什么不直接比 zhBand 里的聚合墨迹占比：那条带比一行字高出几十像素的余量，
+    // LINE_H 算错个几像素、中文行位移了，聚合占比根本不会变——这条断言会在
+    // LINE_H 真的错了的时候照样绿，等于没测。必须直接找中文行的上边缘在哪一行。
+    //
+    // 扫描窗口：实测关闭双语时中文行顶边在 baseline(749)-37≈712，字形实际占高
+    // 比 48*LINE_H=57.6 的理论行盒矮不少(汉字字面比字号本身留白小)。窗口按实测
+    // 结果两侧各留 30px 余量(679~739)，既不会因为太窄而找不到边缘，
+    // 也不会宽到把上一行/别的东西也扫进来。
+    //
+    // ★ 容差 6px 是 bilingualExtraPx 想要兑现的承诺("开双语不该让中文行移动")，
+    // 不是按实测值划的——这条按实测数字反推阈值就失去意义了。见任务报告：
+    // 本机实测 关闭=712 开启=719，位移 7px，超过 6px 容差，此断言目前会失败。
+    // 这暴露的是 ass.ts 里 LINE_H=1.2 这个经验系数偏低（导致 bilingualExtraPx
+    // 少算了几像素、MarginV 少减了一点），不是这条测试写错了——按要求不在这里
+    // 改阈值迁就实现，真实数据已写入任务报告，由人决定是调 LINE_H 还是放宽承诺。
+    const baseline = Math.round(H * 0.78)
+    const yFrom = baseline - 70
+    const yTo = baseline - 10
+    const topOff = findTopEdge(offOut, 1.0, yFrom, yTo)
+    const topOn = findTopEdge(onOut, 1.0, yFrom, yTo)
+    expect(topOff, `扫描窗口[${yFrom},${yTo}]里没找到关闭双语时的中文行顶边，窗口要调`).not.toBeNull()
+    expect(topOn, `扫描窗口[${yFrom},${yTo}]里没找到开启双语时的中文行顶边，窗口要调`).not.toBeNull()
+    expect(Math.abs((topOn as number) - (topOff as number)),
+      `中文行顶边位移: 关闭=${topOff} 开启=${topOn}，LINE_H 假设可能不准`).toBeLessThanOrEqual(6)
+  })
+})

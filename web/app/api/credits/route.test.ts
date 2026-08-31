@@ -3,7 +3,17 @@
 // 将来任何新测试文件都不得写 site_config。
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
 import { NextRequest } from 'next/server'
+import os from 'os'
+import path from 'path'
+import fs from 'fs/promises'
+import { mkdtempSync } from 'fs'
 import { prisma } from '@mixcut/db'
+
+// /api/admin/recharge-qr 落盘用的 DATA_DIR 在模块顶层读一次 process.env.DATA_DIR，
+// 必须在 import 该路由之前设好、且指向真实存在的临时目录 —— 本机没有 /data，
+// 用法同 web/app/api/admin/fonts/route.test.ts。
+const tmpDataDir = mkdtempSync(path.join(os.tmpdir(), 'credits-route-test-'))
+process.env.DATA_DIR = tmpDataDir
 
 const requireRoleMock = vi.fn()
 vi.mock('@/lib/auth', async () => {
@@ -18,6 +28,7 @@ const userIds: string[] = []
 afterAll(async () => {
   await prisma.user.deleteMany({ where: { id: { in: userIds } } })
   await prisma.$disconnect()
+  await fs.rm(tmpDataDir, { recursive: true, force: true })
 })
 beforeEach(() => { requireRoleMock.mockReset() })
 

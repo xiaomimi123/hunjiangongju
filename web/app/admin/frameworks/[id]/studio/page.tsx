@@ -123,107 +123,116 @@ export default function FrameworkStudioPage() {
         </p>
       )}
 
-      <div className="card p-4 text-xs text-ink3">
-        不确定改成什么合适时，建议先用这个框架生成一条，在
-        <span className="text-ink">「生成 → 剪辑工作台」</span>里边看边调，满意后点
-        <span className="text-ink">「保存为模板默认值」</span>写回这里——那样能看着成片改，不用凭空猜数值。
-      </div>
-
-      {text && (
-        <section className="card space-y-3 p-4 lg:sticky lg:top-4">
-          <div className="flex items-center justify-between">
-            <p className="eyebrow">画面预览 · 可直接拖</p>
-            <button className="btn-ghost text-xs disabled:opacity-50" disabled={!!busy}
-              onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
-              {busy === '画面' ? '保存中…' : '保存画面'}
-            </button>
+      {/* 宽屏（lg+，后台主要使用场景）左右并排：左列参数可滚动、右列画布 sticky 贴顶，
+          调参时预览始终在视野里——这正是画布存在的意义。窄屏折回单列，画布放在
+          全部参数下面（不再霸占第一屏），理由见 studio 页同名注释。
+          两个网格子元素的 DOM 顺序就是左列（提示卡+参数）在前、画布在后，
+          窄屏下 grid 退化为纵向堆叠时天然满足「画布在参数下面」，不需要额外的 order 类。 */}
+      <div className="lg:grid lg:grid-cols-[1fr_420px] lg:items-start lg:gap-5">
+        <div className="space-y-5">
+          <div className="card p-4 text-xs text-ink3">
+            不确定改成什么合适时，建议先用这个框架生成一条，在
+            <span className="text-ink">「生成 → 剪辑工作台」</span>里边看边调，满意后点
+            <span className="text-ink">「保存为模板默认值」</span>写回这里——那样能看着成片改，不用凭空猜数值。
           </div>
-          <StageCanvas
-            width={BODY_SIZE.width} height={BODY_SIZE.height}
-            text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
-            scene={scene} onScene={setScene} bg={bg} onBg={setBg}
-            sample={{
-              caption: '这是一句示例字幕', captionEn: 'This is a sample caption',
-              bookTitle: '活着', bookAuthor: '余华', openTitle: '今天分享的是',
-            }}
-            selected={sel} onSelect={setSel}
-            onPosY={(layer, v) => {
-              switch (layer) {
-                case 'caption': setCapPosY(v); break
-                case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
-                case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
-                case 'openTitle': setText({ ...text, openTitlePosY: v }); break
-                default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
-              }
-            }}
-            onSize={(layer, v) => {
-              switch (layer) {
-                case 'caption': setText({ ...text, captionSizePx: v }); break
-                case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
-                case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
-                case 'openTitle': setText({ ...text, openTitleScale: v }); break
-                default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
-              }
-            }}
-          />
-        </section>
-      )}
 
-      <Section title="节奏 · 每段停留多久（默认值）" what="节奏"
-        patch={() => ({ body: { slotDurationsMs: slots } })}>
-        <p className="text-xs text-ink3">
-          这是**文案配额与配音时长的目标**：文案按各段时长比例分字数，配音再补静音/变速对齐到它。
-          单条片子画面的实际切点由配音对齐算出，因此改这里会通过下一条新生成的片子体现出来。
-        </p>
-        <SlotRows slots={slots} onChange={setSlots} />
-        <button className="btn-ghost text-xs" onClick={() => setSlots((s) => [...s, 5000])}>+ 增加一段</button>
-      </Section>
+          <Section title="节奏 · 每段停留多久（默认值）" what="节奏"
+            patch={() => ({ body: { slotDurationsMs: slots } })}>
+            <p className="text-xs text-ink3">
+              这是**文案配额与配音时长的目标**：文案按各段时长比例分字数，配音再补静音/变速对齐到它。
+              单条片子画面的实际切点由配音对齐算出，因此改这里会通过下一条新生成的片子体现出来。
+            </p>
+            <SlotRows slots={slots} onChange={setSlots} />
+            <button className="btn-ghost text-xs" onClick={() => setSlots((s) => [...s, 5000])}>+ 增加一段</button>
+          </Section>
 
-      <Section title="转场 · 正片各边界" what="转场"
-        patch={() => ({ transition: { bodyCycle: cycle } })}>
-        <TransitionRows cycle={cycle} onChange={setCycle} />
-      </Section>
+          <Section title="转场 · 正片各边界" what="转场"
+            patch={() => ({ transition: { bodyCycle: cycle } })}>
+            <TransitionRows cycle={cycle} onChange={setCycle} />
+          </Section>
 
-      <Section title="运镜 · 逐段推近幅度" what="运镜"
-        patch={() => ({ motion: { keyframes: kfs } })}>
-        <MotionRows kfs={kfs} onChange={setKfs} />
-      </Section>
+          <Section title="运镜 · 逐段推近幅度" what="运镜"
+            patch={() => ({ motion: { keyframes: kfs } })}>
+            <MotionRows kfs={kfs} onChange={setKfs} />
+          </Section>
 
-      <Section title="字幕样式" what="字幕样式"
-        patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) })}>
-        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
-          text={text} onText={setText} />
-      </Section>
+          <Section title="字幕样式" what="字幕样式"
+            patch={() => ({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) })}>
+            <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
+              text={text} onText={setText} />
+          </Section>
 
-      {text && (
-        <Section title="文字层 · 字号 / 描边 / 加粗 / 颜色" what="文字层"
-          patch={() => ({ text })}>
-          <TextRows text={text} onChange={setText} fonts={fonts} />
-        </Section>
-      )}
+          {text && (
+            <Section title="文字层 · 字号 / 描边 / 加粗 / 颜色" what="文字层"
+              patch={() => ({ text })}>
+              <TextRows text={text} onChange={setText} fonts={fonts} />
+            </Section>
+          )}
 
-      {pace && (
-        <Section title="节奏留白与语速" what="节奏留白"
-          patch={() => ({ pace })}>
-          <PaceRows pace={pace} onChange={setPace} />
-        </Section>
-      )}
+          {pace && (
+            <Section title="节奏留白与语速" what="节奏留白"
+              patch={() => ({ pace })}>
+              <PaceRows pace={pace} onChange={setPace} />
+            </Section>
+          )}
 
-      {script && (
-        <Section title="文案口径（给 AI 的规则）" what="文案口径"
-          patch={() => ({ script })}>
-          <ScriptRows script={script} onChange={setScript} />
-        </Section>
-      )}
+          {script && (
+            <Section title="文案口径（给 AI 的规则）" what="文案口径"
+              patch={() => ({ script })}>
+              <ScriptRows script={script} onChange={setScript} />
+            </Section>
+          )}
 
-      {audio && (
-        <Section title="配乐" what="配乐" patch={() => ({ audio })}>
-          <p className="text-xs text-ink3">
-            换曲子在框架库编辑里选「默认 BGM」，或在单条片子的工作台里换。这里只管音量与剪法。
-          </p>
-          <AudioRows audio={audio} onChange={setAudio} />
-        </Section>
-      )}
+          {audio && (
+            <Section title="配乐" what="配乐" patch={() => ({ audio })}>
+              <p className="text-xs text-ink3">
+                换曲子在框架库编辑里选「默认 BGM」，或在单条片子的工作台里换。这里只管音量与剪法。
+              </p>
+              <AudioRows audio={audio} onChange={setAudio} />
+            </Section>
+          )}
+        </div>
+
+        {text && (
+          <section className="card mt-5 space-y-3 p-4 lg:sticky lg:top-4 lg:mt-0">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">画面预览 · 可直接拖</p>
+              <button className="btn-ghost text-xs disabled:opacity-50" disabled={!!busy}
+                onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
+                {busy === '画面' ? '保存中…' : '保存画面'}
+              </button>
+            </div>
+            <StageCanvas
+              width={BODY_SIZE.width} height={BODY_SIZE.height}
+              text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
+              scene={scene} onScene={setScene} bg={bg} onBg={setBg}
+              sample={{
+                caption: '这是一句示例字幕', captionEn: 'This is a sample caption',
+                bookTitle: '活着', bookAuthor: '余华', openTitle: '今天分享的是',
+              }}
+              selected={sel} onSelect={setSel}
+              onPosY={(layer, v) => {
+                switch (layer) {
+                  case 'caption': setCapPosY(v); break
+                  case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
+                  case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
+                  case 'openTitle': setText({ ...text, openTitlePosY: v }); break
+                  default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
+                }
+              }}
+              onSize={(layer, v) => {
+                switch (layer) {
+                  case 'caption': setText({ ...text, captionSizePx: v }); break
+                  case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
+                  case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
+                  case 'openTitle': setText({ ...text, openTitleScale: v }); break
+                  default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
+                }
+              }}
+            />
+          </section>
+        )}
+      </div>
     </div>
   )
 }

@@ -16,6 +16,7 @@ export const POST = handler(async (req) => {
   await consumeCode(email, String(code ?? ''), 'reset')
   const user = await prisma.user.findUnique({ where: { email } })
   if (!user) throw new HttpError(400, '账号不存在')
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 10) } })
+  // 忘记密码重置：同样让旧会话立即失效
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 10), sessionEpoch: { increment: 1 } } })
   return NextResponse.json({ ok: true })
 })

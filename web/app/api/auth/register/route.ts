@@ -25,7 +25,7 @@ export const POST = handler(async (req) => {
     const user = await prisma.user.create({
       data: { email: phone, nickname: `学员${phone.slice(-4)}`, account: phone, passwordHash: await bcrypt.hash(password, 10), role: 'student' },
     })
-    return setSessionCookie(NextResponse.json({ role: user.role, needsVerification: false }), { userId: user.id, role: user.role })
+    return setSessionCookie(NextResponse.json({ role: user.role, needsVerification: false }), { userId: user.id, role: user.role, epoch: user.sessionEpoch })
   } catch (e) {
     if (e && typeof e === 'object' && (e as { code?: string }).code === 'P2002') throw new HttpError(409, '该手机号已注册')
     throw e

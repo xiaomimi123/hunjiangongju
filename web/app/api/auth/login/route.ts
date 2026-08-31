@@ -17,5 +17,5 @@ export const POST = handler(async (req) => {
   const ok = await bcrypt.compare(String(password), user?.passwordHash ?? DUMMY_HASH)
   if (!user || !ok) throw new HttpError(401, '账号或密码错误')
   if (user.disabled) throw new HttpError(403, '账号已被禁用，请联系管理员')
-  return setSessionCookie(NextResponse.json({ role: user.role }), { userId: user.id, role: user.role })
+  return setSessionCookie(NextResponse.json({ role: user.role }), { userId: user.id, role: user.role, epoch: user.sessionEpoch })
 })

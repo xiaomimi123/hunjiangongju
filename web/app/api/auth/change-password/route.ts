@@ -15,6 +15,7 @@ export const POST = handler(async (req) => {
   if (!(await bcrypt.compare(String(currentPassword ?? ''), user.passwordHash))) {
     throw new HttpError(400, '当前密码不正确')
   }
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 10) } })
+  // 改密码要让该用户所有已签发 token 立即失效（尤其几个人共用账号的场景）：会话代次 +1
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 10), sessionEpoch: { increment: 1 } } })
   return NextResponse.json({ ok: true })
 })

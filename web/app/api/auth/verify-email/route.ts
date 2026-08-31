@@ -25,7 +25,7 @@ const _legacy = handler(async (req) => {
     const user = await prisma.user.create({
       data: { email, nickname: nicknameFromEmail(email), account: email, passwordHash: await bcrypt.hash(password, 10), role: 'student' },
     })
-    return setSessionCookie(NextResponse.json({ role: user.role }), { userId: user.id, role: user.role })
+    return setSessionCookie(NextResponse.json({ role: user.role }), { userId: user.id, role: user.role, epoch: user.sessionEpoch })
   } catch (e) {
     if (e && typeof e === 'object' && (e as { code?: string }).code === 'P2002') throw new HttpError(409, '该邮箱已注册')
     throw e

@@ -58,8 +58,10 @@ export const PATCH = handler(async (req, { params }) => {
   if (u.role === 'operator') await guardOperator(session, params.id, action === 'disable')
   if (action === 'reset') {
     assertPassword(password)
-    await prisma.user.update({ where: { id: params.id }, data: { passwordHash: await bcrypt.hash(password, 10) } })
+    // 运营给学员重置密码：同样让其旧会话立即失效
+    await prisma.user.update({ where: { id: params.id }, data: { passwordHash: await bcrypt.hash(password, 10), sessionEpoch: { increment: 1 } } })
   } else if (action === 'disable' || action === 'enable') {
+    // 禁用/启用不需要 bump epoch：disabled 字段在 requireRole 里直接查库判断，立即生效
     await prisma.user.update({ where: { id: params.id }, data: { disabled: action === 'disable' } })
   } else if (action === 'recharge') {
     // 积分充值：导师线下收款后在这里落账。加分与流水同一事务，对账不缺笔

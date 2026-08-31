@@ -33,7 +33,7 @@
 - **数据**：Prisma 5 + PostgreSQL 16
 - **队列/异步**：BullMQ 5 + Redis 7
 - **视频**：fluent-ffmpeg（ffmpeg + Noto CJK 字体）
-- **认证**：JWT（httpOnly Cookie）+ bcrypt；邮箱验证码（nodemailer）
+- **认证**：JWT（httpOnly Cookie，生产环境额外带 Secure）+ bcrypt；邮箱验证码（nodemailer）。鉴权在服务端回查数据库比对账号禁用状态与「会话代次」（`sessionEpoch`），改密码 / 重置密码会使该账号此前签发的登录状态立即失效，禁用账号会让其后续 API 调用立即 401
 - **部署**：Docker Compose + Caddy（自动 HTTPS）
 
 ## 项目结构（monorepo）

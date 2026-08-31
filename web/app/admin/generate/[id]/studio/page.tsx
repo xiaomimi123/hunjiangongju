@@ -209,182 +209,193 @@ export default function StudioPage() {
       {msg && <p className="pill pill-ok">{msg}</p>}
       {locked && <p className="pill pill-warn">{info.blockReason}</p>}
 
-      {text && (
-        <section className="card space-y-3 p-4 lg:sticky lg:top-4">
-          <div className="flex items-center justify-between">
-            <p className="eyebrow">画面预览 · 可直接拖</p>
-            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-              onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
-              {busy === '画面' ? '保存中…' : '保存画面'}
-            </button>
-          </div>
-          <StageCanvas
-            width={BODY_SIZE.width} height={BODY_SIZE.height}
-            text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
-            scene={scene} onScene={setScene} bg={bg} onBg={setBg}
-            sample={sample}
-            selected={sel} onSelect={setSel}
-            onPosY={(layer, v) => {
-              if (locked) return
-              switch (layer) {
-                case 'caption': setCapPosY(v); break
-                case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
-                case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
-                case 'openTitle': setText({ ...text, openTitlePosY: v }); break
-                default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
-              }
-            }}
-            onSize={(layer, v) => {
-              if (locked) return
-              switch (layer) {
-                case 'caption': setText({ ...text, captionSizePx: v }); break
-                case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
-                case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
-                case 'openTitle': setText({ ...text, openTitleScale: v }); break
-                default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
-              }
-            }}
-          />
-        </section>
-      )}
+      {/* 宽屏（lg+，后台主要使用场景）左右并排：左列参数可滚动、右列画布 sticky 贴顶，
+          调参时预览始终在视野里——这正是画布存在的意义。窄屏折回单列，画布放在
+          全部参数下面（不再霸占第一屏）：这条任务往往一次要连着调好几个分区再点
+          「应用并重渲」，把画布放最上面会让运营在窄屏上每改一个分区都要先滑过一整块
+          画布才够到下一个控件，比"预览滚到最后才看到"更烦——两害相权，选画布垫底。
+          两个网格子元素的 DOM 顺序就是左列（覆盖提示+参数）在前、画布在后，
+          窄屏下 grid 退化为纵向堆叠时天然满足，不需要额外的 order 类。 */}
+      <div className="lg:grid lg:grid-cols-[1fr_420px] lg:items-start lg:gap-5">
+        <div className="space-y-5">
+          {info.override && (
+            <div className="card flex flex-wrap items-center gap-3 p-4">
+              <span className="eyebrow">本条已有自定义参数</span>
+              <span className="text-xs text-ink3">框架默认值被这条任务的设置覆盖中</span>
+              <button className="btn-ghost text-xs" disabled={locked || !!busy}
+                onClick={() => act('params/promote', '保存为模板默认值')}>
+                保存为模板默认值（以后同框架都按这个来）
+              </button>
+              <button className="btn-ghost text-xs" disabled={locked || !!busy}
+                onClick={async () => {
+                  setBusy('reset')
+                  try { await api(`/api/generate/${id}/params`, { method: 'DELETE' }); await load(); setMsg('已恢复框架默认') }
+                  catch (e) { setErr((e as Error).message) } finally { setBusy('') }
+                }}>
+                恢复框架默认
+              </button>
+            </div>
+          )}
 
-      {info.override && (
-        <div className="card flex flex-wrap items-center gap-3 p-4">
-          <span className="eyebrow">本条已有自定义参数</span>
-          <span className="text-xs text-ink3">框架默认值被这条任务的设置覆盖中</span>
-          <button className="btn-ghost text-xs" disabled={locked || !!busy}
-            onClick={() => act('params/promote', '保存为模板默认值')}>
-            保存为模板默认值（以后同框架都按这个来）
-          </button>
-          <button className="btn-ghost text-xs" disabled={locked || !!busy}
-            onClick={async () => {
-              setBusy('reset')
-              try { await api(`/api/generate/${id}/params`, { method: 'DELETE' }); await load(); setMsg('已恢复框架默认') }
-              catch (e) { setErr((e as Error).message) } finally { setBusy('') }
-            }}>
-            恢复框架默认
-          </button>
-        </div>
-      )}
+          {/* ── 节奏 ── */}
+          <section className="card space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">节奏 · 每段停留多久</p>
+              <button className="btn-primary text-xs disabled:opacity-50" disabled={locked || !!busy || segCount === 0}
+                onClick={saveSlotsAndRealign}>
+                {busy === 'slots' ? '保存并重新配音中…' : '保存并重新配音对齐'}
+              </button>
+            </div>
+            <p className="text-xs text-ink3">
+              改时长要**重新配音**才生效：画面各段的起止来自配音对齐的结果，不是直接来自这里的数值。
+              只点「应用并重渲」的话画面不会变。
+            </p>
+            <SlotRows slots={slots} onChange={setSlots} disabled={locked} />
+          </section>
 
-      {/* ── 节奏 ── */}
-      <section className="card space-y-3 p-4">
-        <div className="flex items-center justify-between">
-          <p className="eyebrow">节奏 · 每段停留多久</p>
-          <button className="btn-primary text-xs disabled:opacity-50" disabled={locked || !!busy || segCount === 0}
-            onClick={saveSlotsAndRealign}>
-            {busy === 'slots' ? '保存并重新配音中…' : '保存并重新配音对齐'}
-          </button>
-        </div>
-        <p className="text-xs text-ink3">
-          改时长要**重新配音**才生效：画面各段的起止来自配音对齐的结果，不是直接来自这里的数值。
-          只点「应用并重渲」的话画面不会变。
-        </p>
-        <SlotRows slots={slots} onChange={setSlots} disabled={locked} />
-      </section>
+          {/* ── 转场 ── */}
+          <section className="card space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">转场 · 正片各边界</p>
+              <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                onClick={() => save({ transition: { bodyCycle: cycle } }, '转场')}>
+                {busy === '转场' ? '保存中…' : '保存转场'}
+              </button>
+            </div>
+            <TransitionRows cycle={cycle} onChange={setCycle} disabled={locked} />
+          </section>
 
-      {/* ── 转场 ── */}
-      <section className="card space-y-3 p-4">
-        <div className="flex items-center justify-between">
-          <p className="eyebrow">转场 · 正片各边界</p>
-          <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-            onClick={() => save({ transition: { bodyCycle: cycle } }, '转场')}>
-            {busy === '转场' ? '保存中…' : '保存转场'}
-          </button>
-        </div>
-        <TransitionRows cycle={cycle} onChange={setCycle} disabled={locked} />
-      </section>
+          {/* ── 运镜 ── */}
+          <section className="card space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">运镜 · 逐段推近幅度</p>
+              <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                onClick={() => save({ motion: { keyframes: kfs } }, '运镜')}>
+                {busy === '运镜' ? '保存中…' : '保存运镜'}
+              </button>
+            </div>
+            <MotionRows kfs={kfs} onChange={setKfs} disabled={locked} />
+          </section>
 
-      {/* ── 运镜 ── */}
-      <section className="card space-y-3 p-4">
-        <div className="flex items-center justify-between">
-          <p className="eyebrow">运镜 · 逐段推近幅度</p>
-          <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-            onClick={() => save({ motion: { keyframes: kfs } }, '运镜')}>
-            {busy === '运镜' ? '保存中…' : '保存运镜'}
-          </button>
-        </div>
-        <MotionRows kfs={kfs} onChange={setKfs} disabled={locked} />
-      </section>
-
-      {/* ── 字幕样式 ── */}
-      <section className="card space-y-3 p-4">
-        <div className="flex items-center justify-between">
-          <p className="eyebrow">字幕样式</p>
-          <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-            onClick={() => save({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) }, '字幕样式')}>
-            {busy === '字幕样式' ? '保存中…' : '保存字幕样式'}
-          </button>
-        </div>
-        {text?.bilingual && enMissing && (
-          <p className="pill pill-warn text-xs">
-            本条生成时未开双语，字幕没有英文文本；重渲不会出现英文，需要重新生成文案。
-          </p>
-        )}
-        <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
-          text={text} onText={setText} disabled={locked} />
-      </section>
-
-      {/* ── 文字层 ── */}
-      {text && (
-        <section className="card space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <p className="eyebrow">文字层 · 字号 / 描边 / 加粗 / 颜色</p>
-            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-              onClick={() => save({ text }, '文字层')}>
-              {busy === '文字层' ? '保存中…' : '保存文字层'}
-            </button>
-          </div>
-          <TextRows text={text} onChange={setText} fonts={fonts} disabled={locked} />
-        </section>
-      )}
-
-      {/* ── 节奏留白 ──
-          语速与留白影响的是**配音**，保存后要走「保存并重新配音对齐」或整条重渲才可闻。 */}
-      {pace && (
-        <section className="card space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <p className="eyebrow">节奏留白与语速</p>
-            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-              onClick={() => save({ pace }, '节奏留白')}>
-              {busy === '节奏留白' ? '保存中…' : '保存节奏留白'}
-            </button>
-          </div>
-          <p className="text-xs text-ink3">这些改的是**配音**（留白插在音轨里）。保存后需「保存并重新配音对齐」才生效，只重渲画面听不出变化。</p>
-          <PaceRows pace={pace} onChange={setPace} disabled={locked} />
-        </section>
-      )}
-
-      {/* ── 配乐 ── */}
-      {audio && (
-        <section className="card space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <p className="eyebrow">配乐</p>
-            <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
-              onClick={() => save({ audio }, '配乐')}>
-              {busy === '配乐' ? '保存中…' : '保存配乐参数'}
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="w-40 shrink-0 text-xs text-ink3">曲子</span>
-            <select className="field max-w-xs text-sm" value={bgmId} disabled={locked || busy === 'bgm'}
-              onChange={async (e) => {
-                const v = e.target.value
-                setBgmId(v); setBusy('bgm')
-                try { await api(`/api/generate/${id}/bgm`, { method: 'POST', body: { bgmId: v || null } }); setMsg('已换曲（重渲后生效）') }
-                catch (x) { setErr((x as Error).message) } finally { setBusy('') }
-              }}>
-              <option value="">不使用 BGM</option>
-              {bgms.map((b) => <option key={b.id} value={b.id}>{b.name || b.styleTag || b.id.slice(0, 8)}</option>)}
-            </select>
-            {bgmId && bgms.find((b) => b.id === bgmId) && (
-              <audio controls src={bgms.find((b) => b.id === bgmId)!.fileUrl} className="h-9" />
+          {/* ── 字幕样式 ── */}
+          <section className="card space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">字幕样式</p>
+              <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                onClick={() => save({ body: { subtitleColor: capColor, subtitlePosY: capPosY }, ...(text ? { text } : {}) }, '字幕样式')}>
+                {busy === '字幕样式' ? '保存中…' : '保存字幕样式'}
+              </button>
+            </div>
+            {text?.bilingual && enMissing && (
+              <p className="pill pill-warn text-xs">
+                本条生成时未开双语，字幕没有英文文本；重渲不会出现英文，需要重新生成文案。
+              </p>
             )}
-            <Link href="/admin/bgm" className="text-xs text-flame">管理曲库 →</Link>
-          </div>
-          <AudioRows audio={audio} onChange={setAudio} disabled={locked} />
-        </section>
-      )}
+            <CaptionStyleRows color={capColor} posY={capPosY} onColor={setCapColor} onPosY={setCapPosY}
+              text={text} onText={setText} disabled={locked} />
+          </section>
+
+          {/* ── 文字层 ── */}
+          {text && (
+            <section className="card space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <p className="eyebrow">文字层 · 字号 / 描边 / 加粗 / 颜色</p>
+                <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                  onClick={() => save({ text }, '文字层')}>
+                  {busy === '文字层' ? '保存中…' : '保存文字层'}
+                </button>
+              </div>
+              <TextRows text={text} onChange={setText} fonts={fonts} disabled={locked} />
+            </section>
+          )}
+
+          {/* ── 节奏留白 ──
+              语速与留白影响的是**配音**，保存后要走「保存并重新配音对齐」或整条重渲才可闻。 */}
+          {pace && (
+            <section className="card space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <p className="eyebrow">节奏留白与语速</p>
+                <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                  onClick={() => save({ pace }, '节奏留白')}>
+                  {busy === '节奏留白' ? '保存中…' : '保存节奏留白'}
+                </button>
+              </div>
+              <p className="text-xs text-ink3">这些改的是**配音**（留白插在音轨里）。保存后需「保存并重新配音对齐」才生效，只重渲画面听不出变化。</p>
+              <PaceRows pace={pace} onChange={setPace} disabled={locked} />
+            </section>
+          )}
+
+          {/* ── 配乐 ── */}
+          {audio && (
+            <section className="card space-y-3 p-4">
+              <div className="flex items-center justify-between">
+                <p className="eyebrow">配乐</p>
+                <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                  onClick={() => save({ audio }, '配乐')}>
+                  {busy === '配乐' ? '保存中…' : '保存配乐参数'}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="w-40 shrink-0 text-xs text-ink3">曲子</span>
+                <select className="field max-w-xs text-sm" value={bgmId} disabled={locked || busy === 'bgm'}
+                  onChange={async (e) => {
+                    const v = e.target.value
+                    setBgmId(v); setBusy('bgm')
+                    try { await api(`/api/generate/${id}/bgm`, { method: 'POST', body: { bgmId: v || null } }); setMsg('已换曲（重渲后生效）') }
+                    catch (x) { setErr((x as Error).message) } finally { setBusy('') }
+                  }}>
+                  <option value="">不使用 BGM</option>
+                  {bgms.map((b) => <option key={b.id} value={b.id}>{b.name || b.styleTag || b.id.slice(0, 8)}</option>)}
+                </select>
+                {bgmId && bgms.find((b) => b.id === bgmId) && (
+                  <audio controls src={bgms.find((b) => b.id === bgmId)!.fileUrl} className="h-9" />
+                )}
+                <Link href="/admin/bgm" className="text-xs text-flame">管理曲库 →</Link>
+              </div>
+              <AudioRows audio={audio} onChange={setAudio} disabled={locked} />
+            </section>
+          )}
+        </div>
+
+        {text && (
+          <section className="card mt-5 space-y-3 p-4 lg:sticky lg:top-4 lg:mt-0">
+            <div className="flex items-center justify-between">
+              <p className="eyebrow">画面预览 · 可直接拖</p>
+              <button className="btn-ghost text-xs disabled:opacity-50" disabled={locked || !!busy}
+                onClick={() => save({ text, body: { subtitleColor: capColor, subtitlePosY: capPosY } }, '画面')}>
+                {busy === '画面' ? '保存中…' : '保存画面'}
+              </button>
+            </div>
+            <StageCanvas
+              width={BODY_SIZE.width} height={BODY_SIZE.height}
+              text={text} captionColor={capColor} captionPosY={capPosY} fonts={fonts}
+              scene={scene} onScene={setScene} bg={bg} onBg={setBg}
+              sample={sample}
+              selected={sel} onSelect={setSel}
+              onPosY={(layer, v) => {
+                if (locked) return
+                switch (layer) {
+                  case 'caption': setCapPosY(v); break
+                  case 'bookTitle': setText({ ...text, bookTitlePosY: v }); break
+                  case 'flashTitle': setText({ ...text, flashTitlePosY: v }); break
+                  case 'openTitle': setText({ ...text, openTitlePosY: v }); break
+                  default: break // flashAuthor / watermark：无独立位置参数，不可拖，StageCanvas 不会触发
+                }
+              }}
+              onSize={(layer, v) => {
+                if (locked) return
+                switch (layer) {
+                  case 'caption': setText({ ...text, captionSizePx: v }); break
+                  case 'bookTitle': setText({ ...text, bookTitleScale: v }); break
+                  case 'flashTitle': setText({ ...text, flashTitleScale: v }); break
+                  case 'openTitle': setText({ ...text, openTitleScale: v }); break
+                  default: break // flashAuthor / watermark：无独立字号参数，不可拖，StageCanvas 不会触发
+                }
+              }}
+            />
+          </section>
+        )}
+      </div>
 
       {/* 固定操作条 */}
       <div className="fixed inset-x-0 bottom-0 border-t border-line bg-surface/95 p-3 backdrop-blur">

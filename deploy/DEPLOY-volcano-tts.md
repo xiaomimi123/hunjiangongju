@@ -30,7 +30,12 @@ scp dongfangwenlan.tar.gz root@101.37.151.152:~/
 
 # 服务器：清旧代码（保留 .env.prod 与 data/）再解压
 cd ~/dongfangwenlan
-find . -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
+# ★ 绝对路径 + 守卫：这条命令依赖当前目录时极其危险 —— 若 cd 没生效（分段粘贴、
+# cd 失败、换了终端），它会把当前目录清空。2026-08-31 就因此误删了 /root 下的
+# 全部内容（含 .env.prod、data/ 与所有备份）。务必整段一起执行，不要拆开。
+APP=/root/dongfangwenlan
+test -f "$APP/docker-compose.prod.yml" || { echo "❌ $APP 不像应用目录，已中止"; exit 1; }
+find "$APP" -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
 tar -xzf ~/dongfangwenlan.tar.gz -C ~/dongfangwenlan
 
 # 构建启动

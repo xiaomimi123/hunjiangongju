@@ -21,7 +21,12 @@ PUBLIC_BASE_URL=https://<你的域名，与 .env.prod 里 DOMAIN 相同>
 按 CUTOVER「日常更新」：先清旧代码再解压，再 `up -d --build`。
 ```bash
 cd ~/dongfangwenlan
-find . -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
+# ★ 绝对路径 + 守卫：这条命令依赖当前目录时极其危险 —— 若 cd 没生效（分段粘贴、
+# cd 失败、换了终端），它会把当前目录清空。2026-08-31 就因此误删了 /root 下的
+# 全部内容（含 .env.prod、data/ 与所有备份）。务必整段一起执行，不要拆开。
+APP=/root/dongfangwenlan
+test -f "$APP/docker-compose.prod.yml" || { echo "❌ $APP 不像应用目录，已中止"; exit 1; }
+find "$APP" -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
 tar -xzf ~/dongfangwenlan.tar.gz -C ~/dongfangwenlan
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 ```

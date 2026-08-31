@@ -43,7 +43,12 @@ $C exec -T postgres pg_dump -U mixcut mixcut > ~/backup_before_fonts_$(date +%F_
 ls -lh ~/backup_before_fonts_*.sql     # 确认非空
 
 # 2) 清旧代码再解压（★ tar 不删旧文件，见 CUTOVER 的坑）
-find . -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
+# ★ 绝对路径 + 守卫：这条命令依赖当前目录时极其危险 —— 若 cd 没生效（分段粘贴、
+# cd 失败、换了终端），它会把当前目录清空。2026-08-31 就因此误删了 /root 下的
+# 全部内容（含 .env.prod、data/ 与所有备份）。务必整段一起执行，不要拆开。
+APP=/root/dongfangwenlan
+test -f "$APP/docker-compose.prod.yml" || { echo "❌ $APP 不像应用目录，已中止"; exit 1; }
+find "$APP" -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
 tar -xzf ~/dongfangwenlan.tar.gz -C ~/dongfangwenlan
 
 # 3) 建自定义字体目录（上传接口自己也会建，提前建可避免权限意外）

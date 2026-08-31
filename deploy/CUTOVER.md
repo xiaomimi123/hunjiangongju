@@ -82,6 +82,14 @@ $C exec -T postgres psql -U mixcut -d mixcut -c "SELECT tablename FROM pg_tables
 
 ## 日常更新到新版本（切换上线后每次发版）
 
+> ⚠️⚠️ **2026-08-31 事故教训：下面那条 `find ... -exec rm -rf` 曾因 `cd` 未生效而在
+> `/root` 下执行，删掉了 `.env.prod`、`data/`（全部素材与成片）以及所有备份 sql。
+> 现已改为绝对路径 + 目录守卫，但仍请**整段一起执行、不要拆开粘贴**。
+> 恢复要点（万一再发生）：数据库在 Docker 命名卷 `dongfangwenlan_pgdata` 里不受影响；
+> `.env.prod` 的内容可以从**尚未重启**的容器里捞回来：
+> `docker inspect dongfangwenlan-web-1 --format '{{range .Config.Env}}{{println .}}{{end}}'`
+> ——所以出事后第一件事是**不要停容器**。
+
 > ⚠️ **关键：`tar -xzf` 只覆盖/新增压缩包里有的文件，不会删除已在新版本里删掉的旧文件。** 直接原地解压会残留旧代码（旧路由/旧模型引用），导致 `next build` 类型检查失败（如 `Property 'taskSegment' does not exist`）。所以更新时必须**先清旧代码再解压**。
 
 ```bash
@@ -91,7 +99,12 @@ scp dongfangwenlan.tar.gz root@101.37.151.152:~/
 
 # 服务器：清掉旧代码（只保留 .env.prod 与 data/，备份在 ~ 里不受影响）再解压
 cd ~/dongfangwenlan
-find . -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
+# ★ 绝对路径 + 守卫：这条命令依赖当前目录时极其危险 —— 若 cd 没生效（分段粘贴、
+# cd 失败、换了终端），它会把当前目录清空。2026-08-31 就因此误删了 /root 下的
+# 全部内容（含 .env.prod、data/ 与所有备份）。务必整段一起执行，不要拆开。
+APP=/root/dongfangwenlan
+test -f "$APP/docker-compose.prod.yml" || { echo "❌ $APP 不像应用目录，已中止"; exit 1; }
+find "$APP" -maxdepth 1 -mindepth 1 ! -name '.env.prod' ! -name 'data' -exec rm -rf {} +
 tar -xzf ~/dongfangwenlan.tar.gz -C ~/dongfangwenlan
 
 # 构建启动（migrate 服务自动应用新增数据库迁移）

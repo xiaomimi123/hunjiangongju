@@ -30,6 +30,9 @@
 // 两次，错注释比没注释更危险），这里改成准确说法。
 
 import { useEffect, useRef, useState } from 'react'
+// 子模块路径导入（非 '@mixcut/db' 包索引）：见 stageGeometry.ts 顶部注释，走包索引会把
+// Prisma/服务端代码带进客户端 bundle。本文件已经是 'use client'。
+import { DEFAULT_FONT_ID } from '@mixcut/db/src/booklist/fonts'
 import type { TextParams, FontOption } from './paramControls'
 import {
   computeStageLayers,
@@ -162,23 +165,60 @@ export function StageCanvas(props: {
   // noto-sc / noto-sc-bold 族名相同，直接用 family 注册会导致两个 FontFace
   // 用相同 (family, weight, style) 竞争 document.fonts，谁生效由异步 load()
   // 的完成顺序决定，非确定性。别名与 familyOf() 的取名逻辑必须保持一致。
+  //
+  // ★ 按需加载，不是一进页面就把内置库全拉一遍：内置 5 款合计约 54MB
+  // （霞鹜文楷单个 24.7MB），线上从服务器传到浏览器很慢，全量预加载会让运营
+  // 在字体真正可用之前有很长一段"点了没反应"的空窗。这里只加载当前三个字体槽
+  // （正文字幕 / 标题类 / 英文行）实际引用到的字体 id——槽位留空表示"跟随"
+  // （标题/英文跟正文，正文留空则跟内置默认 DEFAULT_FONT_ID），不产生独立请求。
+  // loadedIdsRef 记录"已经发起过加载"的 id，避免同一个 id 被换字体来回切换
+  // 时重复 new FontFace + document.fonts.add。
+  //
+  // ★ 特意不用「cancelled 标志位 + effect 清理函数」去挡卸载后的 setState——
+  // 这块画布常年挂载在 studio 页里不会真被卸载，而 React 18 开发环境的
+  // StrictMode 会挂载两次来暴露副作用问题：cancelled 标志位会在第一次挂载的
+  // 清理阶段就被置真，导致第一次挂载发起的 load() 永远无法把状态写回去；
+  // 而 loadedIdsRef 又已经记下这个 id，第二次挂载看到"已发起过"就直接跳过、
+  // 不再重新发起——两边一凑，字体状态卡死在"加载中"，界面上比原来的
+  // bug（一进页面全量下载 54MB）还隐蔽。document.fonts.add() 与
+  // setFontStatus() 在组件真的卸载后调用都是安全的空操作，不需要挡。
+  const loadedIdsRef = useRef<Set<string>>(new Set())
+  const [fontStatus, setFontStatus] = useState<Record<string, 'loading' | 'loaded' | 'error'>>({})
   useEffect(() => {
-    let cancelled = false
-    for (const f of fonts) {
-      const face = new FontFace(stageAlias(f.id), `url(/api/fonts/${f.id}/file)`)
+    const neededIds = new Set<string>()
+    neededIds.add(text.captionFontId || DEFAULT_FONT_ID)
+    if (text.titleFontId) neededIds.add(text.titleFontId)
+    if (text.enFontId) neededIds.add(text.enFontId)
+
+    for (const id of Array.from(neededIds)) {
+      if (loadedIdsRef.current.has(id)) continue
+      const entry = fonts.find((f) => f.id === id)
+      if (!entry) continue
+      loadedIdsRef.current.add(id)
+      setFontStatus((s) => ({ ...s, [id]: 'loading' }))
+      const face = new FontFace(stageAlias(id), `url(/api/fonts/${id}/file)`)
       face
         .load()
         .then((loaded) => {
-          if (!cancelled) document.fonts.add(loaded)
+          document.fonts.add(loaded)
+          setFontStatus((s) => ({ ...s, [id]: 'loaded' }))
         })
         .catch(() => {
-          // 加载失败就回退浏览器默认字体——不能让一个字体坏掉整块画布
+          // 加载失败就回退浏览器默认字体——不能让一个字体坏掉整块画布，
+          // 但状态要显式标成 error，不能和 loading 长一个样（那正是本次要修的坑）。
+          loadedIdsRef.current.delete(id) // 允许换个字体或重试时再次触发加载
+          setFontStatus((s) => ({ ...s, [id]: 'error' }))
         })
     }
-    return () => {
-      cancelled = true
-    }
-  }, [fonts])
+  }, [fonts, text.captionFontId, text.titleFontId, text.enFontId])
+
+  const pendingFontIds = Object.entries(fontStatus)
+    .filter(([, st]) => st === 'loading')
+    .map(([id]) => id)
+  const failedFontIds = Object.entries(fontStatus)
+    .filter(([, st]) => st === 'error')
+    .map(([id]) => id)
+  const fontLabel = (id: string) => fonts.find((f) => f.id === id)?.label ?? id
 
   const captionFamily = familyOf(fonts, text.captionFontId)
   const titleFamily = familyOf(fonts, text.titleFontId) ?? captionFamily
@@ -362,6 +402,24 @@ export function StageCanvas(props: {
           </label>
         </span>
       </div>
+
+      {/* 字体加载状态：加载中 / 失败必须显式区分，不能和"没反应"长一个样——
+          这正是本次要修的体验坑（用户反馈"点击之后没有变化"，其实是内置字体
+          单款最大 24.7MB，还在下载）。成功不额外展示，避免常驻噪音。 */}
+      {(pendingFontIds.length > 0 || failedFontIds.length > 0) && (
+        <div className="mb-2 space-y-1" data-testid="stage-font-status">
+          {pendingFontIds.length > 0 && (
+            <p className="text-xs text-ink3" data-testid="stage-font-loading">
+              字体加载中…（{pendingFontIds.map(fontLabel).join('、')}）
+            </p>
+          )}
+          {failedFontIds.length > 0 && (
+            <p className="text-xs text-red-500" data-testid="stage-font-error">
+              字体加载失败，预览用系统字体代替（{failedFontIds.map(fontLabel).join('、')}）
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 外层 boxRef：全宽测量容器，ResizeObserver 挂在它身上算 scale——
           它的宽度必须只由父级布局决定，不能反过来被 scale 影响，否则「按容器宽度算

@@ -22,6 +22,9 @@
   **包现在约 38MB**（字体目录未压缩 52MB，本版新增 4 个字体共约 46MB），
   上传耗时与服务器磁盘余量留意一下。
 - 无新增环境变量，`.env.prod` 不用改。
+- ⚠️ 本版登录 cookie 加了 `Secure` 标志（仅在 `NODE_ENV=production` 时生效）。
+  生产走 Caddy HTTPS，正常。但**若通过 `http://` 或裸 IP 访问后台，将无法登录**——
+  这是预期行为（防止令牌明文外泄），请始终用 HTTPS 域名访问。
 
 ## 2. 部署（可直接整段粘贴）
 
@@ -72,9 +75,9 @@ $C logs migrate | tail -20
 
 ## 3. 数据库迁移
 
-只有一条：`20260830161812_custom_font`，内容是单条 `CREATE TABLE "custom_fonts"`，
-**不 ALTER、不碰任何现有表、无索引重建**，在有数据的生产库上是秒级无锁。
+**两条**，都是纯新增、秒级、无锁，不碰任何现有数据：
 
+**① `20260830161812_custom_font`** —— 自定义字体上传用的新表：
 ```sql
 CREATE TABLE "custom_fonts" (
     "id" TEXT NOT NULL,
@@ -86,6 +89,15 @@ CREATE TABLE "custom_fonts" (
     CONSTRAINT "custom_fonts_pkey" PRIMARY KEY ("id")
 );
 ```
+
+**② `20260831100334_session_epoch`** —— 会话加固（改密码/禁用能踢掉已有登录）：
+```sql
+ALTER TABLE "users" ADD COLUMN "session_epoch" INTEGER NOT NULL DEFAULT 0;
+```
+PostgreSQL 11+ 加带默认值的列**不重写表**，`users` 再大也是秒级、不锁表。
+
+★ **上线不会把现有登录踢掉**：旧 token 没有 `epoch` 字段，代码按 `0` 处理，
+与这个列的默认值 `0` 对齐。已用生产镜像端到端实测确认（存量 token 仍返回 200）。
 
 compose 里 `web` 与 `worker` 都声明了
 `depends_on: migrate: { condition: service_completed_successfully }`

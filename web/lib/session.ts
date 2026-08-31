@@ -3,7 +3,7 @@ import { signToken } from './jwt'
 
 export async function setSessionCookie(
   res: NextResponse,
-  session: { userId: string; role: string }
+  session: { userId: string; role: string; epoch: number }
 ): Promise<NextResponse> {
   const token = await signToken(session)
   res.cookies.set('token', token, {

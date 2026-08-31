@@ -19,6 +19,8 @@ model User {
   // 积分（仅学员扣减）：1 条视频 = 1 积分；新账号默认送 30；
   // 用完由导师在后台充值（流水见 CreditLog），删任务不返还。
   credits      Int      @default(30)
+  /// 会话代次。改密码时 +1，使该用户所有已签发的 token 立即失效（JWT 无状态，靠比对这个数收口）
+  sessionEpoch Int      @default(0) @map("session_epoch")
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("users")

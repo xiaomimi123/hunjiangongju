@@ -43,6 +43,58 @@ beforeAll(() => {
   requireRoleMock.mockResolvedValue({ userId: 'stu1', role: 'student' })
 })
 
+describe('GET /api/generate/[id] —— segments 按角色收敛（captionBeats/bookTitle/bookAuthor 只供运营端画布用）', () => {
+  it('学员：segments 不含 captionBeats/bookTitle/bookAuthor，其余字段逐字段一致', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, {})
+    await prisma.generatedSegment.create({
+      data: {
+        generationTaskId: task.id,
+        seqNo: 1,
+        scriptText: '第一段口播',
+        imageUrl: 'http://example.com/1.png',
+        bookTitle: '活着',
+        bookAuthor: '余华',
+        captionBeats: [{ zh: '活', en: 'live' }],
+      },
+    })
+    requireRoleMock.mockResolvedValueOnce({ userId: 'stu1', role: 'student' })
+    const res = await GET(req(task.id), { params: { id: task.id } })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.segments).toEqual([{ seqNo: 1, scriptText: '第一段口播', imageUrl: 'http://example.com/1.png' }])
+  })
+
+  it('运营：segments 仍下发 captionBeats/bookTitle/bookAuthor（剪辑工作台画布依赖）', async () => {
+    const fw = await makeFramework()
+    const task = await makeTask(fw.id, {}, 'op1')
+    await prisma.generatedSegment.create({
+      data: {
+        generationTaskId: task.id,
+        seqNo: 1,
+        scriptText: '第一段口播',
+        imageUrl: 'http://example.com/1.png',
+        bookTitle: '活着',
+        bookAuthor: '余华',
+        captionBeats: [{ zh: '活', en: 'live' }],
+      },
+    })
+    requireRoleMock.mockResolvedValueOnce({ userId: 'op1', role: 'operator' })
+    const res = await GET(req(task.id), { params: { id: task.id } })
+    const json = await res.json()
+    expect(json.segments).toEqual([
+      {
+        seqNo: 1,
+        scriptText: '第一段口播',
+        imageUrl: 'http://example.com/1.png',
+        bookTitle: '活着',
+        bookAuthor: '余华',
+        captionBeats: [{ zh: '活', en: 'live' }],
+      },
+    ])
+  })
+})
+
 describe('GET /api/generate/[id]', () => {
   it('学员：variables 含运营字段(voiceId/assetSource/__bgmId) 时，只下发 books 的 title/author 投影，不下发整个 variables', async () => {
     const fw = await makeFramework()

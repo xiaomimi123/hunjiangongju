@@ -41,7 +41,12 @@ export const GET = handler(async (_req, { params }) => {
           .filter((b): b is { title: string; author?: string } => !!b && typeof b === 'object' && typeof (b as { title?: unknown }).title === 'string')
           .map((b) => ({ title: b.title, author: typeof b.author === 'string' ? b.author : '' }))
       : []
-    return NextResponse.json(books.length > 0 ? { ...rest, books } : rest)
+    // captionBeats/bookTitle/bookAuthor 只服务运营端剪辑工作台画布（/admin/generate/[id]/studio 的预览示例）。
+    // 学员端在生成期间每 3 秒轮询这条接口（web/app/(student)/works/[id]/page.tsx），
+    // 这三个字段对学员完全无用却要计入每次响应体积，因此在这里裁掉，不下发给学员。
+    // 数据仍从数据库读出（select 未按角色拆分，代码更简单），只是不发给学员，同样达到省流量的目的。
+    const segments = rest.segments.map(({ seqNo, scriptText, imageUrl }) => ({ seqNo, scriptText, imageUrl }))
+    return NextResponse.json(books.length > 0 ? { ...rest, segments, books } : { ...rest, segments })
   }
 
   return NextResponse.json(task)

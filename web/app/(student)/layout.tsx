@@ -36,7 +36,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       <main className="flex-1 px-5 pb-28 pt-12">{children}</main>
 
       {/* 底导航：5 格，中央「做片」凸起 */}
-      <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-lg items-end justify-around border-t border-line bg-white/94 px-1.5 pb-4 pt-2 backdrop-blur-lg safe-b">
+      {/* pb-4 与 globals.css 的 .safe-b（padding-bottom: env(safe-area-inset-bottom)）冲突：
+          safe-b 后声明会整个覆盖 pb-4，安卓等无底部安全区设备上导航贴底无留白。
+          改用同时含固定间距与安全区的合成值，不再叠加 safe-b。 */}
+      <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-lg items-end justify-around border-t border-line bg-white/94 px-1.5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-lg">
         <Link href="/" className="w-[60px] text-center">
           <TabIcon d={ICONS.home} active={isActive('/')} />
           <span className={`mt-0.5 block text-[11px] ${isActive('/') ? 'font-bold text-flame' : 'text-ink3'}`}>首页</span>

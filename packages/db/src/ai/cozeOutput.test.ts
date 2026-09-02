@@ -122,8 +122,6 @@ describe('parseCozeOutput', () => {
   })
 
   it('非法 JSON 字符串（扣子转义 bug）：正则捞出 URL，机器噪音不当文本返回', () => {
-    const raw = '{"输出":"junk","node_status":"{\\"输出\\":{}}","Output":"https://v.coze.cn/final.mp4?sign=x"}'
-      .replace('node_status\\":', 'node_status\\":\\"broken') // 保证整体 parse 不了
     const bad = '{"a":"{\\"x\\":1}",oops "Output":"https://v.coze.cn/final.mp4?sign=x and https://img.coze.cn/cover.png"}'
     expect(() => JSON.parse(bad)).toThrow()
     const items = parseCozeOutput(bad)
@@ -131,6 +129,17 @@ describe('parseCozeOutput', () => {
       { kind: 'video', url: 'https://v.coze.cn/final.mp4?sign=x' },
       { kind: 'image', url: 'https://img.coze.cn/cover.png' },
     ])
-    void raw
+  })
+
+  it('非法 JSON 字符串正则兜底：URL 尾部粘连的标点被裁掉', () => {
+    // 正则贪婪匹配 URL 时容易把紧跟其后的中英文标点也吞进来（这里是右括号+中文逗号，
+    // 以及句尾的右方括号+句号），裁剪后 URL 才是能打开的干净地址。
+    const bad = '{"a":"{\\"x\\":1}",oops "Output":"(见 https://v.coze.cn/final.mp4) 封面 https://img.coze.cn/cover.png]。"}'
+    expect(() => JSON.parse(bad)).toThrow()
+    const items = parseCozeOutput(bad)
+    expect(items).toEqual([
+      { kind: 'video', url: 'https://v.coze.cn/final.mp4' },
+      { kind: 'image', url: 'https://img.coze.cn/cover.png' },
+    ])
   })
 })

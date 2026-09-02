@@ -76,6 +76,41 @@ describe('cozeRunWorkflow（异步提交 + 轮询）', () => {
     await expect(cozeRunWorkflow('wf-1', {}, { fetchImpl, timeoutMs: 30, pollIntervalMs: 1 })).rejects.toThrow('超时')
   })
 
+  it('Success 但 output 为空 → 抛错（不能让学员既扣分又拿空结果）', async () => {
+    mockGetCapabilityConfig.mockResolvedValue(okCfg)
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(submitRes())
+      .mockResolvedValueOnce(historyRes('Success', ''))
+    await expect(cozeRunWorkflow('wf-1', {}, { fetchImpl, pollIntervalMs: 1 })).rejects.toThrow('未取到输出内容')
+  })
+
+  it('非法 JSON 的 Success 响应（真实形状：output 后紧跟 "usage"）：正则兜底也能提出 output', async () => {
+    mockGetCapabilityConfig.mockResolvedValue(okCfg)
+    // 模拟实测的双重转义 bug：output 内部的引号被错误转义成 \\"，导致整体 JSON.parse 必炸，
+    // 只能靠 parseRunHistoryText 的正则兜底提取——终结符是 output 后面紧跟的 "usage" 键。
+    const badJsonText =
+      '{"code":0,"data":[{"execute_status":"Success","output":"{\\"node_status\\":\\"{\\\\"输出\\\\":{}}\\",\\"Output\\":\\"https://v.example/ok.mp4\\"}","usage":{"tokens":1}}]}'
+    expect(() => JSON.parse(badJsonText)).toThrow()
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(submitRes())
+      .mockResolvedValueOnce(new Response(badJsonText, { status: 200 }))
+    const { raw } = await cozeRunWorkflow('wf-1', {}, { fetchImpl, pollIntervalMs: 1 })
+    expect(typeof raw).toBe('string')
+    expect(raw as string).toContain('v.example/ok.mp4')
+  })
+
+  it('未知状态（Queued）不当终态，继续轮询直到 Success', async () => {
+    mockGetCapabilityConfig.mockResolvedValue(okCfg)
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(submitRes())
+      .mockResolvedValueOnce(historyRes('Queued'))
+      .mockResolvedValueOnce(historyRes('Queued'))
+      .mockResolvedValueOnce(historyRes('Success', ',"output":"done"'))
+    const { raw } = await cozeRunWorkflow('wf-1', {}, { fetchImpl, pollIntervalMs: 1 })
+    expect(raw).toBe('done')
+    expect(fetchImpl).toHaveBeenCalledTimes(4) // 提交 1 次 + 轮询 3 次（Queued/Queued/Success）
+  })
+
   it('轮询响应 401 → 立刻抛鉴权失败，不再重试', async () => {
     mockGetCapabilityConfig.mockResolvedValue(okCfg)
     const fetchImpl = vi.fn()

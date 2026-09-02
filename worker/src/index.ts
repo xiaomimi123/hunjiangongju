@@ -10,13 +10,16 @@ startGenWorker()
  *
  * 并发 2：扣子跑工作流全靠网络等待（不吃本机 CPU），但受扣子那边的并发/QPS 限制，
  * 2 是稳妥起点，跟 gen worker 网络队列的并发判断依据一致。
- * 锁时长 10 分钟：与 cozeRunWorkflow 的默认超时对齐，避免任务还没跑完就被判 stalled 重复消费。
+ * 锁时长 35 分钟：cozeRunWorkflow 的默认总超时已经是 30 分钟（视频类工作流实测可跑超
+ * 10 分钟），锁时长必须盖过它才不会出现任务还没跑完就被判 stalled、被第二个 worker
+ * 抢着重复消费——重复消费不会重复扣分/退分（状态闸+退分闸兜底），但会白白重跑一次
+ * 扣子工作流、烧一份扣子额度，留 5 分钟余量。
  */
 function startCozeWorker(): Worker {
   const w = new Worker(
     'coze-run',
     (job) => processCozeRun(job.data.runId),
-    { connection: redisConnection, concurrency: 2, lockDuration: 600_000 },
+    { connection: redisConnection, concurrency: 2, lockDuration: 35 * 60_000 },
   )
   w.on('completed', (j) => console.log(`[coze] run ${j.data.runId} done`))
   w.on('failed', (j, err) => {

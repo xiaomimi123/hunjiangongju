@@ -92,7 +92,10 @@ export function parseCozeOutput(raw: unknown): CozeOutputItem[] {
       if (urls && urls.length > 0) {
         const out: CozeOutputItem[] = []
         const seen = new Set<string>()
-        for (const u of urls) {
+        for (const uRaw of urls) {
+          // 正则贪婪匹配容易把 URL 后面紧跟的中文/英文标点也吞进来（例如 "...mp4）" 或
+          // "...png，"），裁掉尾部这类粘连标点，避免生成的链接打不开。
+          const u = uRaw.replace(/[),.，。}\]]+$/, '')
           const item = classifyString(u)
           if (item && item.kind !== 'text' && !seen.has(item.url)) { seen.add(item.url); out.push(item) }
         }

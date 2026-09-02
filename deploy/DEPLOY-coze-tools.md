@@ -208,6 +208,9 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod logs worker | gre
 - **重复投递不是隐患**：BullMQ 默认 `attempts=1`，不会自动重试；worker 端另有终态状态闸 + refunded
   幂等闸（`worker/src/coze/run.ts:114-138`），即使发生重复投递（stalled 重发、手工重入队）也不会
   重复扣分/重复退分，本条不是待修事项，此处仅作说明。
+  但要注意：重复扣分/退分不会发生，不代表重复投递毫无代价——stalled 重投会**重复执行一次扣子
+  工作流**（烧一份扣子额度，且短时间内两个 execute 并行跑同一个 run），部署/重启 worker 尽量
+  避开学员运行高峰，减少触发 stalled 重投的窗口。
 - **上传文件不自动清理**：学员上传的图片在 `data/coze-uploads/` 逗留。
   run 完成后没有显式删除逻辑，运维需定期手动清理（如 `find data/coze-uploads/ -mtime +7 -delete`）。
 

@@ -95,12 +95,27 @@ function extFromContentType(ct?: string): string | null {
 async function transferOutputs(items: CozeOutputItem[], runId: string, deps: CozeRunDeps): Promise<CozeStoredOutputItem[]> {
   const dir = path.join(DATA_DIR, 'coze', runId)
   const out: CozeStoredOutputItem[] = []
+  let downloadAttempts = 0
+  let downloadFailures = 0
+  let lastError = ''
   for (const item of items) {
     if (item.kind === 'text') {
       out.push(item)
       continue
     }
-    const result = await deps.download(item.url)
+    downloadAttempts += 1
+    let result: CozeDownloadResult
+    try {
+      result = await deps.download(item.url)
+    } catch (e) {
+      // 单个 URL 下载失败（网络抖动/对端过期）不该把一次本来成功的扣子运行整体判 FAILED——
+      // 该项降级：保留原始（扣子远程）url 让学员至少还能点开看，并注明下载失败。
+      // 只有全部项都下载失败（下面的兜底判断）才判定整个 run 失败。
+      downloadFailures += 1
+      lastError = e instanceof Error ? e.message : String(e)
+      out.push({ ...item, note: `文件下载失败，保留原始地址（可能已过期）: ${lastError.slice(0, 200)}` })
+      continue
+    }
     if ('tooLarge' in result) {
       out.push({ ...item, note: `文件超过 ${MAX_DOWNLOAD_BYTES / 1024 / 1024}MB 转存上限，未转存（仍是扣子原始地址，可能会过期）` })
       continue
@@ -110,6 +125,11 @@ async function transferOutputs(items: CozeOutputItem[], runId: string, deps: Coz
     const filename = `${randomUUID()}${ext}`
     await fs.writeFile(path.join(dir, filename), result.buf)
     out.push({ ...item, url: `/api/files/coze/${runId}/${filename}` })
+  }
+  // 有下载动作但全部失败：这次运行对学员来说等同于什么都没拿到，走整体失败退分，
+  // 而不是把一堆「已过期」的降级项落库了事。
+  if (downloadAttempts > 0 && downloadFailures === downloadAttempts) {
+    throw new Error(lastError || '扣子输出文件全部下载失败')
   }
   return out
 }
@@ -207,7 +227,25 @@ export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultD
     }
 
     const { raw } = await deps.runWorkflow(tool.workflowId, parameters)
-    const outputItems = await transferOutputs(parseCozeOutput(raw), runId, deps)
+    const parsedOutputItems = parseCozeOutput(raw)
+
+    let outputItems: CozeStoredOutputItem[]
+    if (parsedOutputItems.length > 0) {
+      outputItems = await transferOutputs(parsedOutputItems, runId, deps)
+    } else {
+      // 落库前的第二道闸：parseCozeOutput 一个能展示的项都没解析出来。正常情况下
+      // coze.ts 里 Success 但 output 为空已经直接抛错，走不到这里——这里是防御性兜底，
+      // 防止未来 parseCozeOutput 的识别规则收紧后又漏出这种「有 raw 但解析不出结构化项」的缝隙。
+      const rawText = typeof raw === 'string' ? raw : raw != null ? JSON.stringify(raw) : ''
+      if (rawText.trim()) {
+        // raw 非空但解析不出结构化展示项：把原文截断兜底展示，学员至少拿到原始输出，
+        // 不是既扣了积分又两手空空。
+        outputItems = [{ kind: 'text', text: rawText.slice(0, 2000) }]
+      } else {
+        await failRun(runId, run.userId, run.creditsCost, '扣子返回成功但无输出，积分已退回')
+        return
+      }
+    }
 
     // 状态闸：只有仍是本次抢到的 RUNNING 才允许写 SUCCEEDED——若这期间状态已被
     // 别的路径改动（理论上不该发生，但闸不多余），也不强行覆盖。

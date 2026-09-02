@@ -54,14 +54,21 @@ async function parseCozeEnvelope(res: Response, action: string): Promise<CozeEnv
 type RunHistory = { status: string; output?: string; errorMsg?: string }
 
 // 宽松反转义：把一层 JSON 字符串转义还原成字符。用于扣子返回非法 JSON 时的
-// 正则兜底路径——顺序先长后短（\\uXXXX → 单字符转义 → \\" → \\\\），
+// 正则兜底路径——单趟扫描，每个 `\X` 只被替换一次，不会出现「先替换出的字符又被
+// 后续规则二次替换」的错序问题（例如分步替换时 \\\\ 会被前面的 \\" 规则误吃半截）。
 // 对扣子的错误转义（\\" 实际当引号用）也能得到可读文本。best-effort，不保证可 JSON.parse。
 function looseUnescape(s: string): string {
-  return s
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, '\\')
+  return s.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (_, g: string) => {
+    if (g[0] === 'u') return String.fromCharCode(parseInt(g.slice(1), 16))
+    switch (g) {
+      case 'n': return '\n'
+      case 't': return '\t'
+      case 'r': return '\r'
+      case '"': return '"'
+      case '\\': return '\\'
+      default: return g // 未知转义：原样保留转义后的字符，不猜
+    }
+  })
 }
 
 // 解析 run_histories 响应文本。先按合法 JSON 走；失败（扣子转义 bug）退化为正则提取。
@@ -140,8 +147,17 @@ export async function cozeRunWorkflow(
       throw new Error(`扣子鉴权失败（Token 无效或无权限）: ${text.slice(0, 200)}`)
     }
     const h = text ? parseRunHistoryText(text) : null
-    if (h && h.status !== 'Running') {
-      if (h.status === 'Success') return { raw: h.output ?? '' }
+    // 终态判断改白名单：只认扣子实测出现过的两个终态字面量（Success/Fail）。
+    // 其余任何状态——包括 Running、Queued 等已知中间态，以及未来可能出现的未知状态——
+    // 都继续轮询，靠外层总超时兜底，不因为看到一个陌生字符串就误判成功/失败。
+    if (h && h.status === 'Success') {
+      // Success 但 output 为空/undefined：说明这次轮询响应本身有问题（扣子服务端异常
+      // 返回了空壳成功），不能把「空结果」当正常输出返回给上层——上层会据此判定运行成功
+      // 并落库展示，学员会既被扣分又拿到空结果。这里直接抛错，让 worker 走 failRun 退分。
+      if (!h.output) throw new Error('扣子返回成功但未取到输出内容')
+      return { raw: h.output }
+    }
+    if (h && h.status === 'Fail') {
       throw new Error(`扣子工作流运行失败（${h.status}）: ${(h.errorMsg ?? h.output ?? '').slice(0, 300) || '无错误详情'}`)
     }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))

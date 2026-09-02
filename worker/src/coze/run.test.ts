@@ -193,6 +193,75 @@ describe('processCozeRun', () => {
     expect(refreshedUser.credits).toBe(30) // 没有被迟到的失败退分——本来就没失败过
   })
 
+  it('outputItems 解析为空且 raw 也空 → FAILED + 退分（防御性二道闸）', async () => {
+    const user = await makeUser(30)
+    await prisma.user.update({ where: { id: user.id }, data: { credits: 26 } })
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id, { creditsCost: 4 })
+
+    const deps = fakeDeps({ runWorkflow: vi.fn(async () => ({ raw: '' })) })
+    await processCozeRun(run.id, deps)
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('FAILED')
+    expect(found.errorMsg).toBe('扣子返回成功但无输出，积分已退回')
+    expect(found.refunded).toBe(true)
+
+    const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser.credits).toBe(30)
+  })
+
+  it('raw 非空但解析不出结构化展示项 → 截断原文当 text 项兜底展示', async () => {
+    const user = await makeUser()
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id)
+
+    // 构造一个 parseCozeOutput 解析不出任何 image/video/file/text 项的 raw：
+    // 只包含数字/布尔/null，全部被 parseCozeOutput 忽略，但 raw 字符串本身非空。
+    const deps = fakeDeps({ runWorkflow: vi.fn(async () => ({ raw: JSON.stringify({ a: 1, b: true, c: null }) })) })
+    await processCozeRun(run.id, deps)
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('SUCCEEDED')
+    const items = found.outputItems as { kind: string; text?: string }[]
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('text')
+    expect(items[0].text).toBe(JSON.stringify({ a: 1, b: true, c: null }))
+  })
+
+  it('部分项下载失败：该项降级保留原始 url 并注明，其余项正常转存，run 仍 SUCCEEDED（不退分）', async () => {
+    const user = await makeUser()
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id)
+
+    const deps = fakeDeps({
+      runWorkflow: vi.fn(async () => ({
+        raw: JSON.stringify({
+          ok: 'https://coze.example.com/out/ok.jpg',
+          bad: 'https://coze.example.com/out/bad.mp4',
+        }),
+      })),
+      download: vi.fn(async (url: string) => {
+        if (url.includes('bad')) throw new Error('网络超时')
+        return { buf: Buffer.from('ok-bytes'), contentType: 'image/jpeg' }
+      }),
+    })
+
+    await processCozeRun(run.id, deps)
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('SUCCEEDED')
+    const items = found.outputItems as { kind: string; url: string; note?: string }[]
+    const ok = items.find((i) => i.kind === 'image')
+    const bad = items.find((i) => i.kind === 'video')
+    expect(ok?.url.startsWith(`/api/files/coze/${run.id}/`)).toBe(true)
+    expect(bad?.url).toBe('https://coze.example.com/out/bad.mp4') // 降级保留原始地址
+    expect(bad?.note).toContain('下载失败')
+
+    const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser.credits).toBe(30) // 部分失败不退分——run 整体是成功的
+  })
+
   it('download 抛错（非 tooLarge，如网络失败）→ 整 run FAILED + 退分', async () => {
     const user = await makeUser(30)
     await prisma.user.update({ where: { id: user.id }, data: { credits: 26 } })

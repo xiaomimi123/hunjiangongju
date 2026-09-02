@@ -240,8 +240,15 @@ export default function CozeToolsPage() {
       )
       setForm((f) => {
         const existingNames = new Set(f.inputs.map((i) => i.name))
+        // 纵深防御：后端已按 name 去重，这里再兜一道——万一某次响应里仍带了同名字段，
+        // 批内也只取第一条，不往 inputs 里塞出重名行（重名行会踩 validateInputs 的查重）
+        const seenInBatch = new Set<string>()
         const added: FormInput[] = r.fields
-          .filter((field) => !existingNames.has(field.name))
+          .filter((field) => {
+            if (existingNames.has(field.name) || seenInBatch.has(field.name)) return false
+            seenInBatch.add(field.name)
+            return true
+          })
           .map((field) => ({
             name: field.name,
             label: field.name,

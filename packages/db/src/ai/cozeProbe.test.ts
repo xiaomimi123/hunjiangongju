@@ -95,4 +95,34 @@ describe('cozeProbeWorkflowParams', () => {
     await expect(cozeProbeWorkflowParams('wf-1', { fetchImpl })).rejects.toThrow('扣子未配置')
     expect(fetchImpl).not.toHaveBeenCalled()
   })
+
+  it('非 2xx 非鉴权错误（网关 502 返回 HTML）→ 抛中文错误，不误判为已收敛启动', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('<html>502 Bad Gateway</html>', { status: 502 }))
+    await expect(cozeProbeWorkflowParams('wf-1', { fetchImpl })).rejects.toThrow('502')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('同一参数名连续两次 Missing parameter → 不重复计入 fields，直接收敛并在 error 里说明', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(sseRes({ error_message: 'Missing parameter: KT_video', error_code: 5000 }))
+      .mockResolvedValueOnce(sseRes({ error_message: 'Missing parameter: KT_video', error_code: 5000 }))
+
+    const result = await cozeProbeWorkflowParams('wf-1', { fetchImpl })
+
+    expect(result.started).toBe(false)
+    expect(result.fields).toEqual([{ name: 'KT_video', type: 'text', required: true }])
+    expect(result.error).toContain('KT_video')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('can\'t convert to file 报错但 fields 为空（无法定位对应字段）→ 收敛，error 说明无法定位', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      sseRes({ error_message: "The request parameter is illegal, see: value '测试' can't convert to file", error_code: 5000 }),
+    )
+    const result = await cozeProbeWorkflowParams('wf-1', { fetchImpl })
+    expect(result.started).toBe(false)
+    expect(result.fields).toEqual([])
+    expect(result.error).toContain('无法定位')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
 })

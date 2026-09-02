@@ -4,15 +4,21 @@
 //
 // 循环逻辑（实测行为，2026-09-03 spike，真实调用 coze.cn API 得到）：
 //   POST {baseUrl}/v1/workflow/stream_run，body { workflow_id, parameters }
-//   响应是 SSE 文本，只看首个 `data: {...}` 行的 JSON：
+//   响应是 SSE 文本，只看首个事件（按 \n\n 分段，事件内多条 data: 续行拼接后）的 JSON：
 //     - error_message 以 "Missing parameter: " 开头
-//       → 记该字段为 { type:'text', required:true }，参数表里补上 "探测" 继续下一轮
+//       → 记该字段为 { type:'text', required:true }，参数表里补上 "探测" 继续下一轮；
+//         若这个字段名已经探到过（同名重复缺失，说明探测没有进展，再跑下去也是空转）
+//         → 直接收敛，started=false，error 里说明是哪个字段反复缺失
 //     - error_message 含 "can't convert to file"
-//       → 上一轮刚探到的字段（必是最后一个）改判为 { type:'image' }，
+//       → 上一轮刚补的字段（fields 里最后一个）改判为 { type:'image' }，
 //         参数值换成 JSON.stringify({file_id:'0'})（file_id 是否有效不重要，
-//         类型校验发生在文件下载之前）继续下一轮
+//         类型校验发生在文件下载之前）继续下一轮；
+//         若此时 fields 是空的（没有「上一轮补的字段」可改），说明拿不到这条报错
+//         对应哪个参数名 → 直接收敛，started=false，error 里说明无法定位
 //     - 其它情形（无 error_message，或 error_message 不匹配上面两种模式）
 //       → 参数校验已经全过，工作流真的启动了：收敛，started=true
+//   HTTP 非 2xx 且不是鉴权失败（例如网关 502 返回一坨 HTML）
+//       → 直接抛中文错误，不当成「无 error_message」误判为已收敛
 //   鉴权失败（HTTP 401，或响应体 code 属于 4100/4101，或 error_message 含 authentication）
 //       → 直接抛中文错误，不重试、不计入轮数
 //   跑满 maxRounds（默认 12）仍未收敛
@@ -48,22 +54,29 @@ function isAbortLike(e: unknown): boolean {
   return name === 'TimeoutError' || name === 'AbortError'
 }
 
-// 从 SSE 文本里取首个 `data: ` 行的 JSON。取不到（例如空流、格式异常）返回 null，
-// 按“无 error_message”处理——收敛为已启动，因为这本来就代表校验没有再报错。
+// 从 SSE 文本里取首个事件的 JSON。SSE 规范里一个事件用空行（\n\n）分隔，事件内允许
+// 出现多条 data: 续行、拼接后才是完整 payload（本项目实测扣子只发单行，但按规范兜底）。
+// 返回 null 有两种不同原因，调用方靠“event 里有没有 error_message”区分：
+//   1) 整段文本压根没有任何 data: 行（空流/非 SSE 格式）——上层当作“无 error_message”，
+//      即校验已过、工作流已启动；
+//   2) data: 行拼出来的 payload 不是合法 JSON——同样退化为“无 error_message”处理，
+//      这里不做二次区分是因为两种情况对调用方的处理路径完全一样。
 function parseFirstSseData(text: string): Record<string, unknown> | null {
-  for (const line of text.split('\n')) {
+  const firstEvent = text.split(/\n\n/)[0] ?? ''
+  const dataLines: string[] = []
+  for (const line of firstEvent.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed.startsWith('data:')) continue
-    const payload = trimmed.slice('data:'.length).trim()
-    if (!payload) continue
-    try {
-      const json = JSON.parse(payload)
-      return json && typeof json === 'object' ? (json as Record<string, unknown>) : null
-    } catch {
-      return null
-    }
+    dataLines.push(trimmed.slice('data:'.length).trim())
   }
-  return null
+  if (dataLines.length === 0) return null
+  const payload = dataLines.join('')
+  try {
+    const json = JSON.parse(payload)
+    return json && typeof json === 'object' ? (json as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
 }
 
 function isAuthError(status: number, event: Record<string, unknown> | null): boolean {
@@ -87,6 +100,7 @@ export async function cozeProbeWorkflowParams(
   const url = `${baseUrl}/v1/workflow/stream_run`
 
   const fields: CozeProbedField[] = []
+  const seenNames = new Set<string>()
   const parameters: Record<string, unknown> = {}
 
   for (let round = 0; round < maxRounds; round++) {
@@ -112,10 +126,22 @@ export async function cozeProbeWorkflowParams(
       throw new Error(`扣子鉴权失败（Token 无效或无权限）: ${msg}`)
     }
 
+    // HTTP 非 2xx 且不是鉴权失败：例如网关 502 返回一坨 HTML，text 里自然拿不到
+    // error_message，若不在这里拦截会被后面的“无 error_message”分支误判为已收敛启动
+    if (!res.ok) {
+      throw new Error(`扣子探测参数请求失败 ${res.status}: ${text.slice(0, 300)}`)
+    }
+
     const errorMessage = typeof event?.error_message === 'string' ? event.error_message : undefined
 
     if (errorMessage && errorMessage.startsWith('Missing parameter: ')) {
       const name = errorMessage.slice('Missing parameter: '.length).trim()
+      if (seenNames.has(name)) {
+        // 同一个字段名反复被判缺失：探测没有进展，再跑下去只是空转到 maxRounds，
+        // 直接收敛并说明原因，比装作“还在探测”更诚实
+        return { fields, started: false, error: `字段 ${name} 反复缺失，无法收敛` }
+      }
+      seenNames.add(name)
       fields.push({ name, type: 'text', required: true })
       parameters[name] = '探测'
       continue
@@ -123,10 +149,14 @@ export async function cozeProbeWorkflowParams(
 
     if (errorMessage && errorMessage.includes("can't convert to file")) {
       const last = fields[fields.length - 1]
-      if (last) {
-        last.type = 'image'
-        parameters[last.name] = JSON.stringify({ file_id: '0' })
+      if (!last) {
+        // 拿到“转文件失败”的报错，但 fields 里还没有任何已探到的字段可以归因
+        // （理论上不该发生——这条报错本该跟在某次 Missing parameter 之后），
+        // 强行猜一个字段名可能张冠李戴，不如诚实收敛
+        return { fields, started: false, error: '收到文件类型转换报错，但无法定位对应的参数字段' }
       }
+      last.type = 'image'
+      parameters[last.name] = JSON.stringify({ file_id: '0' })
       continue
     }
 

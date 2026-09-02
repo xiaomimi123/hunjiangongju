@@ -10,7 +10,7 @@
 | 扣子工具箱（后台导入 + 学员端广场） | 无。纯新增功能，不涉及现有的混剪流水线、积分体系改动 |
 | Worker 新增 coze-run 队列 | 无。独立队列（并发 2），与现有视频渲染队列分离，不争抢资源 |
 
-**已实测零回归证据**：部署前后对存量框架的视频生成任务做冒烟，进度、成片、积分扣减均正常，无变化。
+纯新增功能，不触碰渲染链路代码（diff 可查）。
 
 ## 1. 前置
 
@@ -104,7 +104,6 @@ PostgreSQL 11+ 建表无锁，迁移秒级完成。compose 里 `web` 与 `worker
 - `data/coze/`：扣子 API 返回的输出文件（图片/视频）的转存目录。扣子的 URL 会过期，
   必须在本站落盘并通过 `/api/files/coze/...` 访问。
 - `data/coze-uploads/`：学员上传的图片临时目录（jpg/png/webp，≤10MB）。
-  run 完成后 worker 自动清理对应的上传文件。
 
 ## 5. 上线后配置步骤
 
@@ -166,12 +165,12 @@ PostgreSQL 11+ 建表无锁，迁移秒级完成。compose 里 `web` 与 `worker
 
 ### 学员提交时得到中文报错
 
-这是预期行为。常见错误：
+这是预期行为。常见错误（逐字对照代码，见 `packages/db/src/ai/coze.ts` 与 `worker/src/coze/run.ts`）：
 
-- **「扣子工作流配置缺失」**：Token 未在后台「模型配置」启用。需运营补配 Token → 点启用。
-- **「上传文件转存失败」**：图片上传时本站磁盘写入异常。检查 `data/coze-uploads/` 权限与磁盘空间。
-- **「工作流执行失败：…」**：扣子那边工作流出错（如输入参数不对、第三方 API 调用失败等）。
-  看后台「扣子工具 → 运行记录」的「原始返回」列查看扣子完整错误信息。
+- **「扣子未配置，请在模型配置里填 Token」**：Token 未在后台「模型配置」启用。需运营补配 Token → 点启用。
+- **「图片参数「字段名」路径不合法：…」**：提交里的图片相对路径没通过 worker 端的二次校验（正常提交走不到这条，多半是被篡改的请求）。
+- **「扣子运行工作流失败: …」**：扣子那边工作流出错（如输入参数不对、第三方 API 调用失败等）。
+  原始返回暂无界面可看，需要时查库 `coze_tool_runs.output_raw`。
 
 ### Worker 日志查看
 
@@ -181,7 +180,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod logs worker | gre
 ```
 
 关键关键词：
-- `[coze-run]`：标记的是 coze-run 队列相关日志
+- `[coze]`：标记的是 coze-run 队列相关日志
 - `QUEUED → RUNNING`：表示任务入队并开始处理
 - `SUCCEEDED`：扣子返回成功结果
 - `FAILED`：扣子返回失败，应自动退积分
@@ -189,7 +188,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod logs worker | gre
 ### 积分扣减与退回异常
 
 - **提交成功但没扣分**：数据库 `users` 表的 `credits` 列应该改变。检查 `coze_tool_runs` 表该条 run 的 `status` 是否 SUCCEEDED，`credits_cost` 字段。
-- **成功但积分反复改变**：Worker 重试逻辑。BullMQ 默认重试 3 次，若因网络毛刺重复进库，可能扣多次（目前代码未对此做幂等保护——是已知项，下版修）。查 `coze_tool_runs` 是否存在同 user + 同时间的多条 SUCCEEDED run。
+- **成功但积分反复改变**：不应该发生。BullMQ 队列默认 `attempts=1`，不会自动重试；即便同一 run 被重复投递（如手工误操作），worker 有终态状态闸 + refunded 幂等闸（`worker/src/coze/run.ts:114-138`），重复处理是安全的，不会重复扣分或重复退分。若真的看到同一 run 被重复扣分，说明状态闸失效，是要立即当 bug 排查的问题，不是已知软件债。
 - **积分未退回**：`coze_tool_runs` 表该 run 的 `status` 是 FAILED 但 `refunded` 仍为 false。
   检查 worker 日志是否有退积分阶段的错误。
 
@@ -197,21 +196,23 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod logs worker | gre
 
 - **参数拉取接口未真实验证**：spike 排期在设计之后，实施第一步用真实 Token 验证。
   目前设计已按「拉不到可手动配」兜底，不被堵死。
-- **积分扣减无幂等保护**：Worker 重试时可能重复扣积分（虽然自动退回会复消）。
-  是软件债，待下版补。学员可在「我的记录」里查证。
+- **重复投递不是隐患**：BullMQ 默认 `attempts=1`，不会自动重试；worker 端另有终态状态闸 + refunded
+  幂等闸（`worker/src/coze/run.ts:114-138`），即使发生重复投递（stalled 重发、手工重入队）也不会
+  重复扣分/重复退分，本条不是待修事项，此处仅作说明。
 - **上传文件不自动清理**：学员上传的图片在 `data/coze-uploads/` 逗留。
   run 完成后没有显式删除逻辑，运维需定期手动清理（如 `find data/coze-uploads/ -mtime +7 -delete`）。
 
 ## 10. 常见问题
 
 - **学员上传的图片太大（>10MB）会怎样？**
-  前端校验拒收，弹提示「文件过大」。不会建 run，积分无扣减。
+  服务端校验拒收（`web/app/api/tools/upload/route.ts`），返回 400「图片不能超过 10MB」。不会建 run，积分无扣减。
 
 - **扣子工作流返回我没见过的数据格式会怎样？**
-  前端识别不了的数据格式会以「原始 JSON 折叠展示」呈现给学员，不会报错。
+  识别不出任何展示项时，结果页显示「本次运行没有可展示的结果」，不会报错。
 
 - **同一学员同时提交两个请求会怎样？**
   都会入队扣积分。无全局并发锁，两条 run 会并行执行。
 
 - **扣子平台维护无法服务会怎样？**
-  学员提交后 worker 会一直重试（最多 3 次），最终失败并自动退积分。学员在「我的记录」里能看到运行失败的状态与错误信息。
+  学员提交后 worker 调用扣子失败，run 直接落 FAILED 并自动退积分（BullMQ 默认 `attempts=1`，
+  不会自动重试）。学员在「我的记录」里能看到运行失败的状态与错误信息。

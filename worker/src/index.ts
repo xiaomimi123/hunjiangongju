@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq'
 import { redisConnection } from '@mixcut/db'
 import { startGenWorker } from './gen'
-import { processCozeRun } from './coze/run'
+import { processCozeRun, recoverFailedCozeRun } from './coze/run'
 
 startGenWorker()
 
@@ -19,7 +19,19 @@ function startCozeWorker(): Worker {
     { connection: redisConnection, concurrency: 2, lockDuration: 600_000 },
   )
   w.on('completed', (j) => console.log(`[coze] run ${j.data.runId} done`))
-  w.on('failed', (j, err) => console.error(`[coze] run ${j?.data?.runId} failed: ${err.message}`))
+  w.on('failed', (j, err) => {
+    console.error(`[coze] run ${j?.data?.runId} failed: ${err.message}`)
+    // 兜底：processCozeRun 内部已经把绝大多数失败收口到 failRun（状态 FAILED + 幂等退分），
+    // 但 failRun 自身也可能抛错（DB 抖动、用户已被删除等），事务回滚后 run 会永远停在
+    // RUNNING、钱回不来——这里补一次，failRun 自带状态闸+退分闸，重复调用是安全的。
+    // 与 gen worker 的 attach() 在 'failed' 里落终态的做法对齐。
+    const runId = (j?.data as { runId?: string } | undefined)?.runId
+    if (runId) {
+      recoverFailedCozeRun(runId, `任务处理异常: ${err.message}`).catch((e) => {
+        console.error(`[coze] run ${runId} 兜底 failRun 也失败: ${(e as Error).message}`)
+      })
+    }
+  })
   return w
 }
 

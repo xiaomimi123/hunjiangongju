@@ -17,7 +17,7 @@ const dataDir = vi.hoisted(() => {
 })
 
 import { prisma } from '@mixcut/db'
-import { processCozeRun, type CozeRunDeps } from './run'
+import { processCozeRun, recoverFailedCozeRun, type CozeRunDeps } from './run'
 
 const userIds: string[] = []
 const toolIds: string[] = []
@@ -156,15 +156,87 @@ describe('processCozeRun', () => {
     const tool = await makeTool([])
     const run = await makeRun(tool.id, user.id, { creditsCost: 5 })
 
-    const deps = fakeDeps({ runWorkflow: vi.fn(async () => { throw new Error('挂了') }) })
+    const runWorkflow = vi.fn(async () => { throw new Error('挂了') })
+    const deps = fakeDeps({ runWorkflow })
     await processCozeRun(run.id, deps)
-    await processCozeRun(run.id, deps) // 重复处理同一个已 FAILED 的 run
+    await processCozeRun(run.id, deps) // 重复处理同一个已 FAILED 的 run（模拟 BullMQ 重复投递）
 
     const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
     expect(refreshedUser.credits).toBe(30) // 只退了一次 5 分，不是 35
 
     const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
     expect(found.refunded).toBe(true)
+    // 第二次调用在状态闸就被挡回，根本不该重新烧一次扣子额度
+    expect(runWorkflow).toHaveBeenCalledTimes(1)
+  })
+
+  it('已 SUCCEEDED 的 run 再调一次 processCozeRun：状态/余额不变，runWorkflow 不会被再次调用', async () => {
+    const user = await makeUser(30)
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id, { creditsCost: 4 })
+
+    const runWorkflow = vi.fn(async () => ({ raw: JSON.stringify({ text: '第一次的结果' }) }))
+    await processCozeRun(run.id, fakeDeps({ runWorkflow }))
+
+    const afterFirst = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(afterFirst.status).toBe('SUCCEEDED')
+
+    // 模拟 BullMQ 重复投递：同一个已 SUCCEEDED 的 run 又被消费一次
+    await processCozeRun(run.id, fakeDeps({ runWorkflow }))
+
+    expect(runWorkflow).toHaveBeenCalledTimes(1) // 没有被打回 RUNNING 重跑
+    const afterSecond = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(afterSecond.status).toBe('SUCCEEDED')
+    expect(afterSecond.outputRaw).toEqual(afterFirst.outputRaw)
+
+    const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser.credits).toBe(30) // 没有被迟到的失败退分——本来就没失败过
+  })
+
+  it('download 抛错（非 tooLarge，如网络失败）→ 整 run FAILED + 退分', async () => {
+    const user = await makeUser(30)
+    await prisma.user.update({ where: { id: user.id }, data: { credits: 26 } })
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id, { creditsCost: 4 })
+
+    const deps = fakeDeps({
+      runWorkflow: vi.fn(async () => ({ raw: JSON.stringify({ image: 'https://coze.example.com/out/pic.png' }) })),
+      download: vi.fn(async () => { throw new Error('网络超时') }),
+    })
+    await processCozeRun(run.id, deps)
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('FAILED')
+    expect(found.errorMsg).toBe('网络超时')
+    expect(found.refunded).toBe(true)
+
+    const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser.credits).toBe(30)
+  })
+
+  it('recoverFailedCozeRun：对停在 RUNNING 的 run 兜底，能正确落 FAILED + 退分（worker failed-handler 兜底路径）', async () => {
+    const user = await makeUser(30)
+    await prisma.user.update({ where: { id: user.id }, data: { credits: 24 } })
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id, { creditsCost: 6 })
+    // 模拟 processCozeRun 已经把状态推进到 RUNNING，随后 failRun 自身抛错、事务回滚，
+    // run 停在 RUNNING、未退分——这正是 worker 'failed' 事件兜底要处理的场景。
+    await prisma.cozeToolRun.update({ where: { id: run.id }, data: { status: 'RUNNING' } })
+
+    await recoverFailedCozeRun(run.id, '任务处理异常: 兜底测试')
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('FAILED')
+    expect(found.errorMsg).toBe('任务处理异常: 兜底测试')
+    expect(found.refunded).toBe(true)
+
+    const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser.credits).toBe(30)
+
+    // 再兜底调用一次（例如两次 failed 事件都触发了兜底）：不能重复退分
+    await recoverFailedCozeRun(run.id, '任务处理异常: 兜底测试2')
+    const refreshedUser2 = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser2.credits).toBe(30)
   })
 
   it('工具已被删除 → FAILED + 退分', async () => {

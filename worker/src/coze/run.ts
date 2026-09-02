@@ -108,23 +108,44 @@ async function transferOutputs(items: CozeOutputItem[], runId: string, deps: Coz
   return out
 }
 
+// 终态（SUCCEEDED/FAILED）之外才允许继续处理——挡掉 BullMQ 重复投递（stalled 重发、
+// 手工重入队）：迟到的一次处理绝不能把已有终态的 run 打回 RUNNING 重跑，更不能让一次
+// 迟到的失败把 SUCCEEDED 覆写成 FAILED 并退分（用户会既拿到结果又拿回积分）。
+const NON_TERMINAL_STATUSES = ['QUEUED', 'RUNNING']
+
 // 失败收口：状态置 FAILED + 记错误信息，同一事务里幂等退积分。
-// 幂等靠 updateMany({ refunded: false, creditsCost: { gt: 0 } }) 抢闸——
-// 抢到（count===1）才给用户加分；重复处理同一失败 run 绝不会退第二次。
+// 两道闸都在同一事务、都是 updateMany 抢占式判断：
+//   1) 状态闸：只有当前仍是非终态（QUEUED/RUNNING）才允许写 FAILED——
+//      run 已经是 SUCCEEDED（或已被另一次调用先置为 FAILED）时 count===0，直接返回，
+//      连 refunded 闸都不碰，终态一旦写定就不再变。
+//   2) 退分闸：updateMany({ refunded: false, creditsCost: { gt: 0 } }) 抢到（count===1）
+//      才给用户加分；重复处理同一失败 run 绝不会退第二次。
 async function failRun(runId: string, userId: string, creditsCost: number, errorMsg: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    await tx.cozeToolRun.update({
-      where: { id: runId },
+    const claimedFail = await tx.cozeToolRun.updateMany({
+      where: { id: runId, status: { in: NON_TERMINAL_STATUSES } },
       data: { status: 'FAILED', errorMsg: errorMsg.slice(0, 2000), finishedAt: new Date() },
     })
-    const claimed = await tx.cozeToolRun.updateMany({
+    if (claimedFail.count === 0) return // 已是终态，不再改写状态，也不碰退分闸
+
+    const claimedRefund = await tx.cozeToolRun.updateMany({
       where: { id: runId, refunded: false, creditsCost: { gt: 0 } },
       data: { refunded: true },
     })
-    if (claimed.count === 1) {
+    if (claimedRefund.count === 1) {
       await tx.user.update({ where: { id: userId }, data: { credits: { increment: creditsCost } } })
     }
   })
+}
+
+// worker 的 BullMQ 'failed' 事件兜底：processCozeRun 内部已经把绝大多数失败收口到
+// failRun，但 failRun 自身也可能抛错（DB 抖动、user 已被删除等）——那种情况下事务回滚，
+// run 会永远停在 RUNNING、refunded=false，钱回不来，且全仓没有别的回收器。
+// 这个函数补一次 failRun 调用：failRun 本身有状态闸 + 退分闸，重复调用是安全的。
+export async function recoverFailedCozeRun(runId: string, errorMsg: string): Promise<void> {
+  const run = await prisma.cozeToolRun.findUnique({ where: { id: runId } })
+  if (!run) return
+  await failRun(runId, run.userId, run.creditsCost, errorMsg)
 }
 
 type DeclaredInput = { name: string; type?: string }
@@ -137,7 +158,16 @@ export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultD
     return
   }
 
-  await prisma.cozeToolRun.update({ where: { id: runId }, data: { status: 'RUNNING' } })
+  // 状态闸：只有非终态（QUEUED/RUNNING）才允许抢到手继续跑——
+  // 已是 SUCCEEDED/FAILED 说明这是一次重复投递，直接跳过，绝不重新烧一次扣子额度。
+  const claimedRunning = await prisma.cozeToolRun.updateMany({
+    where: { id: runId, status: { in: NON_TERMINAL_STATUSES } },
+    data: { status: 'RUNNING' },
+  })
+  if (claimedRunning.count === 0) {
+    console.warn(`[coze] run ${runId} 已是终态（重复投递），跳过`)
+    return
+  }
 
   const tool = await prisma.cozeTool.findUnique({ where: { id: run.toolId } })
   if (!tool) {
@@ -166,8 +196,10 @@ export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultD
     const { raw } = await deps.runWorkflow(tool.workflowId, parameters)
     const outputItems = await transferOutputs(parseCozeOutput(raw), runId, deps)
 
-    await prisma.cozeToolRun.update({
-      where: { id: runId },
+    // 状态闸：只有仍是本次抢到的 RUNNING 才允许写 SUCCEEDED——若这期间状态已被
+    // 别的路径改动（理论上不该发生，但闸不多余），也不强行覆盖。
+    await prisma.cozeToolRun.updateMany({
+      where: { id: runId, status: 'RUNNING' },
       data: {
         status: 'SUCCEEDED',
         outputRaw: (raw ?? null) as Prisma.InputJsonValue,

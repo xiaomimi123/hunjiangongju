@@ -16,6 +16,12 @@ type CozeToolInput = {
   required: boolean
 }
 
+// select 选项的逗号分隔字符串解析：只在失焦/提交前调用，输入过程中绝不调用——
+// 打字期间就 split/filter 会在敲下逗号那一刻把它吃掉（受控输入框经典坑）。
+function parseOptions(text: string): string[] {
+  return text.split(',').map((s) => s.trim()).filter(Boolean)
+}
+
 type Tool = {
   id: string
   name: string
@@ -49,9 +55,20 @@ const RUN_STATUS_TONE: Record<string, string> = {
   QUEUED: 'pill', RUNNING: 'pill-warn', SUCCESS: 'pill-ok', FAILED: 'pill-bad',
 }
 
+// 表单里一行输入项：options 换成 optionsText（原始逗号分隔字符串，随打字保留原样，
+// 不在 onChange 里 split/filter）。canonical 的 options 数组只在校验/提交时现算。
+type FormInput = {
+  name: string
+  label: string
+  type: CozeInputType
+  optionsText: string
+  placeholder?: string
+  required: boolean
+}
+
 // 编辑表单里一行输入项的默认值
-function blankInput(): CozeToolInput {
-  return { name: '', label: '', type: 'text', required: false }
+function blankInput(): FormInput {
+  return { name: '', label: '', type: 'text', optionsText: '', required: false }
 }
 
 type FormState = {
@@ -61,7 +78,7 @@ type FormState = {
   priceCredits: string
   sortOrder: string
   enabled: boolean
-  inputs: CozeToolInput[]
+  inputs: FormInput[]
 }
 
 function blankForm(): FormState {
@@ -76,7 +93,11 @@ function toForm(t: Tool): FormState {
     priceCredits: String(t.priceCredits),
     sortOrder: String(t.sortOrder),
     enabled: t.enabled,
-    inputs: t.inputs.map((i) => ({ ...i, options: i.options ? [...i.options] : undefined })),
+    inputs: t.inputs.map((i) => ({
+      name: i.name, label: i.label, type: i.type, required: i.required,
+      placeholder: i.placeholder,
+      optionsText: (i.options ?? []).join(','),
+    })),
   }
 }
 
@@ -161,7 +182,7 @@ export default function CozeToolsPage() {
     finally { setBusyId('') }
   }
 
-  function updateInput(i: number, patch: Partial<CozeToolInput>) {
+  function updateInput(i: number, patch: Partial<FormInput>) {
     setForm((f) => {
       const inputs = f.inputs.slice()
       inputs[i] = { ...inputs[i], ...patch }
@@ -194,6 +215,7 @@ export default function CozeToolsPage() {
             label: p.name,
             type: mapType(p.type),
             required: p.required === true,
+            optionsText: '',
           })),
         }))
         setFetchHint('已拉取参数，请为每项补充中文标签')
@@ -214,7 +236,7 @@ export default function CozeToolsPage() {
       const at = `第 ${i + 1} 项输入`
       if (!/^[\w-]{1,64}$/.test(inp.name)) return `${at}：参数名不合法（只能是字母/数字/下划线/短横线）`
       if (!inp.label.trim()) return `${at}：中文标签不能为空`
-      if (inp.type === 'select' && (!inp.options || inp.options.length === 0)) return `${at}：下拉选择需要至少一个选项`
+      if (inp.type === 'select' && parseOptions(inp.optionsText).length === 0) return `${at}：下拉选择需要至少一个选项`
     }
     return ''
   }
@@ -235,7 +257,7 @@ export default function CozeToolsPage() {
         label: i.label.trim(),
         type: i.type,
         required: i.required,
-        ...(i.type === 'select' ? { options: i.options ?? [] } : {}),
+        ...(i.type === 'select' ? { options: parseOptions(i.optionsText) } : {}),
         ...(i.placeholder ? { placeholder: i.placeholder } : {}),
       })),
     }
@@ -421,8 +443,9 @@ export default function CozeToolsPage() {
                       onChange={(e) => updateInput(i, { placeholder: e.target.value })} />
                     <button onClick={() => removeInput(i)} className="col-span-1 text-xs text-bad">删除</button>
                     {inp.type === 'select' && (
-                      <input className="field col-span-11" value={(inp.options ?? []).join(',')} placeholder="选项，逗号分隔，如 A,B,C"
-                        onChange={(e) => updateInput(i, { options: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+                      <input className="field col-span-11" value={inp.optionsText} placeholder="选项，逗号分隔，如 A,B,C"
+                        onChange={(e) => updateInput(i, { optionsText: e.target.value })}
+                        onBlur={(e) => updateInput(i, { optionsText: parseOptions(e.target.value).join(',') })} />
                     )}
                   </div>
                 ))}

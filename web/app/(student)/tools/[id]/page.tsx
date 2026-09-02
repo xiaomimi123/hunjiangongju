@@ -125,10 +125,16 @@ export default function ToolFormPage() {
         setShowRecharge(true)
         loadWallet()
       } else {
-        // 服务端 400 报错文案是「「字段 label」不能为空/不在可选项内/不是合法的图片路径」
-        // 这类，按 label 反查挂到对应字段下方；匹配不到（比如整体格式错误）才顶部红条兜底
+        // 服务端 400 报错文案是「「字段 label」不能为空/不在可选项内/不是合法的图片路径」这类
+        // （见 web/lib/cozeInputs.ts），先按「label」精确匹配（避免「标题」子串误吞「副标题」
+        // 报错的子串命中问题）；没有带括号的精确命中，才退化成普通子串匹配，候选里取 label
+        // 最长的那个（更长的 label 更不可能是别的字段名的子串，误配概率更低）；都匹配不到
+        // 说明报错和字段无关（比如请求体整体格式错误），走顶部红条兜底
         const msg = (e as Error).message
-        const matched = tool.inputs.find((input) => msg.includes(input.label))
+        const exact = tool.inputs.find((input) => msg.includes(`「${input.label}」`))
+        const matched = exact ?? tool.inputs
+          .filter((input) => msg.includes(input.label))
+          .sort((a, b) => b.label.length - a.label.length)[0]
         if (matched) setFieldErr({ [matched.name]: msg })
         else setErr(msg)
       }

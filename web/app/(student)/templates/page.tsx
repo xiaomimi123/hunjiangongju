@@ -15,6 +15,15 @@ type Framework = {
   defaultVoice?: string
 }
 
+// 内联 SVG 闪电图标：禁 emoji，照样稿 #i-bolt
+function BoltIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+    </svg>
+  )
+}
+
 // 列表左侧竖版缩略占位：无真实封面图时按 id 轮换渐变色块，照样稿 .p1~.p6
 const POSTER_GRADIENTS = [
   'bg-gradient-to-br from-[#2b2d42] to-[#8d99ae]',
@@ -151,7 +160,8 @@ export default function FrameworkLibraryPage() {
           )}
           {sheetErr && <p className="pill pill-bad">{sheetErr}</p>}
           <button onClick={create} disabled={creating} className="btn-primary w-full">
-            {creating ? '生成中…' : '⚡ 生成'}
+            <BoltIcon />
+            {creating ? '生成中…' : '生成'}
           </button>
         </div>
       </BottomSheet>

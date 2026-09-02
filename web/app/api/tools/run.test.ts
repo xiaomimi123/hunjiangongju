@@ -251,6 +251,28 @@ describe('POST /api/tools/[id]/run', () => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(10)
   })
 
+  it('扣分建 run 后入队失败（如 redis 挂了）→ 响应非 200、run 落 FAILED、积分已退回', async () => {
+    const u = await makeStudent(10)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    const tool = await makeTool({ priceCredits: 3 })
+    enqueueCozeRunMock.mockRejectedValueOnce(new Error('redis 挂了'))
+
+    const res = await runPOST(
+      jsonReq('http://localhost/x', 'POST', { inputs: { input_text: 'hi' } }),
+      { params: { id: tool.id } },
+    )
+    expect(res.status).not.toBe(200)
+
+    // 扣分建 run 时没法拿到 id（响应不是 200，不含 { id }），按 tool+user 查回这条唯一的 run
+    const run = await prisma.cozeToolRun.findFirstOrThrow({ where: { toolId: tool.id, userId: u.id } })
+    runIds.push(run.id)
+    expect(run.status).toBe('FAILED')
+    expect(run.refunded).toBe(true)
+    expect(run.errorMsg).toBe('任务入队失败，请稍后重试')
+
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(10) // 扣了又退，余额不变
+  })
+
   it('限流：超过 10 次/分钟 → 429', async () => {
     const u = await makeStudent(100)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
@@ -342,6 +364,57 @@ describe('学员运行记录：列表与详情', () => {
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     const res = await runDetailGET(getReq('http://localhost/x'), { params: { id: 'ghost' } })
     expect(res.status).toBe(404)
+  })
+
+  it('学员端 errorMsg 收口：FAILED run 的原始报错（含服务器路径/扣子响应体）不下发给学员', async () => {
+    const u = await makeStudent(10)
+    const tool = await makeTool()
+    const run = await prisma.cozeToolRun.create({
+      data: {
+        toolId: tool.id,
+        userId: u.id,
+        inputs: {},
+        creditsCost: 1,
+        status: 'FAILED',
+        refunded: true,
+        errorMsg: 'ENOENT: no such file or directory, open \'/data/coze-uploads/abc.png\'',
+      },
+    })
+    runIds.push(run.id)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+
+    const listRes = await runsGET(getReq('http://localhost/api/tools/runs'), { params: {} })
+    const { runs } = await listRes.json()
+    const listed = runs.find((r: { id: string }) => r.id === run.id)
+    expect(listed.errorMsg).not.toContain('/data')
+    expect(listed.errorMsg).toBe('运行失败，积分已退回')
+
+    const detailRes = await runDetailGET(getReq('http://localhost/x'), { params: { id: run.id } })
+    const detail = await detailRes.json()
+    expect(detail.errorMsg).not.toContain('/data')
+    expect(detail.errorMsg).toBe('运行失败，积分已退回')
+  })
+
+  it('operator 端不收口：仍能看到 FAILED run 的原始 errorMsg', async () => {
+    const u = await makeStudent(10)
+    const tool = await makeTool()
+    const run = await prisma.cozeToolRun.create({
+      data: {
+        toolId: tool.id,
+        userId: u.id,
+        inputs: {},
+        creditsCost: 1,
+        status: 'FAILED',
+        refunded: true,
+        errorMsg: 'ENOENT: /data/coze-uploads/abc.png',
+      },
+    })
+    runIds.push(run.id)
+    requireRoleMock.mockResolvedValue({ userId: 'op-errmsg-x', role: 'operator' })
+
+    const detailRes = await runDetailGET(getReq('http://localhost/x'), { params: { id: run.id } })
+    const detail = await detailRes.json()
+    expect(detail.errorMsg).toContain('/data')
   })
 
   it('详情：operator 可看任意学员的 run', async () => {

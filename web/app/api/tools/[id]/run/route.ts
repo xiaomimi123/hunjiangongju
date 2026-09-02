@@ -25,7 +25,7 @@ export const POST = handler(async (req, { params }) => {
         data: { credits: { decrement: tool.priceCredits } },
       })
       if (claimed.count === 0) {
-        // 分不够或账号已不存在。学员被删号但会话 cookie 还活着的情况沿用老行为：不建 run
+        // 分不够或账号已不存在。学员被删号但会话 cookie 还活着的情况沿用 generate 的语义：任务照建、账记不上即可
         const exists = await tx.user.count({ where: { id: s.userId } })
         if (exists > 0) throw new HttpError(403, '积分已用完，请扫码联系导师充值', 'NO_CREDITS')
       }
@@ -39,6 +39,28 @@ export const POST = handler(async (req, { params }) => {
       },
     })
   })
-  await enqueueCozeRun(run.id)
+  try {
+    await enqueueCozeRun(run.id)
+  } catch (err) {
+    // 钱已扣、run 已建，但入队失败（如 redis 挂了）意味着这条 run 永远不会被 worker 处理、
+    // 会永远停在 QUEUED。缝隙必须现场缝上：把 run 置 FAILED + 幂等退分（同一事务，抢闸写法
+    // 与 worker 的 failRun 完全一致，见 worker/src/coze/run.ts:123-139），再把原错误抛出去，
+    // 让学员看到失败而不是一个此后再也不会推进的假成功。
+    await prisma.$transaction(async (tx) => {
+      const claimedFail = await tx.cozeToolRun.updateMany({
+        where: { id: run.id, status: { in: ['QUEUED', 'RUNNING'] } },
+        data: { status: 'FAILED', errorMsg: '任务入队失败，请稍后重试', finishedAt: new Date() },
+      })
+      if (claimedFail.count === 0) return
+      const claimedRefund = await tx.cozeToolRun.updateMany({
+        where: { id: run.id, refunded: false, creditsCost: { gt: 0 } },
+        data: { refunded: true },
+      })
+      if (claimedRefund.count === 1) {
+        await tx.user.updateMany({ where: { id: s.userId }, data: { credits: { increment: run.creditsCost } } })
+      }
+    })
+    throw err
+  }
   return NextResponse.json({ id: run.id })
 })

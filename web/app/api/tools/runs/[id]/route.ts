@@ -22,5 +22,10 @@ export const GET = handler(async (_req, { params }) => {
     throw new HttpError(404, '记录不存在')
   }
   const { userId: _userId, ...safe } = run
+  // 学员端不该看到 worker 写库的原始 errorMsg（可能含扣子响应体前 300 字或 fs 报错里的服务器
+  // 绝对路径）；operator 排查用需要看真错误，不做这层收口。
+  if (s.role !== 'operator' && safe.status === 'FAILED') {
+    safe.errorMsg = '运行失败，积分已退回'
+  }
   return NextResponse.json(safe)
 })

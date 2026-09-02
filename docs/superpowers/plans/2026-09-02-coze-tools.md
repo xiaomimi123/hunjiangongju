@@ -253,12 +253,12 @@ export async function processCozeRun(runId: string, deps = defaultDeps): Promise
 1. run 置 RUNNING；查 tool（没了→FAILED 退分）
 2. 遍历 tool.inputs 里 type==='image' 的字段：读 `DATA_DIR/<rel>` → `deps.uploadFile` 换 fileId → 参数值按 spike 文档的引用格式写入
 3. `deps.runWorkflow(tool.workflowId, parameters)`（超时 10 分钟）
-4. `parseCozeOutput(raw)` → 对 image/video/file 项 `deps.download` 转存 `DATA_DIR/coze/<runId>/<uuid>.<ext>`（≤200MB/文件，超限记 file 项但不转存并注明），fileUrl 改 `/api/files/coze/<runId>/<name>`
+4. `parseCozeOutput(raw)` → 对 image/video/file 项 `deps.download` 转存 `DATA_DIR/coze/<runId>/<uuid>.<ext>`（≤200MB/文件，超限记 file 项但不转存并注明），该项的 `url` 字段**原地改写**为本站 `/api/files/coze/<runId>/<name>`（outputItems 全程只有一个 url 字段名，与 Task 4 的 CozeOutputItem 一致；spec 里写的 fileUrl 以此为准）
 5. 成功：SUCCEEDED + outputRaw + outputItems + finishedAt
 6. **任何失败**：FAILED + errorMsg + 退积分——幂等靠 `updateMany({ where: { id: runId, refunded: false, creditsCost: { gt: 0 } }, data: { refunded: true } })` 抢到才 `credits: { increment: creditsCost }`（同一事务）
 `startCozeWorker()`：`new Worker('coze-run', job => processCozeRun(job.data.runId), { connection, concurrency: 2 })`，照 gen worker 的 attach 错误处理。
 
-- [ ] **Step 1: 失败测试**（注入假 deps：成功链路各字段落库正确；runWorkflow 抛错 → FAILED + 积分退回；**重复调 processCozeRun 同一失败 run，积分只退一次**；image 字段走了 uploadFile；转存后 fileUrl 是本站路径）
+- [ ] **Step 1: 失败测试**（注入假 deps：成功链路各字段落库正确；runWorkflow 抛错 → FAILED + 积分退回；**重复调 processCozeRun 同一失败 run，积分只退一次**；image 字段走了 uploadFile；转存后该项 url 是本站路径）
 - [ ] **Step 2-4: TDD** → 全绿
 - [ ] **Step 5: 提交** `feat(worker): coze-run 队列 —— 运行/转存/失败幂等退分`
 
@@ -269,7 +269,8 @@ export async function processCozeRun(runId: string, deps = defaultDeps): Promise
 **Files:**
 - Create: `web/app/(student)/tools/page.tsx`（广场：工具卡片 + 我的记录入口）
 - Create: `web/app/(student)/tools/[id]/page.tsx`（表单：text→input、textarea→textarea、select→select、image→文件选择即传 `/api/tools/upload`；顶部价格+余额；提交→跳结果页；NO_CREDITS 弹现有充值二维码组件——去 `web/app/(student)` 里找现有弹窗的用法照搬）
-- Create: `web/app/(student)/tools/runs/[id]/page.tsx`（3s 轮询到 SUCCEEDED/FAILED 停；outputItems 渲染：text=段落+复制按钮、image=<img>+下载、video=<video controls>+下载、file=下载链接；items 空时折叠展示 outputRaw JSON；FAILED 显示 errorMsg + 「积分已退回」）
+- Create: `web/app/(student)/tools/runs/[id]/page.tsx`（3s 轮询到 SUCCEEDED/FAILED 停；outputItems 渲染：text=段落+复制按钮、image=`<img src={item.url}>`+下载、video=`<video controls src={item.url}>`+下载、file=下载链接（都读 `item.url`）；items 空时折叠展示 outputRaw JSON；FAILED 显示 errorMsg + 「积分已退回」）
+- Create: `web/app/(student)/tools/runs/page.tsx`（我的记录列表：拉 `/api/tools/runs`，每行工具名/状态/时间，点击进结果页）
 - Modify: `web/app/(student)/page.tsx`（「工具广场」板块：拉 `/api/tools` 前 4 个宫格 + 「全部工具」链接；无 enabled 工具时整个板块不渲染）
 
 沿用学员端现有样式类与 `api()` fetcher；轮询写法照 `works/[id]/page.tsx`（isSettled 停表那套）。

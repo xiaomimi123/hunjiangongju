@@ -25,7 +25,7 @@ function genTone(s: string): 'ok' | 'bad' | 'run' {
 type Gen = {
   id: string; subject: string; status: string; createdAt: string
   framework: { name: string } | null
-  renderTasks: { status: string }[]
+  renderTasks: { status: string; videoUrl: string | null }[]
 }
 type Tool = { id: string; name: string; description: string | null; priceCredits: number }
 type Banner = { id: string; title: string; body: string; linkUrl: string | null }
@@ -87,7 +87,7 @@ export default function HomePage() {
     <div className="space-y-7">
       {/* 深色头部：品牌 + 积分 + 公告轮播，吃满顶部安全区并向两侧出血到屏幕边缘 */}
       <div
-        className="-mx-5 -mt-3 rounded-b-3xl px-[18px] pb-[22px] pt-12 text-white"
+        className="-mx-5 -mt-12 rounded-b-3xl px-[18px] pb-[22px] pt-12 text-white"
         style={{ backgroundImage: 'radial-gradient(140% 120% at 85% -20%, #4a1218 0%, #1a1214 55%)' }}
       >
         <div className="flex items-start justify-between">
@@ -103,7 +103,7 @@ export default function HomePage() {
 
         {banner && (
           banner.linkUrl ? (
-            banner.linkUrl.startsWith('/') ? (
+            banner.linkUrl.startsWith('/') && !banner.linkUrl.startsWith('//') ? (
               <Link
                 href={banner.linkUrl}
                 className="relative mt-4 flex h-24 items-center overflow-hidden rounded-2xl px-[18px] text-white"
@@ -188,10 +188,12 @@ export default function HomePage() {
           <div className="no-scrollbar mt-2.5 flex gap-3 overflow-x-auto pb-1.5">
             {recent.map((t, i) => {
               const st = effStatus(t)
+              // 只有已完成的任务才有真实成片可取首帧；其余状态仍用渐变占位
+              const src = st === 'EXPORTED' ? t.renderTasks[0]?.videoUrl ?? null : null
               return (
                 <div key={t.id} className="w-32 flex-none">
                   <VideoCard
-                    src={null}
+                    src={src}
                     title={t.subject}
                     subtitle={t.framework?.name ?? '框架'}
                     badge={{ text: GEN_LABELS[st] ?? st, tone: genTone(st) }}

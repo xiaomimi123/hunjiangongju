@@ -30,7 +30,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-lg flex-col bg-paper">
-      <main className="flex-1 px-5 pb-28 pt-3">{children}</main>
+      {/* pt-12：非首页五页（templates/tools/me/library/works）用它当顶部安全区留白，
+          照样稿 .phead padding-top:52px 的意图；首页自己的深色头部用 -mt-12 抵消这段，
+          换成头部内部的 pt-12 顶到屏幕最上沿 */}
+      <main className="flex-1 px-5 pb-28 pt-12">{children}</main>
 
       {/* 底导航：5 格，中央「做片」凸起 */}
       <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-lg items-end justify-around border-t border-line bg-white/94 px-1.5 pb-4 pt-2 backdrop-blur-lg safe-b">

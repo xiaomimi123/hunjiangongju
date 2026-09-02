@@ -91,11 +91,16 @@ function isAuthError(status: number, event: Record<string, unknown> | null): boo
 
 export async function cozeProbeWorkflowParams(
   workflowId: string,
-  opts?: { fetchImpl?: CozeFetch; maxRounds?: number },
+  opts?: { fetchImpl?: CozeFetch; maxRounds?: number; overallTimeoutMs?: number },
 ): Promise<CozeProbeResult> {
   const { baseUrl, apiKey } = await getCozeCfg()
   const fetchImpl = opts?.fetchImpl ?? fetch
   const maxRounds = opts?.maxRounds ?? 12
+  // 整体探测 deadline：单次探测要跑多轮 stream_run，某些工作流参数多、轮数多，
+  // 单轮超时（60s）挡不住总耗时失控。超过 deadline 就把已探到的字段先收敛返回，
+  // 比让管理页一直转圈更诚实。
+  const overallTimeoutMs = opts?.overallTimeoutMs ?? 90_000
+  const deadline = Date.now() + overallTimeoutMs
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }
   const url = `${baseUrl}/v1/workflow/stream_run`
 
@@ -104,6 +109,9 @@ export async function cozeProbeWorkflowParams(
   const parameters: Record<string, unknown> = {}
 
   for (let round = 0; round < maxRounds; round++) {
+    if (Date.now() >= deadline) {
+      return { fields, started: false, error: `探测超时，已探到 ${fields.length} 个字段` }
+    }
     let res: Response
     let text: string
     try {
@@ -154,6 +162,11 @@ export async function cozeProbeWorkflowParams(
         // （理论上不该发生——这条报错本该跟在某次 Missing parameter 之后），
         // 强行猜一个字段名可能张冠李戴，不如诚实收敛
         return { fields, started: false, error: '收到文件类型转换报错，但无法定位对应的参数字段' }
+      }
+      if (last.type === 'image') {
+        // 同一个字段已经被改判成 image、换过 file_id 占位值了，还是报同样的转换错误：
+        // 再改也没有别的类型可试，继续跑下去只是空转到 maxRounds，直接收敛
+        return { fields, started: false, error: `字段 ${last.name} 类型探测无法收敛` }
       }
       last.type = 'image'
       parameters[last.name] = JSON.stringify({ file_id: '0' })

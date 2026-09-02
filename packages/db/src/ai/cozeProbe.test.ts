@@ -125,4 +125,32 @@ describe('cozeProbeWorkflowParams', () => {
     expect(result.error).toContain('无法定位')
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
+
+  it('同一字段已被改判过 image，再收到同样的转换报错 → 收敛，error 里点名该字段', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(sseRes({ error_message: 'Missing parameter: KT_cover', error_code: 5000 }))
+      .mockResolvedValueOnce(sseRes({ error_message: "The request parameter is illegal, see: value '测试' can't convert to file", error_code: 5000 }))
+      // 已经把 KT_cover 换成 file_id 占位值了，还是报同样的转换错误——类型探测无法收敛
+      .mockResolvedValueOnce(sseRes({ error_message: "The request parameter is illegal, see: value '测试' can't convert to file", error_code: 5000 }))
+
+    const result = await cozeProbeWorkflowParams('wf-1', { fetchImpl })
+
+    expect(result.started).toBe(false)
+    expect(result.fields).toEqual([{ name: 'KT_cover', type: 'image', required: true }])
+    expect(result.error).toBe('字段 KT_cover 类型探测无法收敛')
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('overallTimeoutMs 用尽（注入负值，deadline 已过去）→ 收敛，一次请求都不发，error 带字段数', async () => {
+    const fetchImpl = vi.fn()
+
+    // 注入负的整体超时：deadline 在函数调用瞬间就已经过去，第一轮开始前的检查
+    // 就应该直接收敛，不发任何请求——比靠真实计时器等待更确定、不飘
+    const result = await cozeProbeWorkflowParams('wf-1', { fetchImpl, maxRounds: 12, overallTimeoutMs: -1 })
+
+    expect(result.started).toBe(false)
+    expect(result.fields).toEqual([])
+    expect(result.error).toBe('探测超时，已探到 0 个字段')
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
 })

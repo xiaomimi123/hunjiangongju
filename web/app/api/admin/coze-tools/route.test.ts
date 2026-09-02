@@ -264,10 +264,12 @@ describe('POST /api/admin/coze-tools/fetch-params', () => {
     expect(json.params).toEqual([{ name: 'input_text', type: 'string', required: true }])
   })
 
-  it('配置问题抛错时走 500', async () => {
+  it('配置问题抛错时走 502 且透出具体中文原因', async () => {
     cozeFetchWorkflowParamsMock.mockRejectedValueOnce(new Error('扣子未配置，请在模型配置里填 Token'))
     const res = await fetchParamsPOST(jsonReq('http://localhost/x', 'POST', { workflowId: 'wf-1' }), { params: {} })
-    expect(res.status).toBe(500)
+    expect(res.status).toBe(502)
+    const json = await res.json()
+    expect(json.error).toContain('扣子未配置，请在模型配置里填 Token')
   })
 })
 
@@ -296,5 +298,9 @@ describe('GET /api/admin/coze-tools/runs', () => {
     const ids = json.runs.map((r: { id: string }) => r.id)
     expect(ids.indexOf(run2.id)).toBeLessThan(ids.indexOf(run1.id))
     expect(json.runs.every((r: { toolId: string }) => r.toolId === created.id)).toBe(true)
+    // 列表字段收窄：不带 outputRaw/outputItems/inputs（可能很大，列表页用不上）
+    expect(Object.keys(json.runs[0]).sort()).toEqual(
+      ['id', 'toolId', 'userId', 'status', 'errorMsg', 'creditsCost', 'createdAt', 'finishedAt'].sort(),
+    )
   })
 })

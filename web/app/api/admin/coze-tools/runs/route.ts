@@ -17,6 +17,17 @@ export const GET = handler(async (req) => {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: PAGE_SIZE + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    // 列表页不需要 outputRaw/outputItems/inputs（体积可能很大），收窄字段避免全量吐给前端
+    select: {
+      id: true,
+      toolId: true,
+      userId: true,
+      status: true,
+      errorMsg: true,
+      creditsCost: true,
+      createdAt: true,
+      finishedAt: true,
+    },
   })
 
   const hasMore = rows.length > PAGE_SIZE

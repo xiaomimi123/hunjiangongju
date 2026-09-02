@@ -23,6 +23,7 @@ const GROUPS: { label: string; items: { href: string; label: string; icon: strin
   { label: '生成', items: [
     { href: '/admin/generate', label: '生成', icon: 'film' },
     { href: '/admin/bgm', label: 'BGM 曲库', icon: 'doc' },
+    { href: '/admin/coze-tools', label: '扣子工具', icon: 'tag' },
   ] },
   { label: '运营', items: [
     { href: '/admin/students', label: '学员数据', icon: 'users' },

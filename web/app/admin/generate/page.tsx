@@ -17,12 +17,13 @@ type Creator = { nickname: string | null; email: string; role: string }
 // renderTasks 需带上 videoUrl 才能在卡片海报里出首帧/给下载按钮取地址（/api/generate GET 已选取）
 type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null; creator?: Creator | null; renderTasks?: { status: string; videoUrl: string | null }[] }
 
-// 状态徽标色调：VideoCard 只认 ok/run/bad 三档，与 genStatus.tsx 内部私有的 genTone 分档一致，
-// 但那个函数没导出（该文件按 brief 只允许改本文件），故本页照抄一份同口径的极简版，
-// 学员端首页（web/app/(student)/page.tsx）也是这么各页面自带一份的老规矩。
-function genTone(status: string): 'ok' | 'run' | 'bad' {
+// 状态徽标色调：与 genStatus.tsx 内部私有的 genTone 四档语义一致（ok/bad/warn/run），
+// 但那个函数没导出，故本页照抄一份同口径版本——学员端首页（web/app/(student)/page.tsx）
+// 也是这么各页面自带一份的老规矩。warn=待处理（素材就绪/待预览确认），需运营手动介入。
+function genTone(status: string): 'ok' | 'run' | 'bad' | 'warn' {
   if (status === 'EXPORTED' || status === 'QC_PASSED') return 'ok'
   if (status === 'FAILED' || status === 'QC_FAILED') return 'bad'
+  if (status === 'ASSET_READY' || status === 'PREVIEW_PENDING') return 'warn'
   return 'run'
 }
 
@@ -42,10 +43,14 @@ function maskPhone(v: string): string {
   return /^\d{11}$/.test(v) ? `${v.slice(0, 3)}****${v.slice(7)}` : v
 }
 
-function creatorLabel(c?: Creator | null): string {
-  if (!c) return '—'
-  if (c.role === 'student') return `学员 ${maskPhone(c.email)}`
-  return c.nickname || c.email
+// 框架名超 6 字截断加省略号，避免卡片副行被挤爆；无框架（如手动文案模式）时整段省略
+function truncateFrameworkName(name: string): string {
+  return name.length > 6 ? `${name.slice(0, 6)}…` : name
+}
+
+function creatorLabel(c: Creator | null | undefined, frameworkName: string | null | undefined): string {
+  const who = !c ? '—' : c.role === 'student' ? `学员 ${maskPhone(c.email)}` : c.nickname || c.email
+  return frameworkName ? `${who} · ${truncateFrameworkName(frameworkName)}` : who
 }
 
 // 相对时间：今天/昨天/前天/N天前，超过一个月退回日期，样稿（video-card-mockup.html「E·后台」）同款口径
@@ -251,7 +256,7 @@ export default function GeneratePage() {
                 key={t.id}
                 src={rt?.videoUrl ?? null}
                 title={t.subject}
-                subtitle={creatorLabel(t.creator)}
+                subtitle={creatorLabel(t.creator, t.framework?.name)}
                 trailing={<span>{relTime(t.createdAt)}</span>}
                 badge={{ text: GEN_LABELS[st] ?? st, tone: genTone(st) }}
                 posterClassName={POSTERS[i % POSTERS.length]}

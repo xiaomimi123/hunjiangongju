@@ -10,17 +10,19 @@ export type VideoCardProps = {
   title: string
   subtitle?: string             // 副信息行左侧
   trailing?: React.ReactNode    // 副信息行右侧（下载链接等）
-  badge?: { text: string; tone: 'ok' | 'run' | 'bad' }
+  badge?: { text: string; tone: 'ok' | 'run' | 'bad' | 'warn' }
   overlayTitle?: string         // 海报下方叠加标题（可选）
   posterClassName?: string      // 无视频时的渐变占位类
   onClick?: () => void
   footer?: React.ReactNode      // 后台版操作按钮排
 }
 
-const BADGE_TONE: Record<'ok' | 'run' | 'bad', string> = {
+const BADGE_TONE: Record<'ok' | 'run' | 'bad' | 'warn', string> = {
   ok: 'bg-[rgba(15,183,126,0.92)]',
   run: 'bg-[rgba(230,0,18,0.9)]',
   bad: 'bg-[rgba(245,51,79,0.92)]',
+  // 待处理（如素材就绪待确认）：沿用 tailwind warn 色 #f59e0b 的 92% 不透明版
+  warn: 'bg-[rgba(245,158,11,0.92)]',
 }
 
 function formatDuration(sec: number): string {

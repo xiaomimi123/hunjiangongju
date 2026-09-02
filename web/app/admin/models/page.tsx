@@ -9,6 +9,7 @@ const LABELS: Record<string, { name: string; hint: string }> = {
   image: { name: '文生图', hint: '逐段插画生成' },
   tts: { name: 'TTS 配音', hint: '整篇一次性配音' },
   asr: { name: 'ASR 转写', hint: '原视频语音转文字' },
+  coze: { name: '扣子工作流', hint: '工具广场调用的扣子(Coze)工作流' },
 }
 
 /**
@@ -294,6 +295,9 @@ export default function ModelsPage() {
                 <input type="checkbox" checked={c.enabled} onChange={(e) => upd(c.capability, { enabled: e.target.checked })} className="h-5 w-5" />
               </label>
             </div>
+            {c.capability === 'coze' && (
+              <p className="text-xs text-ink3">扣子(Coze)工作流：接口地址填 https://api.coze.cn，密钥填扣子的 PAT（个人访问令牌），模型留空即可</p>
+            )}
             {c.capability === 'tts' && (
               <p className="text-xs text-ink3">火山配音(豆包语音合成2.0)：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填 seed-tts-2.0，密钥填「语音技术」控制台的 API Key（非火山方舟的 ark- key）。克隆音色：火山声音复刻2.0 克隆得 S_ 开头音色ID，填入 extra 的 customVoices（如 {'{"customVoices":[{"id":"S_xxx","label":"我的对标男声"}]}'}）即出现在生成页</p>
             )}

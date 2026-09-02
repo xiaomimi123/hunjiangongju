@@ -3,7 +3,7 @@
 // 无 src 时展示渐变占位 + 低透明度播放钮；有 src 时先显示视频首帧（#t=0.1），
 // 点击海报原地切换为带 controls 的可播放 video（不整页跳转）。
 // 若传了 onClick，点击交给外部（比如跳转到运行详情页），不进入内嵌播放。
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export type VideoCardProps = {
   src: string | null            // 视频 URL；null=无成片（进行中/失败）
@@ -50,6 +50,31 @@ export default function VideoCard({
 }: VideoCardProps) {
   const [playing, setPlaying] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
+  // 首帧 <video> 视口懒挂载：卡片进视口前不挂 src（不发起首帧抽帧请求），
+  // 只有内嵌播放场景（无 onClick）才需要，跳转场景（有 onClick）本就不渲染这个 <video>。
+  const [inView, setInView] = useState(false)
+  const posterRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!src) return
+    if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {
+      setInView(true)
+      return
+    }
+    const el = posterRef.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '200px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [src])
 
   const handlePosterClick = () => {
     if (onClick) { onClick(); return }
@@ -59,8 +84,9 @@ export default function VideoCard({
   return (
     <div className="card overflow-hidden p-0">
       <div
+        ref={posterRef}
         className={`relative flex aspect-[9/16] items-center justify-center overflow-hidden text-white ${
-          !src && !playing ? (posterClassName ?? 'bg-gradient-to-br from-ink to-ink2') : 'bg-black'
+          (!src || !inView) && !playing ? (posterClassName ?? 'bg-gradient-to-br from-ink to-ink2') : 'bg-black'
         } ${onClick ? 'cursor-pointer' : ''}`}
         onClick={handlePosterClick}
       >
@@ -76,18 +102,22 @@ export default function VideoCard({
           />
         ) : src ? (
           <>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video
-              src={`${src}#t=0.1`}
-              preload="metadata"
-              muted
-              playsInline
-              className="absolute inset-0 h-full w-full object-cover"
-              onLoadedMetadata={(e) => {
-                const d = e.currentTarget.duration
-                if (Number.isFinite(d)) setDuration(d)
-              }}
-            />
+            {/* 未进入视口前不挂 src，避免大量卡片同时发起首帧抽帧请求；
+                进入视口（提前 200px）后才真正加载 */}
+            {inView && (
+              // eslint-disable-next-line jsx-a11y/media-has-caption
+              <video
+                src={`${src}#t=0.1`}
+                preload="metadata"
+                muted
+                playsInline
+                className="absolute inset-0 h-full w-full object-cover"
+                onLoadedMetadata={(e) => {
+                  const d = e.currentTarget.duration
+                  if (Number.isFinite(d)) setDuration(d)
+                }}
+              />
+            )}
             <PlayIcon />
             {duration != null && (
               <span className="absolute bottom-[7px] right-[7px] rounded-full bg-black/55 px-1.5 py-0.5 text-[0.62rem]">

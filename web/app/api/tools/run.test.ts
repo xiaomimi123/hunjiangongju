@@ -315,11 +315,11 @@ describe('学员运行记录：列表与详情', () => {
     expect(ids).toContain(r2.id)
     expect(ids).not.toContain(rOther.id)
     expect(ids.indexOf(r2.id)).toBeLessThan(ids.indexOf(r1.id))
-    // 列表不带 inputs/outputRaw：outputRaw 是扣子原始响应整包，将来会含 debug_url（带 workflow_id）
+    // 列表不带 outputRaw：扣子原始响应整包，将来会含 debug_url（带 workflow_id）。
+    // inputs 是本人数据、无越权面，列表接口按新契约会返回它（供成片库拼「工具名+输入摘要」）。
     const raw = JSON.stringify(runs)
     expect(raw).not.toContain('outputRaw')
     expect(raw).not.toContain('workflowId')
-    expect(raw).not.toContain('"inputs"')
   })
 
   it('详情：本人可查，且不泄漏 outputRaw / workflowId / inputs', async () => {

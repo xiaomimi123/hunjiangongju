@@ -108,7 +108,7 @@ export default function VideoCard({
           </span>
         )}
       </div>
-      <div className="space-y-0.5 p-2.5">
+      <div className="space-y-0.5 pb-2.5 pl-2.5 pr-2.5 pt-2">
         <p className="truncate text-[0.76rem] font-bold">{title}</p>
         {(subtitle || trailing) && (
           <div className="flex items-center justify-between text-[0.64rem] text-ink3">

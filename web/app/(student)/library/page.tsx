@@ -19,9 +19,23 @@ type Run = {
   toolId: string
   status: 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
   outputItems: OutputItem[] | null
+  inputs: Record<string, unknown> | null
   createdAt: string
 }
 type Tool = { id: string; name: string }
+
+// 工具产出卡片标题=工具名+输入摘要：取 inputs 里第一个非空字符串值（跳过 coze-uploads/ 开头的
+// 文件路径值，那是上传字段存的服务器相对路径，不是用户能看懂的摘要），截 12 字加省略号。
+function summarizeInputs(inputs: Record<string, unknown> | null): string {
+  if (!inputs) return ''
+  for (const v of Object.values(inputs)) {
+    if (typeof v !== 'string') continue
+    const s = v.trim()
+    if (!s || s.startsWith('coze-uploads/')) continue
+    return s.length > 12 ? `${s.slice(0, 12)}…` : s
+  }
+  return ''
+}
 
 // 成片库合并展示的条目：书单成片（work）或工具产出（run）
 type LibraryItem = {
@@ -69,11 +83,13 @@ export default function LibraryPage() {
           if (r.status !== 'SUCCEEDED') continue
           const videoItem = (r.outputItems ?? []).find((it): it is { kind: 'video'; url: string } => it.kind === 'video')
           if (!videoItem) continue
+          const toolName = toolNames[r.toolId] ?? '已下架工具'
+          const summary = summarizeInputs(r.inputs)
           items.push({
             kind: 'tool',
             id: r.id,
             videoUrl: videoItem.url,
-            title: toolNames[r.toolId] ?? '已下架工具',
+            title: summary ? `${toolName} · ${summary}` : toolName,
             subtitle: new Date(r.createdAt).toLocaleDateString('zh-CN'),
             createdAt: r.createdAt,
           })
@@ -166,7 +182,10 @@ export default function LibraryPage() {
       )}
       {loaded && merged.length === 0 && !err && (
         <div className="card grid place-items-center gap-1 py-14 text-center">
-          <span className="text-3xl">🎞️</span>
+          <svg viewBox="0 0 24 24" className="h-8 w-8 stroke-ink3" fill="none" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M7 5v14M17 5v14M3 10h4M3 14h4M17 10h4M17 14h4" />
+          </svg>
           <p className="text-sm text-ink3">成片库还没有内容，敬请期待</p>
         </div>
       )}

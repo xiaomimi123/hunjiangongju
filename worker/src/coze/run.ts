@@ -25,6 +25,12 @@ export type CozeRunDeps = {
 // 转存单文件体积上限：与 downloadDouyin.ts 的下载护栏一致，防止一条超大工作流输出把磁盘/内存打爆。
 const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 
+// image 类型输入字段的相对路径白名单：必须与 web/lib/cozeInputs.ts 的 IMAGE_REL_RE 保持一致。
+// web 端在建 run 前已经校验过一次，这里是纵深防御的第二道闸——run.inputs 是数据库里的 JSON，
+// 任何能直接写库的路径（未来的批量导入、手工修数据等）都不该被这层信任绕过，读文件前必须
+// 现场复验，不合法就拒绝读并让 run 走 failRun 退分，而不是把任意路径拼进 fs.readFile。
+const IMAGE_REL_RE = /^coze-uploads\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/
+
 const CONTENT_TYPE_EXT: Record<string, string> = {
   'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif',
   'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm',
@@ -133,7 +139,11 @@ async function failRun(runId: string, userId: string, creditsCost: number, error
       data: { refunded: true },
     })
     if (claimedRefund.count === 1) {
-      await tx.user.update({ where: { id: userId }, data: { credits: { increment: creditsCost } } })
+      // updateMany 而非 update：用户可能已被删（账号注销/运营清理），此时 update 会抛
+      // P2025（记录不存在），整个 failRun 事务回滚，run 卡死在 RUNNING、refunded 也回滚成
+      // false，永远退不出去。updateMany 命中 0 行只是静默跳过——账户都没了，钱退不进去是
+      // 可接受的终态，不该反过来把「标记失败」这一步也一起回滚掉。
+      await tx.user.updateMany({ where: { id: userId }, data: { credits: { increment: creditsCost } } })
     }
   })
 }
@@ -186,6 +196,9 @@ export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultD
       if (field.type !== 'image') continue
       const rel = submitted[field.name]
       if (typeof rel !== 'string' || !rel) continue
+      if (!IMAGE_REL_RE.test(rel)) {
+        throw new Error(`图片参数「${field.name}」路径不合法：${rel}`)
+      }
       const buf = await fs.readFile(path.join(DATA_DIR, rel))
       const { fileId } = await deps.uploadFile(buf, path.basename(rel))
       // 扣子图片参数的引用格式：spike 未做，按扣子公开文档预写为 { file_id } 的 JSON 字符串。

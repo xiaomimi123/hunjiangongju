@@ -284,6 +284,45 @@ describe('processCozeRun', () => {
     expect(huge?.note).toBeTruthy()
   })
 
+  it('image 字段路径穿越（../../etc/passwd）→ FAILED + 退分，未读文件、未调 runWorkflow', async () => {
+    const user = await makeUser(30)
+    await prisma.user.update({ where: { id: user.id }, data: { credits: 28 } })
+    const tool = await makeTool([{ name: 'ref_image', label: '参考图', type: 'image', required: true }])
+    const run = await makeRun(tool.id, user.id, { inputs: { ref_image: '../../etc/passwd' }, creditsCost: 2 })
+
+    const uploadFile = vi.fn(async () => ({ fileId: 'should-not-be-called' }))
+    const runWorkflow = vi.fn(async () => ({ raw: JSON.stringify({ text: 'should not run' }) }))
+    const deps = fakeDeps({ uploadFile, runWorkflow })
+
+    await processCozeRun(run.id, deps)
+
+    expect(uploadFile).not.toHaveBeenCalled()
+    expect(runWorkflow).not.toHaveBeenCalled()
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('FAILED')
+    expect(found.errorMsg).toContain('路径不合法')
+    expect(found.refunded).toBe(true)
+
+    const refreshedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    expect(refreshedUser.credits).toBe(30)
+  })
+
+  it('用户已被删除时退分：failRun 用 updateMany 静默命中 0 行，不炸事务，run 仍正确落 FAILED', async () => {
+    const user = await makeUser(30)
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id, { creditsCost: 3 })
+    await prisma.user.delete({ where: { id: user.id } })
+    userIds.splice(userIds.indexOf(user.id), 1)
+
+    const deps = fakeDeps({ runWorkflow: vi.fn(async () => { throw new Error('挂了') }) })
+    await expect(processCozeRun(run.id, deps)).resolves.toBeUndefined()
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('FAILED')
+    expect(found.refunded).toBe(true) // cozeToolRun 侧的退分闸已抢占，即便用户账户已不存在
+  })
+
   it('不存在的 runId：不炸，warn 后直接返回', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await expect(processCozeRun('does-not-exist-xyz', fakeDeps())).resolves.toBeUndefined()

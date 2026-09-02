@@ -18,6 +18,39 @@ interface Timing {
   endMs: number
 }
 
+/** 可注入的「文件可读」检查，供测试不必真的建文件。真实实现见 defaultFileReadable。 */
+export type FileReadableCheck = (abs: string) => Promise<boolean>
+
+async function defaultFileReadable(abs: string): Promise<boolean> {
+  try {
+    await fs.access(abs)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 混音前最后一道关卡：确认 renderTask.bgm 对应的文件仍可读，不可读就当「本条没有 BGM」
+ * 继续渲染（返回 null），而不是让 ffmpeg 因打不开输入直接把整条片子渲失败。
+ *
+ * resolveBgmId（renderVisuals.ts）挑曲时已经校验过一次文件存在，但挑完到这里（等 render-video
+ * job 排到、真正跑 ffmpeg）之间文件仍可能消失或损坏——data/ 目录被整个误删过一次，这是真实
+ * 生产事故：画面、配音、字幕全渲好了，只因一首 BGM 文件不见了整条片子作废，这个失败模式不合理。
+ *
+ * 只对 BGM 宽容：body.mp4（画面）与配音音轨缺失时必须继续抛错，那是真的渲不出片子。
+ */
+export async function resolveBgmAbs(
+  bgmFileUrl: string | null,
+  isReadable: FileReadableCheck = defaultFileReadable,
+): Promise<string | null> {
+  if (!bgmFileUrl) return null
+  const abs = urlToAbs(bgmFileUrl)
+  if (await isReadable(abs)) return abs
+  console.warn(`[gen] render-video: BGM 文件不可读 (${abs})，本条按无 BGM 继续渲染`)
+  return null
+}
+
 async function probeDurationSec(mediaAbs: string): Promise<number> {
   const out = await probeText('ffprobe',
     ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', mediaAbs])
@@ -177,7 +210,10 @@ export async function renderVideo(renderTaskId: string): Promise<void> {
   await fs.access(bodyAbs) // 缺 body.mp4 直接抛
 
   const audioAbs = urlToAbs(genTask.fullAudioUrl)
-  const bgmAbs = renderTask.bgm?.fileUrl ? urlToAbs(renderTask.bgm.fileUrl) : null
+  // 只对 BGM 宽容：resolveBgmId 挑曲时已校验过一次文件存在，但挑完到这里之间文件仍可能
+  // 消失（或本来就损坏）——data/ 目录被整个删过一次，这是真实事故（见任务报告）。
+  // body.mp4（画面）与配音音轨缺失必须继续抛错，那是真的渲不出片子；BGM 缺失只是没配乐。
+  const bgmAbs = await resolveBgmAbs(renderTask.bgm?.fileUrl ?? null)
 
   // BGM atrim 上界取 body / 配音 里较长者，保证覆盖整片
   const durSec = Math.max(await probeDurationSec(bodyAbs), await probeDurationSec(audioAbs), 1)

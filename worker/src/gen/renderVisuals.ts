@@ -64,6 +64,20 @@ export function readBgmFolder(overlayTemplate: unknown): string | null {
   return v || null
 }
 
+/** resolveBgmId 校验 BGM 文件是否真的在磁盘上用的最小接口。真实实现是「urlToAbs + fs.stat」，
+ * 测试可以喂一个假的进来——不必真的在磁盘上建文件（风格同 renderPipeline.ts 的 CustomFontLookup）。 */
+export type BgmFileExists = (fileUrl: string) => Promise<boolean>
+
+/** 默认实现：fileUrl 转磁盘路径后 stat，存在且非空才算数（0 字节文件视同缺失）。 */
+export const defaultBgmFileExists: BgmFileExists = async (fileUrl) => {
+  try {
+    const st = await fs.stat(urlToAbs(fileUrl))
+    return st.isFile() && st.size > 0
+  } catch {
+    return false
+  }
+}
+
 /**
  * 选定本条片子的 BGM。优先级：
  *   1. variables.__bgmId —— 运营在编辑页/工作台手选的这一条
@@ -73,39 +87,68 @@ export function readBgmFolder(overlayTemplate: unknown): string | null {
  *   3. 剪映导入框架的默认 BGM（__defaultBgmId，原工程同款）
  *   4. 全库随机兜底（对齐竞品：无指定则配乐，不留白）
  * 随机一律用 genTaskId 派生的稳定索引：同任务重跑不换曲（本仓禁 Math.random）。
- * 每一级都校验记录仍存在，避免陈旧 id 触发 FK 失败。
+ * 每一级都校验记录仍存在（避免陈旧 id 触发 FK 失败），**且校验对应文件真的在磁盘上**——
+ * data/ 目录被误删过一次，库里记录还在但文件没了，选中它会让整条片子在最后混音步骤才失败
+ * （见事故报告：画面/字幕全渲好了，只因一首 BGM 文件缺失整条片子作废）。文件缺失时落到下一级，
+ * 而不是选中一个用不了的。
+ *
+ * 分组池那一级：先按 fileExists 过滤掉磁盘上没有的曲目，再对**过滤后的子集**做 hashPick——
+ * 过滤本身不依赖 genTaskId（同一批 BGM 记录 + 同一批磁盘文件，过滤结果对谁都一样），
+ * 所以「同一 genTaskId 重跑选中同一首」的稳定性不受影响；不能反过来先 hashPick 再检查文件，
+ * 那样命中失效曲目时除了报错没有别的路可退。
  */
 export async function resolveBgmId(
   variables: unknown,
   overlayTemplate: unknown,
   genTaskId: string,
+  fileExists: BgmFileExists = defaultBgmFileExists,
 ): Promise<string | null> {
   const vars = variables as { __bgmId?: string } | null
   if (vars && typeof vars === 'object' && vars.__bgmId) {
     const bgm = await prisma.bgmLibrary.findUnique({ where: { id: vars.__bgmId } })
-    if (bgm) return bgm.id
+    if (bgm) {
+      if (await fileExists(bgm.fileUrl)) return bgm.id
+      console.warn(`[gen] resolve-bgm: 手选曲 id=${bgm.id} 记录还在但文件缺失 (${bgm.fileUrl})，落到下一级`)
+    }
   }
   const hashPick = (pool: { id: string }[]): string | null => {
     if (pool.length === 0) return null
     const idx = Array.from(genTaskId).reduce((a, c) => a + c.charCodeAt(0), 0) % pool.length
     return pool[idx].id
   }
+  const filterExisting = async (pool: { id: string; fileUrl: string }[]): Promise<{ id: string }[]> => {
+    const kept: { id: string }[] = []
+    for (const row of pool) {
+      // eslint-disable-next-line no-await-in-loop -- 池子很小（一个分组/整库的曲目数），顺序 stat 足够快
+      if (await fileExists(row.fileUrl)) {
+        kept.push({ id: row.id })
+      } else {
+        console.warn(`[gen] resolve-bgm: 曲目 id=${row.id} 记录还在但文件缺失 (${row.fileUrl})，从候选池剔除`)
+      }
+    }
+    return kept
+  }
   const folder = readBgmFolder(overlayTemplate)
   if (folder) {
     const pool = await prisma.bgmLibrary.findMany({
-      where: { folder, fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' },
+      where: { folder, fileUrl: { not: '' } }, select: { id: true, fileUrl: true }, orderBy: { id: 'asc' },
     })
-    const picked = hashPick(pool)
+    const picked = hashPick(await filterExisting(pool))
     if (picked) return picked
     console.warn(`[gen] resolve-bgm: 框架绑定的分组「${folder}」里没有可用曲目，落到下一级`)
   }
   const defaultBgmId = readFrameworkDefaults(overlayTemplate).bgmId
   if (defaultBgmId) {
     const bgm = await prisma.bgmLibrary.findUnique({ where: { id: defaultBgmId } })
-    if (bgm) return bgm.id
+    if (bgm) {
+      if (await fileExists(bgm.fileUrl)) return bgm.id
+      console.warn(`[gen] resolve-bgm: 默认曲 id=${bgm.id} 记录还在但文件缺失 (${bgm.fileUrl})，落到下一级`)
+    }
   }
-  const pool = await prisma.bgmLibrary.findMany({ where: { fileUrl: { not: '' } }, select: { id: true }, orderBy: { id: 'asc' } })
-  return hashPick(pool)
+  const pool = await prisma.bgmLibrary.findMany({
+    where: { fileUrl: { not: '' } }, select: { id: true, fileUrl: true }, orderBy: { id: 'asc' },
+  })
+  return hashPick(await filterExisting(pool))
 }
 
 /** 组装 BodyData：segments 由 bodyTimings（按 seqNo）join generated_segments；images 1:1 */

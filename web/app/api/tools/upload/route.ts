@@ -6,6 +6,7 @@ import path from 'path'
 import fs from 'fs/promises'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
+import { checkRate } from '@/lib/ratelimit'
 import { DATA_DIR } from '@/lib/paths'
 
 // 用白名单扩展名而非 file.type：file.type 是浏览器自报的 MIME，不可信；
@@ -14,7 +15,10 @@ const EXT_MAP: Record<string, string> = { '.jpg': 'jpg', '.jpeg': 'jpeg', '.png'
 const MAX_SIZE = 10 * 1024 * 1024
 
 export const POST = handler(async (req) => {
-  await requireRole()
+  const s = await requireRole()
+  // 20 次/分钟：单张最多 10MB，无限流的话学员能无节制写盘把磁盘写满，
+  // 磁盘满会连带打死出片链路（渲染/写临时文件全失败）。
+  checkRate('coze-upload', s.userId, 20)
   const form = await req.formData()
   const file = form.get('file')
   if (!(file instanceof File)) throw new HttpError(400, '缺少文件')

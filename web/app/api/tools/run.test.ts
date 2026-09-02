@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } 
 import { NextRequest } from 'next/server'
 import { prisma } from '@mixcut/db'
 import { HttpError } from '@/lib/auth'
-import { validateInputsAgainst } from '@/lib/cozeInputs'
 
 const requireRoleMock = vi.fn()
 vi.mock('@/lib/auth', async () => {
@@ -91,65 +90,7 @@ function getReq(url: string) {
   return new NextRequest(url, { method: 'GET' })
 }
 
-// ---------------- validateInputsAgainst 纯函数 ----------------
-describe('validateInputsAgainst', () => {
-  const declared = [
-    { name: 'input_text', label: '原文', type: 'text' as const, required: true },
-    { name: 'style', label: '风格', type: 'select' as const, options: ['活泼', '严肃'], required: false },
-    { name: 'cover', label: '封面图', type: 'image' as const, required: false },
-  ]
-
-  it('必填缺失 → 400 指明哪项', () => {
-    try {
-      validateInputsAgainst(declared, {})
-      expect.unreachable()
-    } catch (e) {
-      expect(e).toBeInstanceOf(HttpError)
-      expect((e as HttpError).status).toBe(400)
-      expect((e as HttpError).message).toContain('原文')
-    }
-  })
-
-  it('select 值不在 options 内 → 400', () => {
-    expect(() => validateInputsAgainst(declared, { input_text: 'x', style: '奇怪' })).toThrow(HttpError)
-  })
-
-  it('select 值合法 → 通过', () => {
-    const r = validateInputsAgainst(declared, { input_text: 'x', style: '活泼' })
-    expect(r.style).toBe('活泼')
-  })
-
-  it('image 值路径穿越 → 400', () => {
-    expect(() =>
-      validateInputsAgainst(declared, { input_text: 'x', cover: '../../etc/passwd' }),
-    ).toThrow(HttpError)
-  })
-
-  it('image 值不带 coze-uploads/ 前缀 → 400', () => {
-    expect(() =>
-      validateInputsAgainst(declared, { input_text: 'x', cover: '11111111-1111-1111-1111-111111111111.png' }),
-    ).toThrow(HttpError)
-  })
-
-  it('image 值合法 → 通过', () => {
-    const r = validateInputsAgainst(declared, {
-      input_text: 'x',
-      cover: 'coze-uploads/11111111-1111-1111-1111-111111111111.png',
-    })
-    expect(r.cover).toBe('coze-uploads/11111111-1111-1111-1111-111111111111.png')
-  })
-
-  it('未声明的多余字段丢弃不报错', () => {
-    const r = validateInputsAgainst(declared, { input_text: 'x', extra_junk: 'whatever' })
-    expect(r).not.toHaveProperty('extra_junk')
-  })
-
-  it('text 超长截断到 5000 字符', () => {
-    const long = 'a'.repeat(6000)
-    const r = validateInputsAgainst(declared, { input_text: long })
-    expect((r.input_text as string).length).toBe(5000)
-  })
-})
+// validateInputsAgainst 纯函数的单测搬到 web/lib/cozeInputs.test.ts（同目录，跟被测代码放一起）。
 
 // ---------------- GET /api/tools ----------------
 describe('GET /api/tools', () => {
@@ -278,6 +219,49 @@ describe('POST /api/tools/[id]/run', () => {
     for (const r of results) if (r.status === 200) runIds.push((await r.json()).id)
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(0)
   })
+
+  it('priceCredits=0 的免费工具 → 不扣分', async () => {
+    const u = await makeStudent(3)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    const tool = await makeTool({ priceCredits: 0 })
+    const res = await runPOST(
+      jsonReq('http://localhost/x', 'POST', { inputs: { input_text: 'hi' } }),
+      { params: { id: tool.id } },
+    )
+    expect(res.status).toBe(200)
+    const { id } = await res.json()
+    runIds.push(id)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(3)
+    expect((await prisma.cozeToolRun.findUniqueOrThrow({ where: { id } })).creditsCost).toBe(0)
+  })
+
+  // 必填 text 字段传对象绕过必填校验的回归：validateInputsAgainst 单测已覆盖纯函数层面，
+  // 这里在路由层面复核——绕过成功的话会白扣分、白建 run，是能直接花钱验证到的后果。
+  it('必填字段传对象 {} → 400，不扣分不建 run', async () => {
+    const u = await makeStudent(10)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    const tool = await makeTool({ priceCredits: 2 })
+    const res = await runPOST(
+      jsonReq('http://localhost/x', 'POST', { inputs: { input_text: {} } }),
+      { params: { id: tool.id } },
+    )
+    expect(res.status).toBe(400)
+    expect(await prisma.cozeToolRun.count({ where: { toolId: tool.id } })).toBe(0)
+    expect(enqueueCozeRunMock).not.toHaveBeenCalled()
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(10)
+  })
+
+  it('限流：超过 10 次/分钟 → 429', async () => {
+    const u = await makeStudent(100)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    // checkRate 在 requireRole 之后、findUnique 之前就判定，用不存在的工具 id 也能触发限流，
+    // 不用真造工具/扣分，前 10 次落在「工具不存在」的 404 上，第 11 次落在限流的 429 上。
+    let last: Response | undefined
+    for (let i = 0; i < 11; i++) {
+      last = await runPOST(jsonReq('http://localhost/x', 'POST', { inputs: {} }), { params: { id: 'ghost-rate' } })
+    }
+    expect(last?.status).toBe(429)
+  })
 })
 
 // ---------------- GET /api/tools/runs & /api/tools/runs/[id] ----------------
@@ -309,17 +293,37 @@ describe('学员运行记录：列表与详情', () => {
     expect(ids).toContain(r2.id)
     expect(ids).not.toContain(rOther.id)
     expect(ids.indexOf(r2.id)).toBeLessThan(ids.indexOf(r1.id))
+    // 列表不带 inputs/outputRaw：outputRaw 是扣子原始响应整包，将来会含 debug_url（带 workflow_id）
+    const raw = JSON.stringify(runs)
+    expect(raw).not.toContain('outputRaw')
+    expect(raw).not.toContain('workflowId')
+    expect(raw).not.toContain('"inputs"')
   })
 
-  it('详情：本人可查', async () => {
+  it('详情：本人可查，且不泄漏 outputRaw / workflowId / inputs', async () => {
     const u = await makeStudent(10)
     const tool = await makeTool()
-    const run = await prisma.cozeToolRun.create({ data: { toolId: tool.id, userId: u.id, inputs: {}, creditsCost: 1 } })
+    const run = await prisma.cozeToolRun.create({
+      data: {
+        toolId: tool.id,
+        userId: u.id,
+        inputs: { input_text: 'secret prompt' },
+        creditsCost: 1,
+        outputRaw: { debug_url: 'https://coze.example/debug?workflow_id=wf-should-not-leak' },
+      },
+    })
     runIds.push(run.id)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     const res = await runDetailGET(getReq('http://localhost/x'), { params: { id: run.id } })
     expect(res.status).toBe(200)
-    expect((await res.json()).id).toBe(run.id)
+    const json = await res.json()
+    expect(json.id).toBe(run.id)
+    const raw = JSON.stringify(json)
+    expect(raw).not.toContain('outputRaw')
+    expect(raw).not.toContain('workflowId')
+    expect(raw).not.toContain('wf-should-not-leak')
+    expect(raw).not.toContain('secret prompt')
+    expect(json).not.toHaveProperty('userId')
   })
 
   it('详情：越权——学员 A 查学员 B 的 run → 404（不是 403）', async () => {

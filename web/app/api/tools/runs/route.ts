@@ -12,6 +12,12 @@ export const GET = handler(async () => {
     where: { userId: s.userId },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: PAGE_SIZE,
+    // 收窄字段：不给 inputs/outputRaw——outputRaw 是扣子原始响应整包，可能含 debug_url
+    // 之类带 workflow_id 的字段，学员端不该看到；inputs 列表页也用不上，体积还可能较大。
+    select: {
+      id: true, toolId: true, status: true, errorMsg: true,
+      creditsCost: true, outputItems: true, createdAt: true, finishedAt: true,
+    },
   })
   return NextResponse.json({ runs })
 })

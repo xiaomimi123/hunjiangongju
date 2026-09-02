@@ -35,10 +35,16 @@ export function validateInputsAgainst(toolInputs: unknown, submitted: unknown): 
       }
       result[item.name] = raw
     } else {
-      // text / textarea：非字符串（数字/布尔）转字符串；对象/数组这类明显错误的形状按空串处理，
-      // 避免 "[object Object]" 混进去
-      const str =
-        typeof raw === 'string' ? raw : typeof raw === 'number' || typeof raw === 'boolean' ? String(raw) : ''
+      // text / textarea：非字符串（数字/布尔）转字符串；对象/数组这类明显错误的形状直接 400——
+      // 早先把它们静默转成 ''，会绕过上面的 required 判定（{} 不是 undefined/null/''，
+      // 但转完是空串）：required 字段传个空对象就能骗过校验，白扣分建 run 让 worker 拿空串跑。
+      if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') {
+        throw new HttpError(400, `「${item.label}」必须是文本`)
+      }
+      const str = typeof raw === 'string' ? raw : String(raw)
+      if (item.required && str === '') {
+        throw new HttpError(400, `「${item.label}」不能为空`)
+      }
       result[item.name] = str.slice(0, MAX_TEXT_LEN)
     }
   }

@@ -50,8 +50,9 @@ export default function VideoCard({
 }: VideoCardProps) {
   const [playing, setPlaying] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
-  // 首帧 <video> 视口懒挂载：卡片进视口前不挂 src（不发起首帧抽帧请求），
-  // 只有内嵌播放场景（无 onClick）才需要，跳转场景（有 onClick）本就不渲染这个 <video>。
+  // 首帧 <video> 视口懒挂载：卡片进视口前不挂 src（不发起首帧抽帧请求）。
+  // 内嵌播放卡与跳转卡（有 onClick）都渲染这段首帧预览，懒挂载对两者同样生效——
+  // 一页可能同时有近百张卡，不懒挂会并发近百个 range 请求抓视频头。
   const [inView, setInView] = useState(false)
   const posterRef = useRef<HTMLDivElement | null>(null)
 

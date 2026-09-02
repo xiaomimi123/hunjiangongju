@@ -283,3 +283,36 @@ model BookLibrary {
   @@unique([title, author])
   @@map("book_library")
 }
+
+/// 后台导入的扣子工作流工具。学员端「工具广场」按 enabled + sortOrder 展示。
+model CozeTool {
+  id           String   @id @default(cuid())
+  name         String
+  description  String   @default("")
+  workflowId   String   @map("workflow_id")
+  /// [{ name, label, type: 'text'|'textarea'|'select'|'image', options?, placeholder?, required }]
+  inputs       Json
+  priceCredits Int      @default(1) @map("price_credits")
+  enabled      Boolean  @default(false)
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  @@map("coze_tools")
+}
+
+/// 学员的每次运行。软引用 user/tool（与仓库现有风格一致，应用层校验）。
+model CozeToolRun {
+  id          String    @id @default(cuid())
+  toolId      String    @map("tool_id")
+  userId      String    @map("user_id")
+  inputs      Json
+  status      String    @default("QUEUED")
+  outputRaw   Json?     @map("output_raw")
+  outputItems Json?     @map("output_items")
+  errorMsg    String?   @map("error_msg")
+  creditsCost Int       @map("credits_cost")
+  refunded    Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  finishedAt  DateTime? @map("finished_at")
+  @@index([userId, createdAt])
+  @@map("coze_tool_runs")
+}

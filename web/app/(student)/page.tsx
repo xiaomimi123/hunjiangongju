@@ -27,16 +27,19 @@ type Gen = {
 }
 type Work = { id: string; subject: string; framework: { name: string | null }; videoUrl: string | null; createdAt: string }
 type Me = { nickname: string | null }
+type Tool = { id: string; name: string; description: string | null; priceCredits: number }
 
 export default function HomePage() {
   const [me, setMe] = useState<Me | null>(null)
   const [recent, setRecent] = useState<Gen[]>([])
   const [works, setWorks] = useState<Work[]>([])
+  const [tools, setTools] = useState<Tool[]>([])
 
   useEffect(() => {
     api<Me>('/api/auth/me').then(setMe).catch(() => {})
     api<{ tasks: Gen[] }>('/api/generate').then((d) => setRecent(d.tasks.slice(0, 3))).catch(() => {})
     api<{ works: Work[] }>('/api/library/works').then((d) => setWorks(d.works.slice(0, 4))).catch(() => {})
+    api<{ tools: Tool[] }>('/api/tools').then((d) => setTools(d.tools.slice(0, 4))).catch(() => {})
   }, [])
 
   return (
@@ -80,6 +83,23 @@ export default function HomePage() {
           </Link>
         )}
       </section>
+
+      {tools.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">工具广场</p>
+            <Link href="/tools" className="text-sm text-flame">全部工具</Link>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            {tools.map((t) => (
+              <Link key={t.id} href={`/tools/${t.id}`} className="card space-y-1 p-4">
+                <p className="truncate text-sm font-medium">{t.name}</p>
+                <p className="text-xs text-ink3">{t.priceCredits} 积分</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {works.length > 0 && (
         <section className="space-y-3">

@@ -12,7 +12,9 @@ export const GET = handler(async (_req, { params }) => {
   const run = await prisma.cozeToolRun.findUnique({
     where: { id: params.id },
     // 收窄字段：不给 inputs/outputRaw——outputRaw 是扣子原始响应整包，可能含 debug_url
-    // 之类带 workflow_id 的字段，学员端不该看到。
+    // 之类带 workflow_id 的字段，学员端不该看到。inputs 本条接口按既有测试口径不下发
+    // （见 run.test.ts「不泄漏…inputs」用例）；「再跑一次」预填改走 GET /api/tools/runs
+    // 列表接口——那边的 select 本就带 inputs（供成片库拼摘要用），同一批数据不算新增暴露面。
     select: {
       id: true, toolId: true, userId: true, status: true, errorMsg: true,
       creditsCost: true, outputItems: true, createdAt: true, finishedAt: true,

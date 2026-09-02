@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { api, ApiError } from '@/lib/fetcher'
 
@@ -8,15 +8,41 @@ type InputType = 'text' | 'textarea' | 'select' | 'image'
 type ToolInput = { name: string; label: string; type: InputType; options?: string[]; placeholder?: string; required: boolean }
 type Tool = { id: string; name: string; description: string | null; priceCredits: number; inputs: ToolInput[] }
 type Wallet = { credits: number; qrUrl: string }
+// 「再跑一次」预填只需要 id 和 inputs——从运行记录列表接口里挑一条
+type PrevRun = { id: string; inputs: unknown }
+
+// 内联 SVG 图标：禁 emoji，照样稿 #i-img / #i-bolt
+function ImageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="mx-auto h-5 w-5 text-ink3" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M4 18l5-5 3 3 4-4 4 4" />
+    </svg>
+  )
+}
+function BoltIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+    </svg>
+  )
+}
 
 export default function ToolFormPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const fromRunId = searchParams.get('from')
+
   const [tool, setTool] = useState<Tool | null>(null)
   const [wallet, setWallet] = useState<Wallet | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
   const [uploading, setUploading] = useState<Record<string, boolean>>({})
   const [err, setErr] = useState('')
+  const [fieldErr, setFieldErr] = useState<Record<string, string>>({})
+  const [prefillNote, setPrefillNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [showRecharge, setShowRecharge] = useState(false)
 
@@ -32,8 +58,32 @@ export default function ToolFormPage() {
     loadWallet()
   }, [id])
 
+  // 「再跑一次」预填：GET /api/tools/runs/[id] 出于隐私考虑不下发 inputs（见其路由注释），
+  // 改从运行记录列表接口（本就带 inputs，供成片库拼摘要用）里按 id 挑这一条。只预填文本类
+  // 字段——图片字段的上传路径已是历史文件，直接搬进新一轮提交没意义，提示用户重新上传。
+  useEffect(() => {
+    if (!tool || !fromRunId) return
+    api<{ runs: PrevRun[] }>('/api/tools/runs').then((d) => {
+      const prev = d.runs.find((r) => r.id === fromRunId)
+      if (!prev || !prev.inputs || typeof prev.inputs !== 'object') return
+      const inputsObj = prev.inputs as Record<string, unknown>
+      const next: Record<string, string> = {}
+      let hasImageField = false
+      for (const input of tool.inputs) {
+        if (input.type === 'image') { hasImageField = true; continue }
+        const v = inputsObj[input.name]
+        if (typeof v === 'string' && v) next[input.name] = v
+      }
+      if (Object.keys(next).length > 0) {
+        setValues((cur) => ({ ...next, ...cur }))
+        setPrefillNote(hasImageField ? '已带入上次的文本填写，图片需重新上传' : '已带入上次的文本填写')
+      }
+    }).catch(() => {})
+  }, [tool, fromRunId])
+
   function setValue(name: string, v: string) {
     setValues((prev) => ({ ...prev, [name]: v }))
+    setFieldErr((prev) => (prev[name] ? { ...prev, [name]: '' } : prev))
   }
 
   async function uploadImage(name: string, file: File) {
@@ -53,13 +103,19 @@ export default function ToolFormPage() {
 
   async function submit() {
     if (!tool) return
+    const clientFieldErr: Record<string, string> = {}
     for (const input of tool.inputs) {
       if (input.required && !values[input.name]?.trim()) {
-        setErr(`「${input.label}」不能为空`)
-        return
+        clientFieldErr[input.name] = `「${input.label}」不能为空`
       }
     }
+    if (Object.keys(clientFieldErr).length > 0) {
+      setFieldErr(clientFieldErr)
+      setErr('')
+      return
+    }
     setErr('')
+    setFieldErr({})
     setSubmitting(true)
     try {
       const run = await api<{ id: string }>(`/api/tools/${tool.id}/run`, { body: { inputs: values } })
@@ -69,7 +125,12 @@ export default function ToolFormPage() {
         setShowRecharge(true)
         loadWallet()
       } else {
-        setErr((e as Error).message)
+        // 服务端 400 报错文案是「「字段 label」不能为空/不在可选项内/不是合法的图片路径」
+        // 这类，按 label 反查挂到对应字段下方；匹配不到（比如整体格式错误）才顶部红条兜底
+        const msg = (e as Error).message
+        const matched = tool.inputs.find((input) => msg.includes(input.label))
+        if (matched) setFieldErr({ [matched.name]: msg })
+        else setErr(msg)
       }
       setSubmitting(false)
     }
@@ -103,13 +164,21 @@ export default function ToolFormPage() {
       </div>
 
       <p className="pill pill-run w-fit">消耗 {tool.priceCredits} 积分</p>
+      {prefillNote && <p className="pill pill-warn w-fit">{prefillNote}</p>}
 
-      <div className="space-y-3">
+      <div className="space-y-3.5">
         {tool.inputs.map((input) => (
           <div key={input.name}>
-            <p className="eyebrow mb-1.5">
-              {input.label} {input.required && <span className="text-flame">*</span>}
-            </p>
+            <div className="mb-1.5 flex flex-wrap items-baseline gap-x-1.5">
+              <p className="eyebrow">
+                {input.label}
+                {input.required && <span className="ml-0.5 text-flame">*</span>}
+              </p>
+              <p className="text-[0.66rem] normal-case tracking-normal text-ink3">
+                {input.required ? '必填' : '选填'}
+                {input.placeholder ? ` · ${input.placeholder}` : ''}
+              </p>
+            </div>
             {input.type === 'text' && (
               <input className="field" value={values[input.name] ?? ''} placeholder={input.placeholder}
                 onChange={(e) => setValue(input.name, e.target.value)} />
@@ -127,12 +196,15 @@ export default function ToolFormPage() {
             )}
             {input.type === 'image' && (
               <div className="space-y-2">
-                <input type="file" accept="image/jpeg,image/png,image/webp" className="field"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) uploadImage(input.name, file)
-                  }} />
-                {uploading[input.name] && <p className="text-xs text-ink3">上传中…</p>}
+                <label className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-2xl border-[1.5px] border-dashed border-line px-4 py-5 text-center text-xs text-ink3 transition active:scale-[0.99]">
+                  <ImageIcon />
+                  <span>{uploading[input.name] ? '上传中…' : '点击上传图片'}</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (file) uploadImage(input.name, file)
+                    }} />
+                </label>
                 {values[input.name] && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={`/api/files/${values[input.name]}`} alt={input.label}
@@ -140,14 +212,17 @@ export default function ToolFormPage() {
                 )}
               </div>
             )}
+            {fieldErr[input.name] && <p className="mt-1 text-xs text-bad">{fieldErr[input.name]}</p>}
           </div>
         ))}
       </div>
 
       {err && <p className="pill pill-bad">{err}</p>}
       <button onClick={submit} disabled={submitting || anyUploading} className="btn-primary w-full">
-        {submitting ? '提交中…' : `⚡ 运行（${tool.priceCredits} 积分）`}
+        <BoltIcon />
+        {submitting ? '提交中…' : `消耗 ${tool.priceCredits} 积分 · 开始生成`}
       </button>
+      <p className="text-center text-[0.66rem] text-ink3">生成约需 3-10 分钟 · 失败自动退回积分</p>
 
       {showRecharge && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40 p-4" onClick={() => setShowRecharge(false)}>

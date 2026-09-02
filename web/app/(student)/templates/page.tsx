@@ -15,6 +15,25 @@ type Framework = {
   defaultVoice?: string
 }
 
+// 内联 SVG 闪电图标：禁 emoji，照样稿 #i-bolt
+function BoltIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6z" />
+    </svg>
+  )
+}
+
+// 列表左侧竖版缩略占位：无真实封面图时按 id 轮换渐变色块，照样稿 .p1~.p6
+const POSTER_GRADIENTS = [
+  'bg-gradient-to-br from-[#2b2d42] to-[#8d99ae]',
+  'bg-gradient-to-br from-[#5e3023] to-[#c08552]',
+  'bg-gradient-to-br from-[#1d3557] to-[#457b9d]',
+  'bg-gradient-to-br from-[#3a2d55] to-[#9b5de5]',
+  'bg-gradient-to-br from-[#14342b] to-[#60935d]',
+  'bg-gradient-to-br from-[#4a1c2e] to-[#b23a48]',
+]
+
 export default function FrameworkLibraryPage() {
   const router = useRouter()
   const [frameworks, setFrameworks] = useState<Framework[]>([])
@@ -91,17 +110,18 @@ export default function FrameworkLibraryPage() {
       {err && <p className="pill pill-bad">{err}</p>}
 
       <div className="space-y-2.5">
-        {frameworks.map((f) => (
+        {frameworks.map((f, i) => (
           <button key={f.id} onClick={() => open(f)}
-            className="card flex w-full items-center justify-between gap-3 p-4 text-left transition active:scale-[0.99]">
-            <div className="min-w-0">
+            className="card flex w-full items-center gap-3 p-3 text-left transition active:scale-[0.99]">
+            <div className={`aspect-[9/16] w-14 shrink-0 rounded-2xl ${POSTER_GRADIENTS[i % POSTER_GRADIENTS.length]}`} />
+            <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{f.name}</p>
               <p className="mt-0.5 truncate text-xs text-ink3">
                 {f.industryCategory ?? '通用'}
                 {f.suggestedSegmentCount ? <> · 约 <span className="num">{f.suggestedSegmentCount}</span> 段</> : null}
               </p>
             </div>
-            <span className="grad shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium text-white">用它生成</span>
+            <span className="shrink-0 text-xs font-bold text-flame">去做片</span>
           </button>
         ))}
         {frameworks.length === 0 && !err && (
@@ -140,7 +160,8 @@ export default function FrameworkLibraryPage() {
           )}
           {sheetErr && <p className="pill pill-bad">{sheetErr}</p>}
           <button onClick={create} disabled={creating} className="btn-primary w-full">
-            {creating ? '生成中…' : '⚡ 生成'}
+            <BoltIcon />
+            {creating ? '生成中…' : '生成'}
           </button>
         </div>
       </BottomSheet>

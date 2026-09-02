@@ -83,7 +83,14 @@ const PAGE_SIZE = 50
 
 export const GET = handler(async (req) => {
   const s = await requireRole()
-  const cursor = new URL(req.url).searchParams.get('cursor')?.trim() || undefined
+  const url = new URL(req.url)
+  const cursor = url.searchParams.get('cursor')?.trim() || undefined
+  // ?limit=1~50：首页「最近成片」等只要极少条数时不必按 PAGE_SIZE 硬取 50 条再截断。
+  // 缺省/非法值仍落回 PAGE_SIZE，行为与改动前一致。
+  const limitParam = Number(url.searchParams.get('limit'))
+  const pageSize = Number.isFinite(limitParam) && limitParam > 0
+    ? Math.min(PAGE_SIZE, Math.max(1, Math.floor(limitParam)))
+    : PAGE_SIZE
   // 学员只看自己的；运营看全部（含学员创建的）。此前无论角色一律按 createdBy 过滤，
   // 导致后台「生成栏」永远看不到学员的任务——任务在库里状态正常流转，后台却是空的。
   const isOperator = s.role === 'operator'
@@ -92,7 +99,7 @@ export const GET = handler(async (req) => {
     // id 兜底定序：同毫秒创建的任务在多次查询间行序稳定，翻页不重不漏
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     // 多取一条判断有没有下一页，比额外 count 便宜
-    take: PAGE_SIZE + 1,
+    take: pageSize + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {
       id: true, subject: true, status: true, createdAt: true, updatedAt: true,
@@ -100,11 +107,11 @@ export const GET = handler(async (req) => {
       framework: { select: { name: true } },
       // 最新合成任务状态：autoRender 任务的 generationTask.status 停在 VISUAL_RENDERING，
       // 真实进度（EXPORTED/QC_FAILED 等）在 RenderTask 上，列表据此归类「已完成/失败」。
-      renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
+      renderTasks: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true, videoUrl: true } },
     },
   })
-  const hasMore = rows.length > PAGE_SIZE
-  const tasks = hasMore ? rows.slice(0, PAGE_SIZE) : rows
+  const hasMore = rows.length > pageSize
+  const tasks = hasMore ? rows.slice(0, pageSize) : rows
   const nextCursor = hasMore ? tasks[tasks.length - 1]?.id : undefined
   if (!isOperator) return NextResponse.json({ tasks, ...(nextCursor ? { nextCursor } : {}) })
 

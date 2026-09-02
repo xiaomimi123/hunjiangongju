@@ -316,3 +316,15 @@ model CozeToolRun {
   @@index([userId, createdAt])
   @@map("coze_tool_runs")
 }
+
+/// 移动端首页公告 Banner。学员端只看 enabled 的，按 sortOrder asc 展示。
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  body      String   @default("")
+  linkUrl   String?  @map("link_url")
+  enabled   Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("banners")
+}

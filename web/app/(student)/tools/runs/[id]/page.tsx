@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import VideoCard from '@/components/VideoCard'
 
 type OutputItem = { kind: 'text'; text: string } | { kind: 'image' | 'video' | 'file'; url: string }
 type Status = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
@@ -10,6 +11,7 @@ type Run = {
   id: string; toolId: string; status: Status; errorMsg: string | null
   creditsCost: number; outputItems: OutputItem[] | null; createdAt: string; finishedAt: string | null
 }
+type Tool = { id: string; name: string }
 
 const STATUS_LABEL: Record<Status, string> = {
   QUEUED: '排队中', RUNNING: '运行中', SUCCEEDED: '已完成', FAILED: '失败',
@@ -43,6 +45,7 @@ function CopyButton({ text }: { text: string }) {
 export default function ToolRunResultPage() {
   const { id } = useParams<{ id: string }>()
   const [run, setRun] = useState<Run | null>(null)
+  const [toolName, setToolName] = useState<string | null>(null)
   const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
@@ -60,6 +63,13 @@ export default function ToolRunResultPage() {
     }, 3000)
     return () => { stopped = true; clearInterval(timer) }
   }, [load])
+
+  useEffect(() => {
+    if (!run) return
+    api<{ tools: Tool[] }>('/api/tools').then((d) => {
+      setToolName(d.tools.find((t) => t.id === run.toolId)?.name ?? null)
+    }).catch(() => {})
+  }, [run?.toolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!run && err) {
     return (
@@ -103,34 +113,40 @@ export default function ToolRunResultPage() {
 
       {run.status === 'SUCCEEDED' && items.length > 0 && (
         <div className="space-y-3">
-          {items.map((item, i) => (
-            <div key={i} className="card p-4">
-              {item.kind === 'text' && (
-                <div className="flex items-start justify-between gap-3">
-                  <p className="whitespace-pre-wrap text-sm text-ink2">{item.text}</p>
-                  <CopyButton text={item.text} />
-                </div>
-              )}
-              {item.kind === 'image' && (
-                <div className="space-y-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={item.url} alt="生成图片" className="w-full rounded-xl object-contain" />
-                  <a href={item.url} download className="btn-ghost w-full">下载图片</a>
-                </div>
-              )}
-              {item.kind === 'video' && (
-                <div className="space-y-2">
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video controls src={item.url} className="w-full rounded-xl bg-black" />
-                  <a href={item.url} download className="btn-ghost w-full">下载视频</a>
-                </div>
-              )}
-              {item.kind === 'file' && (
-                <a href={item.url} download className="btn-ghost w-full">下载文件</a>
-              )}
-            </div>
-          ))}
+          {items.map((item, i) => {
+            if (item.kind === 'video') {
+              return (
+                <VideoCard key={i} src={item.url} title={toolName ?? '生成结果'}
+                  subtitle={new Date(run.createdAt).toLocaleString()}
+                  footer={<a href={item.url} download className="btn-ghost mt-2 w-full">下载视频</a>} />
+              )
+            }
+            return (
+              <div key={i} className="card p-4">
+                {item.kind === 'text' && (
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="whitespace-pre-wrap text-sm text-ink2">{item.text}</p>
+                    <CopyButton text={item.text} />
+                  </div>
+                )}
+                {item.kind === 'image' && (
+                  <div className="space-y-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={item.url} alt="生成图片" className="w-full rounded-xl object-contain" />
+                    <a href={item.url} download className="btn-ghost w-full">下载图片</a>
+                  </div>
+                )}
+                {item.kind === 'file' && (
+                  <a href={item.url} download className="btn-ghost w-full">下载文件</a>
+                )}
+              </div>
+            )
+          })}
         </div>
+      )}
+
+      {run.status === 'SUCCEEDED' && (
+        <Link href={`/tools/${run.toolId}?from=${run.id}`} className="btn-ghost w-full">再跑一次</Link>
       )}
 
       <Link href="/tools/runs" className="block text-center text-sm text-flame">← 返回我的记录</Link>

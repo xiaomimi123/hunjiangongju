@@ -8,12 +8,64 @@ import { TTS_VOICES, type TtsVoice } from '@mixcut/db/src/ai/ttsVoices'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
-import { GenPill } from './genStatus'
+import { GEN_LABELS } from './genStatus'
 import { effStatus } from '@/lib/effStatus'
+import VideoCard from '@/components/VideoCard'
 
 type Framework = { id: string; name: string | null; industryCategory: string | null; visualStyleType: string; createdAt: string; defaultAssetFolder: string | null }
 type Creator = { nickname: string | null; email: string; role: string }
-type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null; creator?: Creator | null; renderTasks?: { status: string }[] }
+// renderTasks 需带上 videoUrl 才能在卡片海报里出首帧/给下载按钮取地址（/api/generate GET 已选取）
+type GenTask = { id: string; subject: string; status: string; createdAt: string; updatedAt: string; framework: { name: string | null } | null; creator?: Creator | null; renderTasks?: { status: string; videoUrl: string | null }[] }
+
+// 状态徽标色调：与 genStatus.tsx 内部私有的 genTone 四档语义一致（ok/bad/warn/run），
+// 但那个函数没导出，故本页照抄一份同口径版本——学员端首页（web/app/(student)/page.tsx）
+// 也是这么各页面自带一份的老规矩。warn=待处理（素材就绪/待预览确认），需运营手动介入。
+function genTone(status: string): 'ok' | 'run' | 'bad' | 'warn' {
+  if (status === 'EXPORTED' || status === 'QC_PASSED') return 'ok'
+  if (status === 'FAILED' || status === 'QC_FAILED') return 'bad'
+  if (status === 'ASSET_READY' || status === 'PREVIEW_PENDING') return 'warn'
+  return 'run'
+}
+
+// 卡片无成片时的渐变占位，循环取样稿色值（与学员端首页 POSTERS 同一批配色，保持视觉一致）
+const POSTERS = [
+  'bg-gradient-to-br from-[#2b2d42] to-[#8d99ae]',
+  'bg-gradient-to-br from-[#5e3023] to-[#c08552]',
+  'bg-gradient-to-br from-[#1d3557] to-[#457b9d]',
+  'bg-gradient-to-br from-[#3a2d55] to-[#9b5de5]',
+  'bg-gradient-to-br from-[#14342b] to-[#60935d]',
+  'bg-gradient-to-br from-[#4a1c2e] to-[#b23a48]',
+]
+
+// 学员账号即 11 位手机号（email 列存手机号，见 phone-account-system 备忘），打码成 138****2210；
+// 非该形态（如运营账号邮箱）原样展示，不臆造格式。
+function maskPhone(v: string): string {
+  return /^\d{11}$/.test(v) ? `${v.slice(0, 3)}****${v.slice(7)}` : v
+}
+
+// 框架名超 6 字截断加省略号，避免卡片副行被挤爆；无框架（如手动文案模式）时整段省略
+function truncateFrameworkName(name: string): string {
+  return name.length > 6 ? `${name.slice(0, 6)}…` : name
+}
+
+function creatorLabel(c: Creator | null | undefined, frameworkName: string | null | undefined): string {
+  const who = !c ? '—' : c.role === 'student' ? `学员 ${maskPhone(c.email)}` : c.nickname || c.email
+  return frameworkName ? `${who} · ${truncateFrameworkName(frameworkName)}` : who
+}
+
+// 相对时间：今天/昨天/前天/N天前，超过一个月退回日期，样稿（video-card-mockup.html「E·后台」）同款口径
+function relTime(iso: string): string {
+  const d = new Date(iso)
+  const now = new Date()
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((startOf(now) - startOf(d)) / 86400000)
+  if (diffDays <= 0) return '今天'
+  if (diffDays === 1) return '昨天'
+  if (diffDays === 2) return '前天'
+  if (diffDays < 30) return `${diffDays}天前`
+  return d.toLocaleDateString('zh-CN')
+}
+
 type BookRow = { title: string; author: string; points: string }
 type Mode = 'subject' | 'books'
 type Voice = { id: string; voiceId: string; name: string }
@@ -183,70 +235,68 @@ export default function GeneratePage() {
       </PageHeader>
       {err && <p className="pill pill-bad">{err}</p>}
 
-      <div className="card overflow-x-auto">
-        {tasks && tasks.length >= 200 && (
-          <p className="border-b border-line px-4 py-2 text-xs text-ink3">仅显示最近 200 条生成任务</p>
-        )}
-        <table className="w-full text-sm">
-          <thead className="bg-surface2 text-left text-ink3">
-            <tr>
-              <th className="px-4 py-3 font-medium">选题</th>
-              <th className="px-4 py-3 font-medium">框架</th>
-              <th className="px-4 py-3 font-medium">创建人</th>
-              <th className="px-4 py-3 font-medium">状态</th>
-              <th className="px-4 py-3 font-medium">创建时间</th>
-              <th className="px-4 py-3 font-medium text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {tasks?.map((t) => (
-              <tr key={t.id} className="cursor-pointer hover:bg-surface2" onClick={() => router.push(`/admin/generate/${t.id}`)}>
-                <td className="px-4 py-3">
-                  <Link href={`/admin/generate/${t.id}`} className="font-medium text-flame">{t.subject}</Link>
-                </td>
-                <td className="px-4 py-3 text-ink2">{t.framework?.name ?? '—'}</td>
-                <td className="px-4 py-3 text-ink2">
-                  {t.creator
-                    ? <span title={t.creator.email}>{t.creator.nickname || t.creator.email}{t.creator.role === 'student' && <span className="ml-1 text-ink3">(学员)</span>}</span>
-                    : <span className="text-ink3">—</span>}
-                </td>
-                {/* 有效状态：渲染排队后 genTask.status 停在 VISUAL_RENDERING 不再前进，
-                    真实进度在最新 RenderTask 上（effStatus 的老坑，第四个页面也中过） */}
-                <td className="px-4 py-3"><GenPill status={effStatus({ status: t.status, renderTasks: t.renderTasks ?? [] })} /></td>
-                <td className="num px-4 py-3 text-ink3">{new Date(t.createdAt).toLocaleString('zh-CN')}</td>
-                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => del(t.id, t.subject)} disabled={deleting === t.id}
-                    className="text-ink3 hover:text-flame disabled:opacity-50">
-                    {deleting === t.id ? '删除中…' : '删除'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {tasks && tasks.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-ink3">暂无生成任务，点击右上角「发起生成」</td></tr>
-            )}
-            {!tasks && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-ink3">加载中…</td></tr>
-            )}
-          </tbody>
-        </table>
-        {nextCursor && (
-          <div className="border-t border-line p-3 text-center">
-            <button className="btn-ghost text-xs" disabled={loadingMore}
-              onClick={async () => {
-                setLoadingMore(true)
-                try {
-                  const d = await api<{ tasks: GenTask[]; nextCursor?: string }>(`/api/generate?cursor=${nextCursor}`)
-                  setTasks((prev) => [...(prev ?? []), ...d.tasks])
-                  setNextCursor(d.nextCursor ?? null)
-                } catch (e) { setErr((e as Error).message) }
-                finally { setLoadingMore(false) }
-              }}>
-              {loadingMore ? '加载中…' : '加载更多'}
-            </button>
-          </div>
-        )}
-      </div>
+      {tasks && tasks.length >= 200 && (
+        <p className="text-xs text-ink3">仅显示最近 200 条生成任务</p>
+      )}
+
+      {!tasks && <p className="py-10 text-center text-sm text-ink3">加载中…</p>}
+      {tasks && tasks.length === 0 && (
+        <p className="py-10 text-center text-sm text-ink3">暂无生成任务，点击右上角「发起生成」</p>
+      )}
+
+      {tasks && tasks.length > 0 && (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+          {tasks.map((t, i) => {
+            // 有效状态：渲染排队后 genTask.status 停在 VISUAL_RENDERING 不再前进，
+            // 真实进度在最新 RenderTask 上（effStatus 的老坑，第四个页面也中过）
+            const st = effStatus({ status: t.status, renderTasks: t.renderTasks ?? [] })
+            const rt = t.renderTasks?.[0]
+            return (
+              <VideoCard
+                key={t.id}
+                src={rt?.videoUrl ?? null}
+                title={t.subject}
+                subtitle={creatorLabel(t.creator, t.framework?.name)}
+                trailing={<span>{relTime(t.createdAt)}</span>}
+                badge={{ text: GEN_LABELS[st] ?? st, tone: genTone(st) }}
+                posterClassName={POSTERS[i % POSTERS.length]}
+                onClick={() => router.push(`/admin/generate/${t.id}`)}
+                footer={
+                  <div className="mt-2 flex gap-1.5 border-t border-line pt-2" onClick={(e) => e.stopPropagation()}>
+                    <Link href={`/admin/generate/${t.id}`} className="btn-ghost flex-1 px-2 text-xs">工作台</Link>
+                    {rt?.videoUrl
+                      ? <a href={rt.videoUrl} download className="btn-ghost flex-1 px-2 text-xs">下载</a>
+                      : <span className="btn-ghost flex-1 px-2 text-xs opacity-40">下载</span>}
+                    {/* 「重跑」在本页范围内无对应现成 handler（详情页的重渲/退回编辑各自有前置门禁，
+                        不在列表这层暴露）；沿用列表原有的「删除」而非臆造一个假动作，见提交说明疑虑记录 */}
+                    <button onClick={() => del(t.id, t.subject)} disabled={deleting === t.id}
+                      className="btn-ghost flex-1 px-2 text-xs disabled:opacity-50">
+                      {deleting === t.id ? '删除中…' : '删除'}
+                    </button>
+                  </div>
+                }
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {nextCursor && (
+        <div className="text-center">
+          <button className="btn-ghost text-xs" disabled={loadingMore}
+            onClick={async () => {
+              setLoadingMore(true)
+              try {
+                const d = await api<{ tasks: GenTask[]; nextCursor?: string }>(`/api/generate?cursor=${nextCursor}`)
+                setTasks((prev) => [...(prev ?? []), ...d.tasks])
+                setNextCursor(d.nextCursor ?? null)
+              } catch (e) { setErr((e as Error).message) }
+              finally { setLoadingMore(false) }
+            }}>
+            {loadingMore ? '加载中…' : '加载更多'}
+          </button>
+        </div>
+      )}
 
       <Modal open={open} onClose={() => !busy && setOpen(false)} title="发起生成" wide>
         <div className="space-y-4">

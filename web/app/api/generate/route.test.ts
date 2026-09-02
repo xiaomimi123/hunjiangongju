@@ -138,4 +138,28 @@ describe('GET /api/generate —— 列表可见范围', () => {
     expect(found).toBeTruthy()
     expect(found?.creator?.nickname).toBe('学员小王')
   })
+
+  // ?limit=N：clamp 到 1~50，缺省/非法值仍按 50 处理（首页最近成片只要 3 条时不必多取再截断）
+  it('?limit=N 生效且被 clamp 到 1~50', async () => {
+    const fw = await makeFramework()
+    for (let i = 0; i < 5; i++) {
+      const t = await prisma.generationTask.create({ data: { frameworkId: fw.id, subject: `limit测试${i}`, createdBy: 'limit-stu' } })
+      taskIds.push(t.id)
+    }
+    requireRoleMock.mockResolvedValue({ userId: 'limit-stu', role: 'student' })
+
+    const res3 = await GET(new NextRequest('http://localhost/api/generate?limit=3'), { params: {} })
+    const j3 = (await res3.json()) as { tasks: unknown[] }
+    expect(j3.tasks.length).toBe(3)
+
+    // 超过上限（>50）应被 clamp 到 50，而非原样透传
+    const resBig = await GET(new NextRequest('http://localhost/api/generate?limit=999'), { params: {} })
+    const jBig = (await resBig.json()) as { tasks: unknown[] }
+    expect(jBig.tasks.length).toBeLessThanOrEqual(50)
+
+    // 非法值（<=0）落回默认 50
+    const resZero = await GET(new NextRequest('http://localhost/api/generate?limit=0'), { params: {} })
+    const jZero = (await resZero.json()) as { tasks: unknown[] }
+    expect(jZero.tasks.length).toBe(5)
+  })
 })

@@ -15,8 +15,7 @@ const ICONS: Record<string, string> = {
 
 const GROUPS: { label: string; items: { href: string; label: string; icon: string }[] }[] = [
   { label: '概览', items: [{ href: '/admin', label: '仪表盘', icon: 'dashboard' }] },
-  { label: '拆解 / 复刻', items: [
-    { href: '/admin/extract', label: '视频拆解', icon: 'tasks' },
+  { label: '复刻', items: [
     { href: '/admin/jianying', label: '剪映复刻', icon: 'film' },
     { href: '/admin/frameworks', label: '框架库', icon: 'tag' },
   ] },
@@ -28,7 +27,7 @@ const GROUPS: { label: string; items: { href: string; label: string; icon: strin
   { label: '运营', items: [
     { href: '/admin/students', label: '学员数据', icon: 'users' },
     { href: '/admin/assets', label: '素材库', icon: 'doc' },
-    { href: '/admin/books', label: '书库', icon: 'doc' },
+    { href: '/admin/banners', label: '公告 Banner', icon: 'doc' },
   ] },
   { label: '系统', items: [
     { href: '/admin/models', label: '模型配置', icon: 'gear' },

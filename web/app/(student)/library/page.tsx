@@ -66,37 +66,44 @@ export default function LibraryPage() {
   const [filter, setFilter] = useState<FilterKey>('all')
 
   useEffect(() => {
-    Promise.all([
+    // 三接口互相独立：works 是主内容，失败才提示错误；runs/tools 只是给成片库
+    // 追加「工具产出」条目，失败了不该拖累整页——静默降级为不合并工具产出。
+    Promise.allSettled([
       api<{ works: Work[]; nextCursor?: string }>('/api/library/works'),
       api<{ runs: Run[] }>('/api/tools/runs'),
       api<{ tools: Tool[] }>('/api/tools'),
     ])
       .then(([libRes, runsRes, toolsRes]) => {
-        setWorks(libRes.works)
-        setNextCursor(libRes.nextCursor ?? null)
-
-        const toolNames: Record<string, string> = {}
-        for (const t of toolsRes.tools) toolNames[t.id] = t.name
-
-        const items: LibraryItem[] = []
-        for (const r of runsRes.runs) {
-          if (r.status !== 'SUCCEEDED') continue
-          const videoItem = (r.outputItems ?? []).find((it): it is { kind: 'video'; url: string } => it.kind === 'video')
-          if (!videoItem) continue
-          const toolName = toolNames[r.toolId] ?? '已下架工具'
-          const summary = summarizeInputs(r.inputs)
-          items.push({
-            kind: 'tool',
-            id: r.id,
-            videoUrl: videoItem.url,
-            title: summary ? `${toolName} · ${summary}` : toolName,
-            subtitle: new Date(r.createdAt).toLocaleDateString('zh-CN'),
-            createdAt: r.createdAt,
-          })
+        if (libRes.status === 'fulfilled') {
+          setWorks(libRes.value.works)
+          setNextCursor(libRes.value.nextCursor ?? null)
+        } else {
+          setErr((libRes.reason as Error).message)
         }
-        setToolItems(items)
+
+        if (runsRes.status === 'fulfilled' && toolsRes.status === 'fulfilled') {
+          const toolNames: Record<string, string> = {}
+          for (const t of toolsRes.value.tools) toolNames[t.id] = t.name
+
+          const items: LibraryItem[] = []
+          for (const r of runsRes.value.runs) {
+            if (r.status !== 'SUCCEEDED') continue
+            const videoItem = (r.outputItems ?? []).find((it): it is { kind: 'video'; url: string } => it.kind === 'video')
+            if (!videoItem) continue
+            const toolName = toolNames[r.toolId] ?? '已下架工具'
+            const summary = summarizeInputs(r.inputs)
+            items.push({
+              kind: 'tool',
+              id: r.id,
+              videoUrl: videoItem.url,
+              title: summary ? `${toolName} · ${summary}` : toolName,
+              subtitle: new Date(r.createdAt).toLocaleDateString('zh-CN'),
+              createdAt: r.createdAt,
+            })
+          }
+          setToolItems(items)
+        }
       })
-      .catch((e) => setErr((e as Error).message))
       .finally(() => setLoaded(true))
   }, [])
 

@@ -19,6 +19,8 @@ export { cozeRunWorkflow, cozeUploadFile, cozeFetchWorkflowParams } from './coze
 export type { CozeFetch } from './coze'
 export { parseCozeOutput } from './cozeOutput'
 export type { CozeOutputItem } from './cozeOutput'
+export { cozeProbeWorkflowParams } from './cozeProbe'
+export type { CozeProbedField, CozeProbeResult } from './cozeProbe'
 import { llmComplete } from './llm'
 import { imageGenerate } from './image'
 import { ttsSynthesize } from './tts'

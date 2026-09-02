@@ -116,6 +116,10 @@ export default function CozeToolsPage() {
   const [fetchHint, setFetchHint] = useState('')
   const [fetchErr, setFetchErr] = useState('')
 
+  const [probeBusy, setProbeBusy] = useState(false)
+  const [probeWarning, setProbeWarning] = useState('')
+  const [probeErr, setProbeErr] = useState('')
+
   const [runs, setRuns] = useState<Run[] | null>(null)
   const [runsCursor, setRunsCursor] = useState<string | undefined>(undefined)
   const [runsErr, setRunsErr] = useState('')
@@ -152,10 +156,10 @@ export default function CozeToolsPage() {
   }
 
   function openNew() {
-    setEditing('new'); setForm(blankForm()); setFormErr(''); setFetchErr(''); setFetchHint('')
+    setEditing('new'); setForm(blankForm()); setFormErr(''); setFetchErr(''); setFetchHint(''); setProbeErr(''); setProbeWarning('')
   }
   function openEdit(t: Tool) {
-    setEditing(t.id); setForm(toForm(t)); setFormErr(''); setFetchErr(''); setFetchHint('')
+    setEditing(t.id); setForm(toForm(t)); setFormErr(''); setFetchErr(''); setFetchHint(''); setProbeErr(''); setProbeWarning('')
   }
   function closeForm() {
     if (formBusy) return
@@ -222,6 +226,35 @@ export default function CozeToolsPage() {
       }
     } catch (e) { setFetchErr((e as Error).message) }
     finally { setFetchBusy(false) }
+  }
+
+  // 自动探测：workflowId 已知但扣子该版本没有参数查询接口时用——后端会故意跑一次
+  // 流式运行，靠参数校验报错反推参数表。合并进现有 inputs 时同名跳过不覆盖，
+  // 避免把运营已经手填的中文标签/占位提示冲掉。
+  async function probeParams() {
+    if (!form.workflowId.trim()) { setProbeErr('请先填写 workflowId'); return }
+    setProbeBusy(true); setProbeErr(''); setProbeWarning('')
+    try {
+      const r = await api<{ fields: { name: string; type: 'text' | 'image'; required: true }[]; warning?: string; error?: string }>(
+        '/api/admin/coze-tools/probe-params', { body: { workflowId: form.workflowId.trim() } }
+      )
+      setForm((f) => {
+        const existingNames = new Set(f.inputs.map((i) => i.name))
+        const added: FormInput[] = r.fields
+          .filter((field) => !existingNames.has(field.name))
+          .map((field) => ({
+            name: field.name,
+            label: field.name,
+            type: field.type === 'image' ? 'image' : 'text',
+            required: field.required,
+            optionsText: '',
+          }))
+        return { ...f, inputs: [...f.inputs, ...added] }
+      })
+      if (r.warning) setProbeWarning(r.warning)
+      else if (r.error) setProbeErr(r.error)
+    } catch (e) { setProbeErr((e as Error).message) }
+    finally { setProbeBusy(false) }
   }
 
   function validateForm(): string {
@@ -417,12 +450,19 @@ export default function CozeToolsPage() {
             <div className="space-y-2 rounded-xl border border-line p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="eyebrow">输入项</p>
-                <button onClick={fetchParams} disabled={fetchBusy} className="btn-quiet text-xs">
-                  {fetchBusy ? '拉取中…' : '从扣子拉取参数'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={fetchParams} disabled={fetchBusy} className="btn-quiet text-xs">
+                    {fetchBusy ? '拉取中…' : '从扣子拉取参数'}
+                  </button>
+                  <button onClick={probeParams} disabled={probeBusy} className="btn-quiet text-xs">
+                    {probeBusy ? '探测中…' : '自动探测'}
+                  </button>
+                </div>
               </div>
               {fetchHint && <p className="pill">{fetchHint}</p>}
               {fetchErr && <p className="pill pill-bad">{fetchErr}</p>}
+              {probeWarning && <p className="pill pill-warn">{probeWarning}</p>}
+              {probeErr && <p className="pill pill-bad">{probeErr}</p>}
 
               <div className="space-y-2">
                 {form.inputs.map((inp, i) => (

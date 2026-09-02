@@ -50,7 +50,7 @@ export default function HomePage() {
   const [bannerIdx, setBannerIdx] = useState(0)
 
   useEffect(() => {
-    api<{ tasks: Gen[] }>('/api/generate').then((d) => setRecent(d.tasks.slice(0, 3))).catch(() => {})
+    api<{ tasks: Gen[] }>('/api/generate?limit=3').then((d) => setRecent(d.tasks)).catch(() => {})
     api<{ tools: Tool[] }>('/api/tools').then((d) => setTools(d.tools)).catch(() => {})
     api<{ banners: Banner[] }>('/api/banners').then((d) => setBanners(d.banners)).catch(() => {})
     api<Wallet>('/api/credits').then(setWallet).catch(() => {})
@@ -184,7 +184,12 @@ export default function HomePage() {
       {/* 最近成片：横滑窄卡 */}
       {recent.length > 0 && (
         <section>
-          <p className="eyebrow">最 近 成 片</p>
+          <div className="flex items-center justify-between">
+            <p className="eyebrow">最 近 成 片</p>
+            <Link href="/library" className="text-[0.72rem] text-ink3">
+              查看全部 <span aria-hidden>›</span>
+            </Link>
+          </div>
           <div className="no-scrollbar mt-2.5 flex gap-3 overflow-x-auto pb-1.5">
             {recent.map((t, i) => {
               const st = effStatus(t)

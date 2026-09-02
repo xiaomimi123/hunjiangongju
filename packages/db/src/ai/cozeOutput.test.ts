@@ -120,4 +120,17 @@ describe('parseCozeOutput', () => {
     expect(parseCozeOutput(undefined)).toEqual([])
     expect(parseCozeOutput([1, 2, true])).toEqual([])
   })
+
+  it('非法 JSON 字符串（扣子转义 bug）：正则捞出 URL，机器噪音不当文本返回', () => {
+    const raw = '{"输出":"junk","node_status":"{\\"输出\\":{}}","Output":"https://v.coze.cn/final.mp4?sign=x"}'
+      .replace('node_status\\":', 'node_status\\":\\"broken') // 保证整体 parse 不了
+    const bad = '{"a":"{\\"x\\":1}",oops "Output":"https://v.coze.cn/final.mp4?sign=x and https://img.coze.cn/cover.png"}'
+    expect(() => JSON.parse(bad)).toThrow()
+    const items = parseCozeOutput(bad)
+    expect(items).toEqual([
+      { kind: 'video', url: 'https://v.coze.cn/final.mp4?sign=x' },
+      { kind: 'image', url: 'https://img.coze.cn/cover.png' },
+    ])
+    void raw
+  })
 })

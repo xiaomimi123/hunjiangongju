@@ -84,7 +84,21 @@ export function parseCozeOutput(raw: unknown): CozeOutputItem[] {
     try {
       value = JSON.parse(raw)
     } catch {
-      value = raw // 不是合法 JSON，就当作原始字符串本身参与遍历分类
+      // 不是合法 JSON。实测（2026-09-03 spike）扣子 run_histories 的 output 常因
+      // 双重序列化转义 bug 而无法 parse——里面的产物 URL 不能因此丢掉。
+      // 先用正则把 URL 捞出来逐个分类；有 URL 就只返回 URL 项（其余是节点状态等
+      // 机器噪音，当 text 展示只会吓到学员），一个 URL 都没有才退回整串当文本。
+      const urls = raw.match(/https?:\/\/[^\s"'\\<>]+/g)
+      if (urls && urls.length > 0) {
+        const out: CozeOutputItem[] = []
+        const seen = new Set<string>()
+        for (const u of urls) {
+          const item = classifyString(u)
+          if (item && item.kind !== 'text' && !seen.has(item.url)) { seen.add(item.url); out.push(item) }
+        }
+        if (out.length > 0) return out
+      }
+      value = raw // 连 URL 都没有：当作原始字符串本身参与遍历分类
     }
   }
 

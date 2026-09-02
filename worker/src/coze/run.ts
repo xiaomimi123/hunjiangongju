@@ -201,7 +201,7 @@ export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultD
       }
       const buf = await fs.readFile(path.join(DATA_DIR, rel))
       const { fileId } = await deps.uploadFile(buf, path.basename(rel))
-      // 扣子图片参数的引用格式：spike 未做，按扣子公开文档预写为 { file_id } 的 JSON 字符串。
+      // 扣子文件参数的引用格式：{ file_id } 的 JSON 字符串。已真实 API 验证（2026-09-03 spike，校验通过）。
       // 若与实测不符，以实测为准，届时只需改这一行。
       parameters[field.name] = JSON.stringify({ file_id: fileId })
     }

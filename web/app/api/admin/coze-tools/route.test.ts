@@ -298,9 +298,11 @@ describe('GET /api/admin/coze-tools/runs', () => {
     const ids = json.runs.map((r: { id: string }) => r.id)
     expect(ids.indexOf(run2.id)).toBeLessThan(ids.indexOf(run1.id))
     expect(json.runs.every((r: { toolId: string }) => r.toolId === created.id)).toBe(true)
-    // 列表字段收窄：不带 outputRaw/outputItems/inputs（可能很大，列表页用不上）
+    // 列表字段收窄：不带 outputRaw/outputItems/inputs（可能很大，列表页用不上）；
+    // user 是运营端认人用的合并字段（昵称+手机号），只含这两个子字段
     expect(Object.keys(json.runs[0]).sort()).toEqual(
-      ['id', 'toolId', 'userId', 'status', 'errorMsg', 'creditsCost', 'createdAt', 'finishedAt'].sort(),
+      ['id', 'toolId', 'userId', 'status', 'errorMsg', 'creditsCost', 'createdAt', 'finishedAt', 'user'].sort(),
     )
+    expect(json.runs[0].user === null || Object.keys(json.runs[0].user).sort().join() === 'email,nickname').toBe(true)
   })
 })

@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
+import Link from 'next/link'
 import PageHeader from '@/components/admin/PageHeader'
 
 const INPUT_TYPES = ['text', 'textarea', 'select', 'image'] as const
@@ -38,11 +39,20 @@ type Run = {
   id: string
   toolId: string
   userId: string
+  user?: { nickname: string | null; email: string } | null
   status: string
   errorMsg: string | null
   creditsCost: number
   createdAt: string
   finishedAt: string | null
+}
+
+// 学员标识：昵称优先，其次手机号打码（email 列存 11 位手机号是历史约定），都没有才退回 id 片段
+function runUserLabel(r: Run): string {
+  if (r.user?.nickname) return r.user.nickname
+  const e = r.user?.email
+  if (e && /^\d{11}$/.test(e)) return `${e.slice(0, 3)}****${e.slice(7)}`
+  return e ?? r.userId.slice(0, 8)
 }
 
 const RUN_STATUS_LABELS: Record<string, string> = {
@@ -126,9 +136,18 @@ export default function CozeToolsPage() {
   const [runsBusy, setRunsBusy] = useState(false)
   const [runsToolId, setRunsToolId] = useState('')
 
+  // null=还没查到；true/false=扣子能力是否已启用且配了密钥。上线真实反馈：运营在这个页面
+  // 找不到「填扣子 API」的入口——Token 其实配在模型配置页，这里必须给出状态和直达链接
+  const [cozeReady, setCozeReady] = useState<boolean | null>(null)
+
   const load = useCallback(async () => {
     try { setTools((await api<{ tools: Tool[] }>('/api/admin/coze-tools')).tools) }
     catch (e) { setErr((e as Error).message) }
+    try {
+      const caps = await api<{ capability: string; enabled: boolean; hasKey: boolean }[]>('/api/admin/models')
+      const coze = caps.find((c) => c.capability === 'coze')
+      setCozeReady(!!coze && coze.enabled && coze.hasKey)
+    } catch { /* 查不到就不展示提示条，不拦主流程 */ }
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -320,6 +339,20 @@ export default function CozeToolsPage() {
       </PageHeader>
       {err && <p className="pill pill-bad">{err}</p>}
 
+      {/* Token 配置状态：入口其实在模型配置页，这里给状态 + 直达链接（#cap-coze 锚点） */}
+      {cozeReady === false && (
+        <p className="pill pill-warn">
+          还没配置扣子访问令牌，学员运行工具会直接报错——先去
+          <Link href="/admin/models#cap-coze" className="mx-1 font-bold underline">模型配置 · 扣子工作流</Link>
+          填入 pat_ 开头的个人访问令牌（接口地址 https://api.coze.cn，模型留空）
+        </p>
+      )}
+      {cozeReady === true && (
+        <p className="text-xs text-ink3">
+          扣子令牌已配置（改令牌去 <Link href="/admin/models#cap-coze" className="underline">模型配置 · 扣子工作流</Link>）
+        </p>
+      )}
+
       <div className="card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-surface2 text-left text-ink3">
@@ -394,7 +427,7 @@ export default function CozeToolsPage() {
                   <td className="px-4 py-3">
                     <span className={`pill ${RUN_STATUS_TONE[r.status] ?? ''}`}>{RUN_STATUS_LABELS[r.status] ?? r.status}</span>
                   </td>
-                  <td className="num px-4 py-3 text-ink3">{r.userId}</td>
+                  <td className="px-4 py-3 text-ink3">{runUserLabel(r)}</td>
                   <td className="num px-4 py-3 text-right">{r.creditsCost}</td>
                   <td className="num px-4 py-3 text-ink3">{new Date(r.createdAt).toLocaleString('zh-CN')}</td>
                   <td className="num px-4 py-3 text-ink3">{r.finishedAt ? new Date(r.finishedAt).toLocaleString('zh-CN') : '—'}</td>

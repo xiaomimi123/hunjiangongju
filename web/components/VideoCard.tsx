@@ -50,6 +50,9 @@ export default function VideoCard({
 }: VideoCardProps) {
   const [playing, setPlaying] = useState(false)
   const [duration, setDuration] = useState<number | null>(null)
+  // 视频加载失败（典型场景：库里记录还在、文件已丢——如 2026-08-31 生产事故丢掉的旧渲染）：
+  // 降级为渐变占位，别让一张坏卡反复发 404、也别给学员/运营一个点不动的假播放钮
+  const [srcFailed, setSrcFailed] = useState(false)
   // 首帧 <video> 视口懒挂载：卡片进视口前不挂 src（不发起首帧抽帧请求）。
   // 内嵌播放卡与跳转卡（有 onClick）都渲染这段首帧预览，懒挂载对两者同样生效——
   // 一页可能同时有近百张卡，不懒挂会并发近百个 range 请求抓视频头。
@@ -79,7 +82,7 @@ export default function VideoCard({
 
   const handlePosterClick = () => {
     if (onClick) { onClick(); return }
-    if (src) setPlaying(true)
+    if (src && !srcFailed) setPlaying(true)
   }
 
   return (
@@ -101,7 +104,7 @@ export default function VideoCard({
             className="h-full w-full object-contain"
             onClick={(e) => e.stopPropagation()}
           />
-        ) : src ? (
+        ) : src && !srcFailed ? (
           <>
             {/* 未进入视口前不挂 src，避免大量卡片同时发起首帧抽帧请求；
                 进入视口（提前 200px）后才真正加载 */}
@@ -113,7 +116,8 @@ export default function VideoCard({
                 muted
                 playsInline
                 className="absolute inset-0 h-full w-full object-cover"
-                onLoadedMetadata={(e) => {
+                onError={() => { setSrcFailed(true); setPlaying(false) }}
+          onLoadedMetadata={(e) => {
                   const d = e.currentTarget.duration
                   if (Number.isFinite(d)) setDuration(d)
                 }}

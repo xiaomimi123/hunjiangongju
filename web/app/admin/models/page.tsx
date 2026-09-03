@@ -221,6 +221,13 @@ export default function ModelsPage() {
   const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState('')
 
   async function load() { try { setList(await api<Cap[]>('/api/admin/models')) } catch (e) { setErr((e as Error).message) } }
+
+  // 带 #cap-xxx 锚点进来（如扣子工具页的直达链接）：列表异步加载完后原生锚点已错过时机，手动滚过去
+  useEffect(() => {
+    if (!list.length || !window.location.hash.startsWith('#cap-')) return
+    document.querySelector(window.location.hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.length])
   useEffect(() => { load() }, [])
 
   function upd(cap: string, patch: Partial<Cap>) { setList((l) => l.map((c) => (c.capability === cap ? { ...c, ...patch } : c))) }
@@ -285,7 +292,7 @@ export default function ModelsPage() {
       {msg && <p className="pill pill-ok mb-4">{msg}</p>}
       <div className="grid gap-4 md:grid-cols-2">
         {list.map((c) => (
-          <div key={c.capability} className="card space-y-3 p-5">
+          <div key={c.capability} id={`cap-${c.capability}`} className="card space-y-3 p-5">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-display font-bold">{LABELS[c.capability]?.name ?? c.capability}</p>

@@ -30,6 +30,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-lg flex-col bg-paper">
+      {/* 状态栏遮罩：viewport-fit=cover 后页面延伸到 iOS 状态栏底下，滚动时正文会和
+          时间/电量文字叠字（真机实拍反馈）。这条固定在最顶、高度=安全区，把穿过的内容挡住；
+          首页跟深色头部同色系，其余页浅色磨砂；无刘海设备 env=0 高度为 0，等于不渲染 */}
+      <div aria-hidden className={`fixed inset-x-0 top-0 z-30 h-[env(safe-area-inset-top)] ${
+        path === '/' ? 'bg-[#1a1214]/85 backdrop-blur-sm' : 'bg-paper/85 backdrop-blur-sm'
+      }`} />
       {/* 顶部留白 --stu-safe-top（globals.css）：普通浏览器 = 3rem（照样稿 .phead 52px 的意图），
           刘海屏/微信内打开（viewport-fit=cover 时 env 生效）= 1rem + 状态栏高度，防止状态栏压住内容。
           首页深色头部用同一变量做 -mt 抵消，再自己 pt 顶到屏幕最上沿——两处必须同源，别改成字面量 */}
@@ -39,7 +45,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       {/* pb-4 与 globals.css 的 .safe-b（padding-bottom: env(safe-area-inset-bottom)）冲突：
           safe-b 后声明会整个覆盖 pb-4，安卓等无底部安全区设备上导航贴底无留白。
           改用同时含固定间距与安全区的合成值，不再叠加 safe-b。 */}
-      <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-lg items-end justify-around border-t border-line bg-white/94 px-1.5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-lg">
+      <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-lg items-end justify-around border-t border-line bg-white/95 shadow-[0_-6px_20px_-12px_rgba(20,20,20,0.25)] px-1.5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
         <Link href="/" className="w-[60px] text-center">
           <TabIcon d={ICONS.home} active={isActive('/')} />
           <span className={`mt-0.5 block text-[11px] ${isActive('/') ? 'font-bold text-flame' : 'text-ink3'}`}>首页</span>

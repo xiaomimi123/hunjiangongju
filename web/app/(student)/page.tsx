@@ -87,7 +87,10 @@ export default function HomePage() {
     <div className="space-y-7">
       {/* 深色头部：品牌 + 积分 + 公告轮播，吃满顶部安全区并向两侧出血到屏幕边缘 */}
       <div
-        className="-mx-5 -mt-[var(--stu-safe-top)] rounded-b-3xl px-[18px] pb-[22px] pt-[var(--stu-safe-top)] text-white"
+        className=// 窄屏（容器铺满视口，max-w-lg=512px 以内）：头部贴满屏幕顶，顶角直角、底角圆角——像原生 App 头。
+        // 视口 ≥512px 后内容列居中，头部悬空成"岛"，顶直角+底圆角就成了视觉 bug（上线真实反馈）：
+        // 该档改四角全圆卡片 + 顶部留 24px 间距。断点用 min-[512px] 精确对齐 max-w-lg，别改成 sm(640)。
+        "-mx-5 -mt-[var(--stu-safe-top)] rounded-b-3xl px-[18px] pb-[22px] pt-[var(--stu-safe-top)] text-white min-[512px]:-mt-6 min-[512px]:rounded-3xl min-[512px]:pt-6"
         style={{ backgroundImage: 'radial-gradient(140% 120% at 85% -20%, #4a1218 0%, #1a1214 55%)' }}
       >
         <div className="flex items-start justify-between">

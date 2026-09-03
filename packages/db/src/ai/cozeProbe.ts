@@ -89,6 +89,29 @@ function isAuthError(status: number, event: Record<string, unknown> | null): boo
   return false
 }
 
+// 只读到第一个完整 SSE 事件块（\n\n 分隔）就断开，不等整条流结束。
+// 为什么必须这样：探测收敛的那一轮，扣子会真实启动工作流并持续推流直到跑完（可达几分钟），
+// res.text() 要等流关闭才返回，必然撞上单轮 60s 超时——线上真实反馈「探测参数超时(60000ms)」。
+// 参数校验报错轮次首个事件就是 Error，早到；收敛轮首个事件是 Message 节点事件，同样早到。
+async function readFirstEvent(res: Response): Promise<string> {
+  if (!res.body) return res.text() // 测试注入的极简 Response 兜底
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  try {
+    // 64KB 上限：正常首事件几百字节，超限说明响应形状异常（如 HTML 错误页），带回去交给上层判错
+    while (buf.length < 65536) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      if (buf.includes('\n\n')) break
+    }
+  } finally {
+    reader.cancel().catch(() => { /* 提前断流是本函数的目的，取消失败无所谓 */ })
+  }
+  return buf
+}
+
 export async function cozeProbeWorkflowParams(
   workflowId: string,
   opts?: { fetchImpl?: CozeFetch; maxRounds?: number; overallTimeoutMs?: number },
@@ -121,7 +144,7 @@ export async function cozeProbeWorkflowParams(
         body: JSON.stringify({ workflow_id: workflowId, parameters }),
         signal: AbortSignal.timeout(60_000),
       })
-      text = await res.text()
+      text = await readFirstEvent(res)
     } catch (e) {
       if (isAbortLike(e)) throw new Error('扣子探测参数超时（60000ms）')
       throw e

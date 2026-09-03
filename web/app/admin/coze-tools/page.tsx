@@ -251,7 +251,7 @@ export default function CozeToolsPage() {
             optionsText: '',
           })),
         }))
-        setFetchHint('已拉取参数，请为每项补充中文标签')
+        setFetchHint('已拉取参数，请为每项补充中文标签——记得点「保存」，保存后学员端才会出现这些字段')
       }
     } catch (e) { setFetchErr((e as Error).message) }
     finally { setFetchBusy(false) }
@@ -287,8 +287,10 @@ export default function CozeToolsPage() {
           }))
         return { ...f, inputs: [...f.inputs, ...added] }
       })
-      if (r.warning) setProbeWarning(r.warning)
-      else if (r.error) setProbeErr(r.error)
+      // 线上真实踩坑：探测结果只进了这张表单，运营以为已生效就去学员端看，其实还没点保存——
+      // 学员端拿到的 inputs 仍是空的，工具页一个字段都不渲染。成功路径必须把「还要保存」说出来。
+      if (r.error) setProbeErr(r.error)
+      else setProbeWarning([r.warning, '探测结果已加入下方输入项，点「保存」后学员端才会显示这些字段'].filter(Boolean).join('；'))
     } catch (e) { setProbeErr((e as Error).message) }
     finally { setProbeBusy(false) }
   }

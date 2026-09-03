@@ -290,9 +290,9 @@ export default function ModelsPage() {
       <PageHeader title="模型配置" subtitle="配置各 AI 能力的接口地址、密钥与模型；未启用时走内置 mock" />
       {err && <p className="pill pill-bad mb-4">{err}</p>}
       {msg && <p className="pill pill-ok mb-4">{msg}</p>}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {list.map((c) => (
-          <div key={c.capability} id={`cap-${c.capability}`} className="card space-y-3 p-5">
+          <div key={c.capability} id={`cap-${c.capability}`} className="card space-y-2.5 p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-display font-bold">{LABELS[c.capability]?.name ?? c.capability}</p>
@@ -306,7 +306,10 @@ export default function ModelsPage() {
               <p className="text-xs text-ink3">扣子(Coze)工作流：接口地址填 https://api.coze.cn，密钥填扣子的 PAT（个人访问令牌），模型留空即可</p>
             )}
             {c.capability === 'tts' && (
-              <p className="text-xs text-ink3">火山配音(豆包语音合成2.0)：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填 seed-tts-2.0，密钥填「语音技术」控制台的 API Key（非火山方舟的 ark- key）。克隆音色：火山声音复刻2.0 克隆得 S_ 开头音色ID，填入 extra 的 customVoices（如 {'{"customVoices":[{"id":"S_xxx","label":"我的对标男声"}]}'}）即出现在生成页</p>
+              <details className="text-xs text-ink3">
+                <summary className="cursor-pointer select-none">配置说明（火山配音 / 克隆音色）</summary>
+                <p className="mt-1.5 leading-relaxed">火山配音(豆包语音合成2.0)：接口地址填 https://openspeech.bytedance.com/api/v3/tts/unidirectional，模型填 seed-tts-2.0，密钥填「语音技术」控制台的 API Key（非火山方舟的 ark- key）。克隆音色：火山声音复刻2.0 克隆得 S_ 开头音色ID，填入 extra 的 customVoices（如 {'{"customVoices":[{"id":"S_xxx","label":"我的对标男声"}]}'}）即出现在生成页</p>
+              </details>
             )}
             <label className="block text-sm text-ink2">接口地址
               <input className="field mt-1" value={c.baseUrl} onChange={(e) => upd(c.capability, { baseUrl: e.target.value })} placeholder="https://relay.aitoken.homes/v1" autoCapitalize="none" /></label>
@@ -315,7 +318,7 @@ export default function ModelsPage() {
             <label className="block text-sm text-ink2">密钥 {c.hasKey && <span className="text-ink3">（已设置，留空不改）</span>}
               <input className="field mt-1" type="password" value={keyInput[c.capability] ?? ''} onChange={(e) => setKeyInput((k) => ({ ...k, [c.capability]: e.target.value }))} placeholder={c.hasKey ? '••••••••' : ''} autoCapitalize="none" /></label>
             {c.capability === 'image' && (
-              <div className="space-y-2 rounded-xl border border-line p-3">
+              <div className="space-y-2 rounded-xl border border-line p-2.5">
                 <p className="eyebrow">生图提速</p>
                 <label className="block text-sm text-ink2">并发数（同时生成几张图）
                   <input
@@ -342,7 +345,8 @@ export default function ModelsPage() {
                 </p>
               </div>
             )}
-            <label className="block text-sm text-ink2">高级参数（JSON，留空为 {}）
+            <details>
+              <summary className="cursor-pointer select-none text-xs text-ink3">高级参数（JSON，少用，点开编辑）</summary>
               <textarea
                 className="field mt-1 font-mono text-xs"
                 rows={3}
@@ -351,7 +355,7 @@ export default function ModelsPage() {
                 spellCheck={false}
                 placeholder={'{"customVoices":[{"id":"S_xxx","label":"我的男声"}]}'}
               />
-            </label>
+            </details>
             <div className="flex gap-2">
               <button onClick={() => save(c)} disabled={busy === c.capability + ':save'} className="btn-primary flex-1">保存</button>
               <button onClick={() => test(c)} disabled={busy === c.capability + ':test'} className="btn-ghost shrink-0">测试连通</button>

@@ -62,17 +62,18 @@ export default function SettingsPage() {
   if (!cfg) return <p className="text-ink3">加载中…</p>
 
   return (
-    <div className="max-w-xl space-y-6">
+    <div className="space-y-4">
       <PageHeader title="系统设置" subtitle="充值二维码与邮件服务" />
       {err && <p className="pill pill-bad">{err}</p>}
       {msg && <p className="pill pill-ok">{msg}</p>}
 
-      <Link href="/admin/settings/fonts" className="card flex items-center justify-between p-5 hover:bg-surface2">
+      <Link href="/admin/settings/fonts" className="card flex items-center justify-between p-4 hover:bg-surface2">
         <span className="font-medium">字体管理 · 内置字体清单与自定义字体上传</span>
         <span className="text-sm text-flame">进入 →</span>
       </Link>
 
-      <div className="card space-y-3 p-5">
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="card space-y-3 p-4">
         <p className="font-medium">学员充值二维码</p>
         <p className="text-xs text-ink3">学员积分用完时弹出此二维码（导师微信收款码）。1 条视频 = 1 积分，收款后到「学员数据」页给对应学员充值。</p>
         {qrUrl
@@ -90,7 +91,7 @@ export default function SettingsPage() {
         {qrErr && <p className="pill pill-bad">{qrErr}</p>}
       </div>
 
-      <div className="card space-y-4 p-5">
+      <div className="card space-y-3 p-4">
         <label className="flex items-center justify-between">
           <span className="font-medium">启用邮件服务</span>
           <input type="checkbox" checked={cfg.enabled} onChange={(e) => up('enabled', e.target.checked)} className="h-5 w-5" />
@@ -102,8 +103,16 @@ export default function SettingsPage() {
         </label>
         <p className="text-xs text-ink3">关闭时：登录页不显示「注册」标签，新用户无法自助注册。</p>
       </div>
+      </div>
 
-      <div className="card grid gap-3 p-5">
+      {/* 邮件服务配置：现行账号体系是手机号，邮箱验证码链路早已停用（410），
+          这套 SMTP 配置平时用不到——收进折叠，别让它撑出一屏留白 */}
+      <details className="card p-4">
+        <summary className="cursor-pointer select-none text-sm font-medium text-ink2">
+          邮件服务配置（SMTP）· 现行手机号账号体系一般无需配置，点开编辑
+        </summary>
+        <div className="mt-3 grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid gap-3">
         <label className="text-sm text-ink2">SMTP 主机
           <input className="field mt-1" value={cfg.host} onChange={(e) => up('host', e.target.value)} placeholder="smtp.example.com" /></label>
         <div className="flex gap-3">
@@ -128,13 +137,15 @@ export default function SettingsPage() {
         <button onClick={save} disabled={busy} className="btn-primary">保存配置</button>
       </div>
 
-      <div className="card space-y-3 p-5">
+      <div className="space-y-3">
         <p className="eyebrow">发送测试邮件</p>
         <div className="flex gap-3">
           <input className="field" value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="收件邮箱" autoCapitalize="none" />
           <button onClick={test} disabled={busy || !testTo} className="btn-ghost shrink-0">发送</button>
         </div>
       </div>
+        </div>
+      </details>
     </div>
   )
 }

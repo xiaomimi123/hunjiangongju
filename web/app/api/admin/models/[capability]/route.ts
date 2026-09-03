@@ -15,7 +15,9 @@ export const PUT = handler(async (req, { params }) => {
     enabled: !!b.enabled,
     extra: b.extra ?? undefined,
   }
-  if (typeof b.apiKey === 'string' && b.apiKey.length > 0) data.apiKeyEnc = encrypt(b.apiKey)
+  // 令牌两端去空白：从扣子/控制台复制密钥极易带上尾部空格或换行，
+  // 带着存进去会让请求头变成 `Bearer xxx␣`，扣子鉴权直接失败（4101/not found）
+  if (typeof b.apiKey === 'string' && b.apiKey.trim().length > 0) data.apiKeyEnc = encrypt(b.apiKey.trim())
   const row = await prisma.aiCapabilityConfig.upsert({
     where: { capability: cap },
     update: data,

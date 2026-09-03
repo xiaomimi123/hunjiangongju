@@ -37,9 +37,19 @@ function summarizeInputs(inputs: Record<string, unknown> | null): string {
   return ''
 }
 
-// 成片库合并展示的条目：书单成片（work）或工具产出（run）
+// 学员自己的生成任务（/api/generate 返回形状里本页要用的字段）
+type GenTask = {
+  id: string
+  subject: string
+  status: string
+  createdAt: string
+  framework: { name: string | null } | null
+  renderTasks?: { status: string; videoUrl: string | null }[]
+}
+
+// 成片库合并展示的条目：我的成片（mine）、运营精选（work）或工具产出（run）
 type LibraryItem = {
-  kind: 'work' | 'tool'
+  kind: 'mine' | 'work' | 'tool'
   id: string
   videoUrl: string | null
   title: string
@@ -50,7 +60,8 @@ type LibraryItem = {
 
 const FILTERS = [
   { key: 'all', label: '全部' },
-  { key: 'work', label: '书单成片' },
+  { key: 'mine', label: '我的成片' },
+  { key: 'work', label: '精选案例' },
   { key: 'tool', label: '工具产出' },
 ] as const
 type FilterKey = (typeof FILTERS)[number]['key']
@@ -58,6 +69,7 @@ type FilterKey = (typeof FILTERS)[number]['key']
 export default function LibraryPage() {
   const router = useRouter()
   const [works, setWorks] = useState<Work[]>([])
+  const [mineItems, setMineItems] = useState<LibraryItem[]>([])
   const [toolItems, setToolItems] = useState<LibraryItem[]>([])
   const [err, setErr] = useState('')
   const [loaded, setLoaded] = useState(false)
@@ -72,8 +84,27 @@ export default function LibraryPage() {
       api<{ works: Work[]; nextCursor?: string }>('/api/library/works'),
       api<{ runs: Run[] }>('/api/tools/runs'),
       api<{ tools: Tool[] }>('/api/tools'),
+      // 学员自己生成的视频。上线后真实反馈：学员点「查看全部」想看的是**自己**的片子，
+      // 而 /api/library/works 只有运营发布的精选（published:true）——两者都要有
+      api<{ tasks: GenTask[] }>('/api/generate?limit=50'),
     ])
-      .then(([libRes, runsRes, toolsRes]) => {
+      .then(([libRes, runsRes, toolsRes, mineRes]) => {
+        if (mineRes.status === 'fulfilled') {
+          const items: LibraryItem[] = []
+          for (const t of mineRes.value.tasks) {
+            const rt = t.renderTasks?.[0]
+            if (rt?.status !== 'EXPORTED' || !rt.videoUrl) continue
+            items.push({
+              kind: 'mine',
+              id: t.id,
+              videoUrl: rt.videoUrl,
+              title: t.subject,
+              subtitle: `${t.framework?.name ?? '框架'} · ${new Date(t.createdAt).toLocaleDateString('zh-CN')}`,
+              createdAt: t.createdAt,
+            })
+          }
+          setMineItems(items)
+        }
         if (libRes.status === 'fulfilled') {
           setWorks(libRes.value.works)
           setNextCursor(libRes.value.nextCursor ?? null)
@@ -117,16 +148,20 @@ export default function LibraryPage() {
       createdAt: w.createdAt,
       work: w,
     }))
-    const all = [...workItems, ...toolItems]
+    // 自己的片被运营发布后会同时出现在 mine 与精选里（同一任务 id）——全部视图按 id 去重，
+    // 保留「我的成片」那份（学员视角它就是自己的作品）；单独看「精选案例」时不去重
+    const mineIds = new Set(mineItems.map((it) => it.id))
+    const all = [...mineItems, ...workItems.filter((it) => !mineIds.has(it.id)), ...toolItems]
     all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     if (filter === 'all') return all
+    if (filter === 'work') return workItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     return all.filter((it) => it.kind === filter)
-  }, [works, toolItems, filter])
+  }, [works, mineItems, toolItems, filter])
 
   return (
     <div className="space-y-5">
       <h1 className="font-display text-2xl font-bold tracking-tight">成片库</h1>
-      <p className="text-sm text-ink3">运营精选成片 + 工具产出，点开即看，可下载复用</p>
+      <p className="text-sm text-ink3">我的成片 + 精选案例 + 工具产出，点开即看，可下载复用</p>
       {err && <p className="pill pill-bad">{err}</p>}
 
       <div className="flex gap-2">
@@ -147,7 +182,22 @@ export default function LibraryPage() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {merged.map((item) =>
-          item.kind === 'work' ? (
+          item.kind === 'mine' ? (
+            // 我的成片：卡上直接内嵌播放 + 下载（不跳详情，学员要的就是拿片子）
+            <VideoCard
+              key={`mine-${item.id}`}
+              src={item.videoUrl}
+              title={item.title}
+              subtitle={item.subtitle}
+              trailing={
+                item.videoUrl ? (
+                  <a href={`${item.videoUrl}?download=1`} download onClick={(e) => e.stopPropagation()} className="shrink-0 text-flame">
+                    下载
+                  </a>
+                ) : undefined
+              }
+            />
+          ) : item.kind === 'work' ? (
             <VideoCard
               key={`work-${item.id}`}
               src={item.videoUrl}

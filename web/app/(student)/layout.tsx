@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 // 底导航 5 格图标——内联 SVG symbol path，照样稿 i-home/i-layers/i-cut/i-grid/i-user
 const ICONS: Record<string, string> = {
   home: 'M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z',
-  layers: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5 M3 17l9 5 9-5',
+  film: 'M3 5h18v14H3z M7 5v14M17 5v14M3 10h4M3 14h4M17 10h4M17 14h4',
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   user: 'M12 8m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0 M4 21c1.5-4 5-6 8-6s6.5 2 8 6',
 }
@@ -30,10 +30,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-lg flex-col bg-paper">
-      {/* pt-12：非首页五页（templates/tools/me/library/works）用它当顶部安全区留白，
-          照样稿 .phead padding-top:52px 的意图；首页自己的深色头部用 -mt-12 抵消这段，
-          换成头部内部的 pt-12 顶到屏幕最上沿 */}
-      <main className="flex-1 px-5 pb-28 pt-12">{children}</main>
+      {/* 顶部留白 --stu-safe-top（globals.css）：普通浏览器 = 3rem（照样稿 .phead 52px 的意图），
+          刘海屏/微信内打开（viewport-fit=cover 时 env 生效）= 1rem + 状态栏高度，防止状态栏压住内容。
+          首页深色头部用同一变量做 -mt 抵消，再自己 pt 顶到屏幕最上沿——两处必须同源，别改成字面量 */}
+      <main className="flex-1 px-5 pb-28 pt-[var(--stu-safe-top)]">{children}</main>
 
       {/* 底导航：5 格，中央「做片」凸起 */}
       {/* pb-4 与 globals.css 的 .safe-b（padding-bottom: env(safe-area-inset-bottom)）冲突：
@@ -44,10 +44,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           <TabIcon d={ICONS.home} active={isActive('/')} />
           <span className={`mt-0.5 block text-[11px] ${isActive('/') ? 'font-bold text-flame' : 'text-ink3'}`}>首页</span>
         </Link>
-        <Link href="/templates" className="w-[60px] text-center">
-          <TabIcon d={ICONS.layers} active={isActive('/templates')} />
-          <span className={`mt-0.5 block text-[11px] ${isActive('/templates') ? 'font-bold text-flame' : 'text-ink3'}`}>框架</span>
+        <Link href="/library" className="w-[60px] text-center">
+          <TabIcon d={ICONS.film} active={isActive('/library')} />
+          <span className={`mt-0.5 block text-[11px] ${isActive('/library') ? 'font-bold text-flame' : 'text-ink3'}`}>成片</span>
         </Link>
+        {/* 做片：中央凸起钮，进框架选片流程。曾与「框架」tab 同指 /templates——两个入口一个页面、
+            且本钮永远灰色，学员点了以为没反应（线上真实反馈）；现在框架库只归这个钮管，激活态也归它 */}
         <Link href="/templates" className="-mt-6 w-[60px] text-center">
           <span className="grad mx-auto flex h-[52px] w-[52px] items-center justify-center rounded-full text-white shadow-lift">
             <svg viewBox="0 0 24 24" className="h-[22px] w-[22px]" fill="none" stroke="currentColor"
@@ -55,7 +57,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
               <path d={CUT_PATH} />
             </svg>
           </span>
-          <span className="mt-0.5 block text-[11px] text-ink3">做片</span>
+          <span className={`mt-0.5 block text-[11px] ${isActive('/templates') ? 'font-bold text-flame' : 'text-ink3'}`}>做片</span>
         </Link>
         <Link href="/tools" className="w-[60px] text-center">
           <TabIcon d={ICONS.grid} active={isActive('/tools')} />

@@ -87,7 +87,7 @@ export default function HomePage() {
     <div className="space-y-7">
       {/* 深色头部：品牌 + 积分 + 公告轮播，吃满顶部安全区并向两侧出血到屏幕边缘 */}
       <div
-        className="-mx-5 -mt-12 rounded-b-3xl px-[18px] pb-[22px] pt-12 text-white"
+        className="-mx-5 -mt-[var(--stu-safe-top)] rounded-b-3xl px-[18px] pb-[22px] pt-[var(--stu-safe-top)] text-white"
         style={{ backgroundImage: 'radial-gradient(140% 120% at 85% -20%, #4a1218 0%, #1a1214 55%)' }}
       >
         <div className="flex items-start justify-between">

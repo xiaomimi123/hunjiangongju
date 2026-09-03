@@ -19,6 +19,8 @@
 
 @layer base {
   :root {
+  /* 学员端顶部安全留白：普通浏览器=3rem；viewport-fit=cover 且有刘海时=1rem+状态栏 */
+  --stu-safe-top: max(3rem, calc(1rem + env(safe-area-inset-top)));
     --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   }
   html {

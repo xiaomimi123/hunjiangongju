@@ -55,6 +55,16 @@ function runUserLabel(r: Run): string {
   return e ?? r.userId.slice(0, 8)
 }
 
+// 从输入里提取 workflowId：支持三种粘贴方式——纯数字 ID、整条工作流 URL（自动抓
+// workflow_id= 参数，避免把 space_id 填错进来，这是线上真实踩过的坑）、带首尾空格的值。
+function extractWorkflowId(raw: string): string {
+  const s = raw.trim()
+  const m = s.match(/[?&]workflow_id=(\d+)/)
+  if (m) return m[1]
+  const digits = s.match(/^\d+$/)
+  return digits ? s : s
+}
+
 const RUN_STATUS_LABELS: Record<string, string> = {
   QUEUED: '排队中',
   RUNNING: '运行中',
@@ -473,7 +483,10 @@ export default function CozeToolsPage() {
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className="mb-1 block text-xs text-ink3">workflowId</span>
-                <input className="field" value={form.workflowId} onChange={(e) => setForm((f) => ({ ...f, workflowId: e.target.value }))} placeholder="扣子工作流 ID" />
+                <input className="field" value={form.workflowId} onChange={(e) => setForm((f) => ({ ...f, workflowId: extractWorkflowId(e.target.value) }))} placeholder="扣子工作流 ID（纯数字）" />
+                <span className="mt-1 block text-[0.68rem] text-ink3">
+                  取工作流编排页地址里 <b className="text-ink2">workflow_id=</b> 后面那串（<b className="text-ink2">不是</b> space_id）。直接粘整条 URL 也会自动识别。
+                </span>
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs text-ink3">排序（越小越靠前）</span>

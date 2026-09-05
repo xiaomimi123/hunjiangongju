@@ -148,6 +148,22 @@ describe('processCozeRun', () => {
     expect(parameters.scm_api_key).toBe('sk-secret-123')
   })
 
+  it('link 输出项（网页地址）原样透传，不走下载转存', async () => {
+    const user = await makeUser()
+    const tool = await makeTool([])
+    const run = await makeRun(tool.id, user.id)
+    const download = vi.fn()
+    const runWorkflow = vi.fn(async () => ({
+      raw: JSON.stringify({ output: '{"draft_url":"https://agent.ai-tools.cn/jyxzs?draft_url=x"}', other: '{}' }),
+    }))
+    await processCozeRun(run.id, fakeDeps({ runWorkflow, download }))
+
+    const found = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('SUCCEEDED')
+    expect(found.outputItems).toEqual([{ kind: 'link', url: 'https://agent.ai-tools.cn/jyxzs?draft_url=x' }])
+    expect(download).not.toHaveBeenCalled()
+  })
+
   it('runWorkflow 抛错 → FAILED + 积分退回', async () => {
     const user = await makeUser(30)
     // 模拟已扣分：真实入口在建 run 时同事务扣分，这里直接把余额调到扣分后的状态

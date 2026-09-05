@@ -3,10 +3,14 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { api, ApiError } from '@/lib/fetcher'
+import VideoCard from '@/components/VideoCard'
 
 type InputType = 'text' | 'textarea' | 'select' | 'image'
 type ToolInput = { name: string; label: string; type: InputType; options?: string[]; placeholder?: string; required: boolean }
-type Tool = { id: string; name: string; description: string | null; priceCredits: number; inputs: ToolInput[] }
+type Tool = {
+  id: string; name: string; description: string | null; priceCredits: number; inputs: ToolInput[]
+  demoVideoUrl: string | null; tutorialVideoUrl: string | null
+}
 type Wallet = { credits: number; qrUrl: string }
 // 「再跑一次」预填只需要 id 和 inputs——从运行记录列表接口里挑一条
 type PrevRun = { id: string; inputs: unknown }
@@ -171,6 +175,17 @@ export default function ToolFormPage() {
 
       <p className="pill pill-run w-fit">消耗 {tool.priceCredits} 积分</p>
       {prefillNote && <p className="pill pill-warn w-fit">{prefillNote}</p>}
+
+      {(tool.demoVideoUrl || tool.tutorialVideoUrl) && (
+        <div className={`grid gap-3 ${tool.demoVideoUrl && tool.tutorialVideoUrl ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {tool.demoVideoUrl && (
+            <VideoCard src={tool.demoVideoUrl} title="成品演示" subtitle="生成效果预览" />
+          )}
+          {tool.tutorialVideoUrl && (
+            <VideoCard src={tool.tutorialVideoUrl} title="使用教学" subtitle="怎么填下面的参数" />
+          )}
+        </div>
+      )}
 
       <div className="space-y-3.5">
         {tool.inputs.map((input) => (

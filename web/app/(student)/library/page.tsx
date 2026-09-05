@@ -13,7 +13,7 @@ type Work = {
   createdAt: string
 }
 
-type OutputItem = { kind: 'text'; text: string } | { kind: 'image' | 'video' | 'file'; url: string }
+type OutputItem = { kind: 'text'; text: string } | { kind: 'image' | 'video' | 'file' | 'link'; url: string }
 type Run = {
   id: string
   toolId: string

@@ -171,6 +171,17 @@ describe('POST /api/admin/coze-tools', () => {
     expect(fixed.required).toBe(false)
   })
 
+  it('演示/教学视频：合法路径存下、脏字符串 400、空串清为 null', async () => {
+    const bad = await createTool({ ...VALID_BODY, demoVideoUrl: 'javascript:alert(1)' })
+    expect(bad.status).toBe(400)
+
+    const res = await createTool({ ...VALID_BODY, demoVideoUrl: '/api/files/coze-tool-media/a.mp4', tutorialVideoUrl: '' })
+    expect(res.status).toBe(200)
+    const created = await res.json()
+    expect(created.demoVideoUrl).toBe('/api/files/coze-tool-media/a.mp4')
+    expect(created.tutorialVideoUrl).toBeNull()
+  })
+
   it('合法创建 → 200，GET 回读一致', async () => {
     const res = await createTool()
     expect(res.status).toBe(200)

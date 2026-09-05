@@ -99,7 +99,9 @@ async function transferOutputs(items: CozeOutputItem[], runId: string, deps: Coz
   let downloadFailures = 0
   let lastError = ''
   for (const item of items) {
-    if (item.kind === 'text') {
+    // link 是网页地址（如剪映小助手 draft 链接），「下载」它只会存下一个没用的 HTML，
+    // 链接本身才是交付物——与 text 一样原样透传。
+    if (item.kind === 'text' || item.kind === 'link') {
       out.push(item)
       continue
     }

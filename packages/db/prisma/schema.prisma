@@ -295,6 +295,9 @@ model CozeTool {
   priceCredits Int      @default(1) @map("price_credits")
   enabled      Boolean  @default(false)
   sortOrder    Int      @default(0) @map("sort_order")
+  /// 演示视频（成品效果）与教学视频（怎么填参数），后台上传，学员端工具页展示
+  demoVideoUrl     String? @map("demo_video_url")
+  tutorialVideoUrl String? @map("tutorial_video_url")
   createdAt    DateTime @default(now()) @map("created_at")
   @@map("coze_tools")
 }

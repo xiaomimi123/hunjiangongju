@@ -98,6 +98,19 @@ export function validateName(raw: unknown): string {
   return name.slice(0, 40)
 }
 
+// 演示/教学视频 URL：本站上传路径或外链，空串/null 表示清除。防把任意脏字符串写进 <video src>。
+export function validateVideoUrl(raw: unknown, label: string): string | null {
+  if (raw === undefined || raw === null) return null
+  if (typeof raw !== 'string') throw new HttpError(400, `${label}必须是字符串`)
+  const url = raw.trim()
+  if (!url) return null
+  if (url.length > 500) throw new HttpError(400, `${label}过长`)
+  if (!url.startsWith('/api/files/') && !/^https?:\/\//i.test(url)) {
+    throw new HttpError(400, `${label}必须是本站上传路径（/api/files/…）或 http(s) 外链`)
+  }
+  return url
+}
+
 const WORKFLOW_ID_RE = /^[\w-]{1,128}$/
 
 export function validateWorkflowId(raw: unknown): string {

@@ -11,6 +11,9 @@
 export type CozeOutputItem =
   | { kind: 'text'; text: string }
   | { kind: 'image' | 'video' | 'file'; url: string } // url 此时还是扣子远程 URL，转存是 worker 的事
+  // link：指向网页（pathname 无扩展名）的 URL，如剪映小助手的 draft 链接。前端渲染成
+  // 可点开/复制的链接；worker 不转存（下载一个网页存成文件毫无意义，还会毁掉链接本身的用途）。
+  | { kind: 'link'; url: string }
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 const VIDEO_EXTS = new Set(['.mp4', '.mov', '.webm'])
@@ -34,10 +37,14 @@ function classifyString(s: string): CozeOutputItem | null {
     } catch {
       return { kind: 'file', url: s }
     }
-    const dot = pathname.lastIndexOf('.')
-    const ext = dot >= 0 ? pathname.slice(dot).toLowerCase() : ''
+    // pathname 最后一段里的扩展名；用 basename 判断，防止 `/v1.2/share` 这类路径段里的点被误认
+    const base = pathname.slice(pathname.lastIndexOf('/') + 1)
+    const dot = base.lastIndexOf('.')
+    const ext = dot > 0 ? base.slice(dot).toLowerCase() : ''
     if (IMAGE_EXTS.has(ext)) return { kind: 'image', url: s }
     if (VIDEO_EXTS.has(ext)) return { kind: 'video', url: s }
+    // 无扩展名 → 大概率是网页（分享页/工具页），当 link 展示，不让 worker 去「下载」它
+    if (!ext) return { kind: 'link', url: s }
     return { kind: 'file', url: s }
   }
   const trimmed = s.trim()
@@ -51,6 +58,17 @@ function classifyString(s: string): CozeOutputItem | null {
 function walk(value: unknown, depth: number, out: CozeOutputItem[], seenUrls: Set<string>, seenTexts: Set<string>): void {
   if (depth > MAX_DEPTH) return
   if (typeof value === 'string') {
+    // 内层 JSON 字符串下钻：工作流常把结束节点输出整个再序列化一层（实测 2026-09-06：
+    // output 是 '{"draft_url":"https://…"}' 这样的字符串），不 parse 就会把原始 JSON
+    // 当文本亮给学员、且 '{}' 这种空噪音也占一条。只对「看起来是 JSON 容器」且
+    // 尺寸有限的字符串试 parse，深度计入 MAX_DEPTH——解析炸弹被深度和尺寸双重封顶。
+    const trimmed = value.trim()
+    if (trimmed.length <= 10_000 && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+      try {
+        walk(JSON.parse(trimmed), depth + 1, out, seenUrls, seenTexts)
+        return
+      } catch { /* 不是合法 JSON：按普通字符串走分类 */ }
+    }
     const item = classifyString(value)
     if (!item) return
     if (item.kind === 'text') {

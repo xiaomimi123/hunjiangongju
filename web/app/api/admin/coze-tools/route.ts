@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
-import { validateInputs, validatePriceCredits, validateName, validateWorkflowId } from '@/lib/cozeToolAdmin'
+import { validateInputs, validatePriceCredits, validateName, validateWorkflowId, validateVideoUrl } from '@/lib/cozeToolAdmin'
 
 export const GET = handler(async () => {
   await requireRole('operator')
@@ -26,9 +26,11 @@ export const POST = handler(async (req) => {
   const priceCredits = validatePriceCredits(body.priceCredits ?? 1)
   const enabled = body.enabled === true
   const sortOrder = Number.isInteger(body.sortOrder) ? (body.sortOrder as number) : 0
+  const demoVideoUrl = validateVideoUrl(body.demoVideoUrl, '演示视频地址')
+  const tutorialVideoUrl = validateVideoUrl(body.tutorialVideoUrl, '教学视频地址')
 
   const tool = await prisma.cozeTool.create({
-    data: { name, description, workflowId, inputs, priceCredits, enabled, sortOrder },
+    data: { name, description, workflowId, inputs, priceCredits, enabled, sortOrder, demoVideoUrl, tutorialVideoUrl },
   })
   return NextResponse.json(tool)
 })

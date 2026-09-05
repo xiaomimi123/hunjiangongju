@@ -90,11 +90,35 @@ describe('parseCozeOutput', () => {
     }
   })
 
-  it('JSON 字符串嵌套只 parse 第一层：内层 JSON 字符串不再 parse，按普通文本处理', () => {
+  it('内层 JSON 字符串下钻解析：拿到真正的业务值而不是原始 JSON 文本', () => {
     const inner = JSON.stringify({ output: '内层文本' })
     const raw = JSON.stringify({ payload: inner })
     const items = parseCozeOutput(raw)
-    expect(items).toEqual([{ kind: 'text', text: inner }])
+    expect(items).toEqual([{ kind: 'text', text: '内层文本' }])
+  })
+
+  it('线上实测形状：output 是 draft_url JSON 字符串 + 空 {} 噪音 → 一条 link，噪音消失', () => {
+    // 2026-09-06 书单工作流真实输出：两个字段各是一层 JSON 字符串
+    const raw = JSON.stringify({
+      output: '{"draft_url":"https://agent.ai-tools.cn/jyxzs?draft_url=https%3A%2F%2Fagent-cos.ai-tools.cn%2Fdraft%2Fx.json"}',
+      other: '{}',
+    })
+    const items = parseCozeOutput(raw)
+    expect(items).toEqual([
+      { kind: 'link', url: 'https://agent.ai-tools.cn/jyxzs?draft_url=https%3A%2F%2Fagent-cos.ai-tools.cn%2Fdraft%2Fx.json' },
+    ])
+  })
+
+  it('嵌套 JSON 字符串超过深度上限不再下钻（解析炸弹防御仍有效）', () => {
+    // 每层都是「对象再序列化成字符串」的套娃，下钻会逐层消耗深度，超过 MAX_DEPTH=6 应被丢弃
+    let s = JSON.stringify({ u: 'https://cdn.example.com/deep.png' })
+    for (let i = 0; i < 7; i++) s = JSON.stringify({ nested: s })
+    expect(parseCozeOutput(s)).toEqual([])
+  })
+
+  it('无扩展名的网页 URL → link 项（worker 不该去下载网页）', () => {
+    const items = parseCozeOutput({ url: 'https://example.com/share/abc123' })
+    expect(items).toEqual([{ kind: 'link', url: 'https://example.com/share/abc123' }])
   })
 
   it('递归深度超过上限时不再下钻，深层数据不出现在结果里', () => {

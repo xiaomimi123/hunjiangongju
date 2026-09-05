@@ -33,6 +33,8 @@ type Tool = {
   priceCredits: number
   enabled: boolean
   sortOrder: number
+  demoVideoUrl: string | null
+  tutorialVideoUrl: string | null
   createdAt: string
 }
 
@@ -100,11 +102,13 @@ type FormState = {
   priceCredits: string
   sortOrder: string
   enabled: boolean
+  demoVideoUrl: string
+  tutorialVideoUrl: string
   inputs: FormInput[]
 }
 
 function blankForm(): FormState {
-  return { name: '', description: '', workflowId: '', priceCredits: '1', sortOrder: '0', enabled: false, inputs: [] }
+  return { name: '', description: '', workflowId: '', priceCredits: '1', sortOrder: '0', enabled: false, demoVideoUrl: '', tutorialVideoUrl: '', inputs: [] }
 }
 
 function toForm(t: Tool): FormState {
@@ -115,6 +119,8 @@ function toForm(t: Tool): FormState {
     priceCredits: String(t.priceCredits),
     sortOrder: String(t.sortOrder),
     enabled: t.enabled,
+    demoVideoUrl: t.demoVideoUrl ?? '',
+    tutorialVideoUrl: t.tutorialVideoUrl ?? '',
     inputs: t.inputs.map((i) => ({
       name: i.name, label: i.label, type: i.type, required: i.required,
       placeholder: i.placeholder,
@@ -122,6 +128,41 @@ function toForm(t: Tool): FormState {
       valueText: i.value ?? '',
     })),
   }
+}
+
+// 演示/教学视频上传控件：传完把 /api/files/ 地址写进表单字段，仍需点「保存」才生效
+function VideoField({ label, value, onChange, onErr }: {
+  label: string; value: string; onChange: (v: string) => void; onErr: (msg: string) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  async function upload(file: File) {
+    setBusy(true); onErr('')
+    try {
+      const form = new FormData()
+      form.set('file', file)
+      const { url } = await api<{ url: string }>('/api/admin/coze-tools/video', { form })
+      onChange(url)
+    } catch (e) { onErr((e as Error).message) }
+    finally { setBusy(false) }
+  }
+  return (
+    <div className="space-y-1.5 rounded-xl border border-line p-3">
+      <p className="text-xs text-ink3">{label}</p>
+      {value ? (
+        <div className="space-y-1.5">
+          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+          <video src={value} controls preload="metadata" className="max-h-40 w-full rounded-lg bg-black" />
+          <button onClick={() => onChange('')} className="text-xs text-bad">移除视频</button>
+        </div>
+      ) : (
+        <label className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-line px-3 py-4 text-xs text-ink3">
+          {busy ? '上传中…' : '点击上传（mp4/mov/webm，≤200MB）'}
+          <input type="file" accept="video/mp4,video/quicktime,video/webm" className="hidden" disabled={busy}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f) }} />
+        </label>
+      )}
+    </div>
+  )
 }
 
 export default function CozeToolsPage() {
@@ -329,6 +370,8 @@ export default function CozeToolsPage() {
       priceCredits: Number(form.priceCredits),
       sortOrder: Number(form.sortOrder),
       enabled: form.enabled,
+      demoVideoUrl: form.demoVideoUrl.trim(),
+      tutorialVideoUrl: form.tutorialVideoUrl.trim(),
       inputs: form.inputs.map((i) => ({
         name: i.name,
         label: i.label.trim(),
@@ -508,6 +551,13 @@ export default function CozeToolsPage() {
               <input type="checkbox" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} />
               上架（学员可见可用）
             </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <VideoField label="演示视频（成品效果，学员端工具页展示）" value={form.demoVideoUrl}
+                onChange={(v) => setForm((f) => ({ ...f, demoVideoUrl: v }))} onErr={setFormErr} />
+              <VideoField label="教学视频（怎么填参数）" value={form.tutorialVideoUrl}
+                onChange={(v) => setForm((f) => ({ ...f, tutorialVideoUrl: v }))} onErr={setFormErr} />
+            </div>
 
             <div className="space-y-2 rounded-xl border border-line p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

@@ -111,7 +111,7 @@ describe('GET /api/tools', () => {
     const ids = tools.map((t: { id: string }) => t.id)
     expect(ids).toContain(enabledTool.id)
     expect(ids).not.toContain(disabledTool.id)
-    expect(Object.keys(tools[0]).sort()).toEqual(['id', 'name', 'description', 'priceCredits', 'inputs'].sort())
+    expect(Object.keys(tools[0]).sort()).toEqual(['id', 'name', 'description', 'priceCredits', 'inputs', 'demoVideoUrl', 'tutorialVideoUrl'].sort())
   })
 
   it('fixed（固定值）输入项整个不下发——名字和值都不能泄漏', async () => {

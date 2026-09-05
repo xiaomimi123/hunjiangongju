@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import VideoCard from '@/components/VideoCard'
 
-type OutputItem = { kind: 'text'; text: string } | { kind: 'image' | 'video' | 'file'; url: string }
+type OutputItem = { kind: 'text'; text: string } | { kind: 'image' | 'video' | 'file' | 'link'; url: string }
 type Status = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
 type Run = {
   id: string; toolId: string; status: Status; errorMsg: string | null
@@ -138,6 +138,15 @@ export default function ToolRunResultPage() {
                 )}
                 {item.kind === 'file' && (
                   <a href={item.url} download className="btn-ghost w-full">下载文件</a>
+                )}
+                {item.kind === 'link' && (
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="break-all text-sm text-ink2">{item.url}</p>
+                      <CopyButton text={item.url} />
+                    </div>
+                    <a href={item.url} target="_blank" rel="noreferrer" className="btn-ghost w-full">打开链接</a>
+                  </div>
                 )}
               </div>
             )

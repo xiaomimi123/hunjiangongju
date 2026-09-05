@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
-import { validateInputs, validatePriceCredits, validateName, validateWorkflowId } from '@/lib/cozeToolAdmin'
+import { validateInputs, validatePriceCredits, validateName, validateWorkflowId, validateVideoUrl } from '@/lib/cozeToolAdmin'
 
 // 局部更新：传了哪个字段才校验/写哪个字段，未传的保持原样。
 export const PATCH = handler(async (req, { params }) => {
@@ -22,6 +22,8 @@ export const PATCH = handler(async (req, { params }) => {
   if ('inputs' in body) data.inputs = validateInputs(body.inputs)
   if ('priceCredits' in body) data.priceCredits = validatePriceCredits(body.priceCredits)
   if ('enabled' in body) data.enabled = body.enabled === true
+  if ('demoVideoUrl' in body) data.demoVideoUrl = validateVideoUrl(body.demoVideoUrl, '演示视频地址')
+  if ('tutorialVideoUrl' in body) data.tutorialVideoUrl = validateVideoUrl(body.tutorialVideoUrl, '教学视频地址')
   if ('sortOrder' in body) {
     if (!Number.isInteger(body.sortOrder)) throw new HttpError(400, 'sortOrder 必须是整数')
     data.sortOrder = body.sortOrder

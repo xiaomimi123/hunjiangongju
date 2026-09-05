@@ -131,6 +131,23 @@ describe('processCozeRun', () => {
     expect(found.status).toBe('SUCCEEDED')
   })
 
+  it('fixed（固定值）字段：值从工具定义注入参数，且覆盖 run.inputs 里的同名脏值', async () => {
+    const user = await makeUser()
+    const tool = await makeTool([
+      { name: 'topic', label: '主题', type: 'text', required: true },
+      { name: 'scm_api_key', label: '速创猫密钥', type: 'fixed', value: 'sk-secret-123', required: false },
+    ])
+    // run.inputs 里混入同名脏值（模拟绕过 web 校验直接写库），必须被固定值覆盖
+    const run = await makeRun(tool.id, user.id, { inputs: { topic: '活着', scm_api_key: '脏值' } })
+
+    const runWorkflow = vi.fn(async (_workflowId: string, _parameters: Record<string, unknown>) => ({ raw: JSON.stringify({ text: 'ok' }) }))
+    await processCozeRun(run.id, fakeDeps({ runWorkflow }))
+
+    const [, parameters] = runWorkflow.mock.calls[0]
+    expect(parameters.topic).toBe('活着')
+    expect(parameters.scm_api_key).toBe('sk-secret-123')
+  })
+
   it('runWorkflow 抛错 → FAILED + 积分退回', async () => {
     const user = await makeUser(30)
     // 模拟已扣分：真实入口在建 run 时同事务扣分，这里直接把余额调到扣分后的状态

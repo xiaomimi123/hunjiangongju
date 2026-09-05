@@ -4,9 +4,9 @@ import { api } from '@/lib/fetcher'
 import Link from 'next/link'
 import PageHeader from '@/components/admin/PageHeader'
 
-const INPUT_TYPES = ['text', 'textarea', 'select', 'image'] as const
+const INPUT_TYPES = ['text', 'textarea', 'select', 'image', 'fixed'] as const
 type CozeInputType = (typeof INPUT_TYPES)[number]
-const TYPE_LABELS: Record<CozeInputType, string> = { text: '单行文本', textarea: '多行文本', select: '下拉选择', image: '图片' }
+const TYPE_LABELS: Record<CozeInputType, string> = { text: '单行文本', textarea: '多行文本', select: '下拉选择', image: '图片', fixed: '固定值（学员不可见）' }
 
 type CozeToolInput = {
   name: string
@@ -14,6 +14,7 @@ type CozeToolInput = {
   type: CozeInputType
   options?: string[]
   placeholder?: string
+  value?: string
   required: boolean
 }
 
@@ -83,12 +84,13 @@ type FormInput = {
   type: CozeInputType
   optionsText: string
   placeholder?: string
+  valueText: string
   required: boolean
 }
 
 // 编辑表单里一行输入项的默认值
 function blankInput(): FormInput {
-  return { name: '', label: '', type: 'text', optionsText: '', required: false }
+  return { name: '', label: '', type: 'text', optionsText: '', valueText: '', required: false }
 }
 
 type FormState = {
@@ -117,6 +119,7 @@ function toForm(t: Tool): FormState {
       name: i.name, label: i.label, type: i.type, required: i.required,
       placeholder: i.placeholder,
       optionsText: (i.options ?? []).join(','),
+      valueText: i.value ?? '',
     })),
   }
 }
@@ -249,6 +252,7 @@ export default function CozeToolsPage() {
             type: mapType(p.type),
             required: p.required === true,
             optionsText: '',
+            valueText: '',
           })),
         }))
         setFetchHint('已拉取参数，请为每项补充中文标签——记得点「保存」，保存后学员端才会出现这些字段')
@@ -284,6 +288,7 @@ export default function CozeToolsPage() {
             type: field.type === 'image' ? 'image' : 'text',
             required: field.required,
             optionsText: '',
+            valueText: '',
           }))
         return { ...f, inputs: [...f.inputs, ...added] }
       })
@@ -308,6 +313,7 @@ export default function CozeToolsPage() {
       if (!/^[\w-]{1,64}$/.test(inp.name)) return `${at}：参数名不合法（只能是字母/数字/下划线/短横线）`
       if (!inp.label.trim()) return `${at}：中文标签不能为空`
       if (inp.type === 'select' && parseOptions(inp.optionsText).length === 0) return `${at}：下拉选择需要至少一个选项`
+      if (inp.type === 'fixed' && !inp.valueText.trim()) return `${at}：固定值不能为空`
     }
     return ''
   }
@@ -327,8 +333,9 @@ export default function CozeToolsPage() {
         name: i.name,
         label: i.label.trim(),
         type: i.type,
-        required: i.required,
+        required: i.type === 'fixed' ? false : i.required,
         ...(i.type === 'select' ? { options: parseOptions(i.optionsText) } : {}),
+        ...(i.type === 'fixed' ? { value: i.valueText.trim() } : {}),
         ...(i.placeholder ? { placeholder: i.placeholder } : {}),
       })),
     }
@@ -530,13 +537,23 @@ export default function CozeToolsPage() {
                       onChange={(e) => updateInput(i, { type: e.target.value as CozeInputType })}>
                       {INPUT_TYPES.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
                     </select>
-                    <label className="col-span-1 flex items-center justify-center gap-1 text-xs">
-                      <input type="checkbox" checked={inp.required} onChange={(e) => updateInput(i, { required: e.target.checked })} />
-                      必填
-                    </label>
-                    <input className="field col-span-2" value={inp.placeholder ?? ''} placeholder="占位提示"
-                      onChange={(e) => updateInput(i, { placeholder: e.target.value })} />
+                    {inp.type === 'fixed' ? (
+                      <input className="field col-span-3" value={inp.valueText} placeholder="固定值（学员不可见）"
+                        onChange={(e) => updateInput(i, { valueText: e.target.value })} />
+                    ) : (
+                      <>
+                        <label className="col-span-1 flex items-center justify-center gap-1 text-xs">
+                          <input type="checkbox" checked={inp.required} onChange={(e) => updateInput(i, { required: e.target.checked })} />
+                          必填
+                        </label>
+                        <input className="field col-span-2" value={inp.placeholder ?? ''} placeholder="占位提示"
+                          onChange={(e) => updateInput(i, { placeholder: e.target.value })} />
+                      </>
+                    )}
                     <button onClick={() => removeInput(i)} className="col-span-1 text-xs text-bad">删除</button>
+                    {inp.type === 'fixed' && (
+                      <p className="col-span-11 text-[0.66rem] text-ink3">此值由服务器在运行时注入，学员端不显示该字段、也拿不到这个值（适合放第三方 api key）</p>
+                    )}
                     {inp.type === 'select' && (
                       <input className="field col-span-11" value={inp.optionsText} placeholder="选项，逗号分隔，如 A,B,C"
                         onChange={(e) => updateInput(i, { optionsText: e.target.value })}

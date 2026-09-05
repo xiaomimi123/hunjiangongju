@@ -16,6 +16,10 @@ export function validateInputsAgainst(toolInputs: unknown, submitted: unknown): 
   const result: Record<string, unknown> = {}
 
   for (const item of declared) {
+    // fixed（固定值）项：值由运营配死、worker 运行时注入。学员端看不到这个字段，
+    // 学员就算手动构造同名字段提交也直接丢弃——绝不写进 run.inputs（运行记录列表
+    // 接口会下发 inputs，写进去就把固定值泄露给本人了）。
+    if (item.type === 'fixed') continue
     const raw = sub[item.name]
     const empty = raw === undefined || raw === null || raw === ''
     if (item.required && empty) {

@@ -178,7 +178,7 @@ export async function recoverFailedCozeRun(runId: string, errorMsg: string): Pro
   await failRun(runId, run.userId, run.creditsCost, errorMsg)
 }
 
-type DeclaredInput = { name: string; type?: string }
+type DeclaredInput = { name: string; type?: string; value?: string }
 
 export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultDeps): Promise<void> {
   const run = await prisma.cozeToolRun.findUnique({ where: { id: runId } })
@@ -209,6 +209,15 @@ export async function processCozeRun(runId: string, deps: CozeRunDeps = defaultD
     const declared = Array.isArray(tool.inputs) ? (tool.inputs as unknown as DeclaredInput[]) : []
     const submitted = run.inputs && typeof run.inputs === 'object' ? (run.inputs as Record<string, unknown>) : {}
     const parameters: Record<string, unknown> = { ...submitted }
+
+    // fixed（固定值）字段：值配在工具定义里（如第三方 api key），学员端全程不可见、
+    // run.inputs 里也没有（web 校验层已丢弃学员的同名提交），这里才注入进工作流参数。
+    // 放在展开 submitted 之后，天然覆盖任何绕过 web 校验直接写库的同名脏值。
+    for (const field of declared) {
+      if (field.type === 'fixed' && typeof field.value === 'string') {
+        parameters[field.name] = field.value
+      }
+    }
 
     // image 字段：学员提交时存的是 DATA_DIR 下的相对路径（coze-uploads/<uuid>.<ext>，
     // web 侧已校验过合法性）。读文件 → 换成扣子 fileId → 写回参数。

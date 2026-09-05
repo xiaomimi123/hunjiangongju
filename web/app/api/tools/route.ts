@@ -11,5 +11,12 @@ export const GET = handler(async () => {
     orderBy: { sortOrder: 'asc' },
     select: { id: true, name: true, description: true, priceCredits: true, inputs: true },
   })
-  return NextResponse.json({ tools })
+  // fixed（固定值）项整个剥掉：value 里可能是第三方 api key 这类敏感值，学员端一个字节都不能见
+  const sanitized = tools.map((t) => ({
+    ...t,
+    inputs: Array.isArray(t.inputs)
+      ? (t.inputs as { type?: string }[]).filter((i) => i?.type !== 'fixed')
+      : t.inputs,
+  }))
+  return NextResponse.json({ tools: sanitized })
 })

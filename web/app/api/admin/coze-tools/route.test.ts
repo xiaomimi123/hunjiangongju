@@ -147,6 +147,30 @@ describe('POST /api/admin/coze-tools', () => {
     expect(res.status).toBe(400)
   })
 
+  it('inputs[].type=fixed 但 value 为空 → 400 且指明第几项', async () => {
+    const res = await createTool({
+      ...VALID_BODY,
+      inputs: [{ name: 'scm_api_key', label: '密钥', type: 'fixed', required: false }],
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain('第 1 项')
+  })
+
+  it('inputs[].type=fixed 合法 → 200，value 存下、required 被强制 false', async () => {
+    const res = await createTool({
+      ...VALID_BODY,
+      inputs: [
+        { name: 'topic', label: '主题', type: 'text', required: true },
+        { name: 'scm_api_key', label: '密钥', type: 'fixed', value: ' sk-abc ', required: true },
+      ],
+    })
+    expect(res.status).toBe(200)
+    const created = await res.json()
+    const fixed = created.inputs.find((i: { name: string }) => i.name === 'scm_api_key')
+    expect(fixed.value).toBe('sk-abc') // 两端去空白
+    expect(fixed.required).toBe(false)
+  })
+
   it('合法创建 → 200，GET 回读一致', async () => {
     const res = await createTool()
     expect(res.status).toBe(200)

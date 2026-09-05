@@ -113,6 +113,23 @@ describe('GET /api/tools', () => {
     expect(ids).not.toContain(disabledTool.id)
     expect(Object.keys(tools[0]).sort()).toEqual(['id', 'name', 'description', 'priceCredits', 'inputs'].sort())
   })
+
+  it('fixed（固定值）输入项整个不下发——名字和值都不能泄漏', async () => {
+    requireRoleMock.mockResolvedValue({ userId: 'stu1', role: 'student' })
+    const tool = await makeTool({
+      inputs: [
+        { name: 'topic', label: '主题', type: 'text', required: true },
+        { name: 'scm_api_key', label: '速创猫密钥', type: 'fixed', value: 'sk-secret-123', required: false },
+      ],
+    })
+    const res = await toolsGET(getReq('http://localhost/api/tools'), { params: {} })
+    const { tools } = await res.json()
+    const found = tools.find((t: { id: string }) => t.id === tool.id)
+    expect(found.inputs).toHaveLength(1)
+    expect(found.inputs[0].name).toBe('topic')
+    expect(JSON.stringify(found)).not.toContain('sk-secret-123')
+    expect(JSON.stringify(found)).not.toContain('scm_api_key')
+  })
 })
 
 // ---------------- POST /api/tools/[id]/run ----------------
@@ -249,6 +266,27 @@ describe('POST /api/tools/[id]/run', () => {
     expect(await prisma.cozeToolRun.count({ where: { toolId: tool.id } })).toBe(0)
     expect(enqueueCozeRunMock).not.toHaveBeenCalled()
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(10)
+  })
+
+  it('fixed 字段：学员构造同名提交也被丢弃，不进 run.inputs（防经运行记录接口回流泄漏）', async () => {
+    const u = await makeStudent(10)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    const tool = await makeTool({
+      priceCredits: 0,
+      inputs: [
+        { name: 'topic', label: '主题', type: 'text', required: true },
+        { name: 'scm_api_key', label: '速创猫密钥', type: 'fixed', value: 'sk-secret-123', required: false },
+      ],
+    })
+    const res = await runPOST(
+      jsonReq('http://localhost/x', 'POST', { inputs: { topic: '活着', scm_api_key: '学员乱填的' } }),
+      { params: { id: tool.id } },
+    )
+    expect(res.status).toBe(200)
+    const { id } = await res.json()
+    runIds.push(id)
+    const run = await prisma.cozeToolRun.findUniqueOrThrow({ where: { id } })
+    expect(run.inputs).toEqual({ topic: '活着' })
   })
 
   it('扣分建 run 后入队失败（如 redis 挂了）→ 响应非 200、run 落 FAILED、积分已退回', async () => {

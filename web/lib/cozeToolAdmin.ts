@@ -3,7 +3,9 @@
 // 带空格/特殊字符会让运行莫名其妙地失败（且失败信息跟这里的校验完全对不上）。
 import { HttpError } from './auth'
 
-export const INPUT_TYPES = ['text', 'textarea', 'select', 'image'] as const
+// fixed = 固定值：运营在后台填死一个值（如工作流要的第三方 api key），运行时服务端注入。
+// 学员端列表接口会整项剥掉（值绝不能下发），学员提交的同名字段会被丢弃。
+export const INPUT_TYPES = ['text', 'textarea', 'select', 'image', 'fixed'] as const
 export type CozeInputType = (typeof INPUT_TYPES)[number]
 
 const NAME_RE = /^[\w-]{1,64}$/
@@ -14,6 +16,7 @@ export type CozeToolInput = {
   type: CozeInputType
   options?: string[]
   placeholder?: string
+  value?: string
   required: boolean
 }
 
@@ -56,7 +59,15 @@ export function validateInputs(raw: unknown): CozeToolInput[] {
       options = opts as string[]
     }
 
-    const required = o.required === true
+    let value: string | undefined
+    if (type === 'fixed') {
+      value = typeof o.value === 'string' ? o.value.trim() : ''
+      if (!value) throw new HttpError(400, `${at}：type 为 fixed（固定值）时 value 不能为空`)
+      if (value.length > 5000) throw new HttpError(400, `${at}：固定值不能超过 5000 字`)
+    }
+
+    // fixed 项的值由服务端注入，与学员是否必填无关，强制 false 免生歧义
+    const required = type === 'fixed' ? false : o.required === true
 
     const placeholder = typeof o.placeholder === 'string' ? o.placeholder : undefined
 
@@ -66,6 +77,7 @@ export function validateInputs(raw: unknown): CozeToolInput[] {
       type: type as CozeInputType,
       ...(options ? { options } : {}),
       ...(placeholder ? { placeholder } : {}),
+      ...(value !== undefined ? { value } : {}),
       required,
     }
   })

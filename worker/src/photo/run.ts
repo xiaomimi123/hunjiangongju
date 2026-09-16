@@ -25,8 +25,13 @@ const INPUT_REL_RE = /^photo-uploads\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/
 
 const NON_TERMINAL_STATUSES = ['QUEUED', 'RUNNING']
 
-// 参考图目录：素材包里复制进仓库的姿态/光线参考（见 packages/db/assets/photo-gen/refs/）
-const REFS_DIR = path.join(process.cwd(), 'packages/db/assets/photo-gen/refs')
+// 参考图目录：素材包里复制进仓库的姿态/光线参考（packages/db/assets/photo-gen/refs/）。
+// 不能用 process.cwd() 定位——npm workspace 启动时 cwd 是 worker/ 而非仓库根
+// （本地 smoke 与 docker 的 `npm run start -w worker` 都如此），从 @mixcut/db 包自身反解最稳。
+const REFS_DIR = path.join(
+  path.dirname(require.resolve('@mixcut/db/package.json')),
+  'assets/photo-gen/refs',
+)
 
 async function defaultDownload(url: string): Promise<Buffer> {
   if (isMockPhotoUrl(url)) return mockPhotoBytes()

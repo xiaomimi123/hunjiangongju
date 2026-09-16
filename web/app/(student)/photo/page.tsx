@@ -56,7 +56,7 @@ export default function PhotoGenPage() {
     loadWallet()
     api<{ pricePerImage: number }>('/api/photo/config').then((c) => setPrice(c.pricePerImage)).catch(() => {})
   }, [])
-  const totalPrice = price * count
+  const totalPrice = Math.ceil(price * count) // 单价可为小数（如 0.5），总价向上取整成整数积分
 
   async function upload(file: File) {
     setErr(''); setUploading(true)

@@ -46,9 +46,15 @@ export function validatePhotoRun(body: unknown): PhotoRunParams {
   return { mode, shotMode, style, count, inputImage }
 }
 
-// 单张积分价：从 photo 能力的 extra.pricePerImage 读，缺省 1，夹到 [0,100] 整数
+// 单张积分价：从 photo 能力的 extra.pricePerImage 读，缺省 1。支持小数（如 0.5）——
+// 账本仍是整数积分，总价 = ceil(单价×张数)（见 totalPhotoPrice），多拍更划算。
 export function resolvePricePerImage(extra: Record<string, unknown>): number {
   const raw = extra.pricePerImage
-  if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 && raw <= 100) return raw
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= 100) return raw
   return 1
+}
+
+// 一次运行的总扣分：小数单价向上取整成整数积分（0.5×1张=1分、0.5×4张=2分）
+export function totalPhotoPrice(pricePerImage: number, count: number): number {
+  return Math.ceil(pricePerImage * count)
 }

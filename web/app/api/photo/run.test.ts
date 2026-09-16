@@ -125,6 +125,16 @@ describe('POST /api/photo/run', () => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(4)
   })
 
+  it('小数单价 0.5：1 张扣 1（向上取整）、4 张扣 2', async () => {
+    const u = await makeStudent(10)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    capConfigMock.mockResolvedValue({ capability: 'photo', baseUrl: 'x', apiKey: 'k', model: 'm', enabled: true, extra: { pricePerImage: 0.5 } })
+    await trackRunOf(await runPOST(jsonReq({ ...VALID, count: 1 }), { params: {} }))
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(9)
+    await trackRunOf(await runPOST(jsonReq({ ...VALID, count: 4 }), { params: {} }))
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(7)
+  })
+
   it('积分不足 → 403 NO_CREDITS，不建 run 不入队', async () => {
     const u = await makeStudent(1)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })

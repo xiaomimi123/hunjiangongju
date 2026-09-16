@@ -143,10 +143,12 @@ export async function processPhotoRun(runId: string, deps: PhotoRunDeps = defaul
       throw new Error(lastError ? `生成失败：${lastError}` : '生成失败：没有得到任何图片')
     }
 
-    // 部分成功：按未产出的张数退分。单价 = creditsCost / count（建 run 时按张定价整数相乘，能整除）
+    // 部分成功：按成功比例保留费用（向上取整），差额退回。不反推单价——单价可能是小数
+    // （0.5/张之类，见 web/lib/photoInputs.ts totalPhotoPrice），总价是 ceil 出来的整数，
+    // keep = ceil(总价×成功数/总数) 与「按小数单价对成功张数重新计费」结果一致且恒为整数。
     const failedCount = run.count - saved.length
-    const perImage = run.count > 0 ? Math.floor(run.creditsCost / run.count) : 0
-    const refundAmount = failedCount > 0 ? failedCount * perImage : 0
+    const keepCost = run.count > 0 ? Math.ceil((run.creditsCost * saved.length) / run.count) : 0
+    const refundAmount = failedCount > 0 ? run.creditsCost - keepCost : 0
 
     await prisma.$transaction(async (tx) => {
       const claimed = await tx.photoGenRun.updateMany({

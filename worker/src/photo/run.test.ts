@@ -144,6 +144,23 @@ describe('processPhotoRun', () => {
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).credits).toBe(11)
   })
 
+  it('小数单价的部分成功：0.5/张 4 张（总价 2）成 1 张 → 保留 ceil(2×1/4)=1、退 1', async () => {
+    await ensureInput()
+    const user = await makeUser(10)
+    const run = await makeRun(user.id, { count: 4, creditsCost: 2 })
+    let call = 0
+    const generate = vi.fn(async () => {
+      call += 1
+      if (call > 1) throw new Error('挂了')
+      return ['https://remote/1.png']
+    })
+    await processPhotoRun(run.id, fakeDeps({ generate }))
+    const found = await prisma.photoGenRun.findUniqueOrThrow({ where: { id: run.id } })
+    expect(found.status).toBe('SUCCEEDED')
+    expect(found.creditsCost).toBe(1)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).credits).toBe(11)
+  })
+
   it('原图路径不合法（越权写库）→ FAILED，不读任意路径', async () => {
     const user = await makeUser(10)
     const run = await makeRun(user.id, { inputImage: '../../etc/passwd', creditsCost: 1 })

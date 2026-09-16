@@ -6,7 +6,7 @@ import { prisma, enqueuePhotoGenRun, getCapabilityConfig } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
-import { validatePhotoRun, resolvePricePerImage } from '@/lib/photoInputs'
+import { validatePhotoRun, resolvePricePerImage, totalPhotoPrice } from '@/lib/photoInputs'
 
 export const POST = handler(async (req) => {
   const s = await requireRole()
@@ -20,7 +20,7 @@ export const POST = handler(async (req) => {
   if (process.env.AI_MOCK !== '1' && !cfg.enabled) {
     throw new HttpError(503, '实拍生图能力未开启，请联系运营在后台「模型配置」配置并启用')
   }
-  const price = resolvePricePerImage(cfg.extra) * params.count
+  const price = totalPhotoPrice(resolvePricePerImage(cfg.extra), params.count)
 
   const run = await prisma.$transaction(async (tx) => {
     if (s.role !== 'operator' && price > 0) {

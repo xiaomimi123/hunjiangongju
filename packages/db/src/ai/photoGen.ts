@@ -71,7 +71,10 @@ async function poll(cfg: { baseUrl: string; apiKey: string }, taskId: string): P
       if (parsed.urls.length === 0) throw new Error('生图完成但没有返回图片 URL')
       return parsed.urls
     }
-    if (parsed.status !== 'processing' && parsed.status !== 'submitted') {
+    // 进行中状态白名单：api.apimart.ai 实测返回 submitted/processing，
+    // 国内直连入口 apib.ai 实测还会返回 pending（2026-09-16 线上踩坑：pending 被误判为失败态）。
+    // queued/waiting/running 一并收进来，防下一个别名再炸。
+    if (!['processing', 'submitted', 'pending', 'queued', 'waiting', 'running'].includes(parsed.status)) {
       throw new Error(`生图任务失败（${parsed.status}）${parsed.error ? `: ${parsed.error.slice(0, 200)}` : ''}`)
     }
     if (Date.now() > deadline) throw new Error(`生图任务超时（${TOTAL_TIMEOUT_MS / 1000}s）`)

@@ -1,8 +1,8 @@
 import { prisma } from '../client'
 import { decrypt } from '../crypto'
 
-export type Capability = 'llm' | 'image' | 'tts' | 'asr' | 'vision' | 'coze'
-export const CAPABILITIES: Capability[] = ['llm', 'image', 'tts', 'asr', 'vision', 'coze']
+export type Capability = 'llm' | 'image' | 'tts' | 'asr' | 'vision' | 'coze' | 'photo'
+export const CAPABILITIES: Capability[] = ['llm', 'image', 'tts', 'asr', 'vision', 'coze', 'photo']
 
 export type ResolvedCapConfig = {
   capability: Capability

@@ -2,6 +2,7 @@ import { Worker } from 'bullmq'
 import { redisConnection } from '@mixcut/db'
 import { startGenWorker } from './gen'
 import { processCozeRun, recoverFailedCozeRun } from './coze/run'
+import { processPhotoRun, recoverFailedPhotoRun } from './photo/run'
 
 startGenWorker()
 
@@ -39,6 +40,32 @@ function startCozeWorker(): Worker {
 }
 
 startCozeWorker()
+
+/**
+ * AI 实拍生图消费端。独立队列 'photo-gen'（见 packages/db/src/photoQueue.ts）。
+ * 并发 2；锁 12 分钟：photoGenerate 单任务总超时 5 分钟，4 张并行走同一等待窗口，
+ * 加视觉分类与转存，10 分钟顶满，留 2 分钟余量盖过全程，防 stalled 重复投递。
+ */
+function startPhotoWorker(): Worker {
+  const w = new Worker(
+    'photo-gen',
+    (job) => processPhotoRun(job.data.runId),
+    { connection: redisConnection, concurrency: 2, lockDuration: 12 * 60_000 },
+  )
+  w.on('completed', (j) => console.log(`[photo] run ${j.data.runId} done`))
+  w.on('failed', (j, err) => {
+    console.error(`[photo] run ${j?.data?.runId} failed: ${err.message}`)
+    const runId = (j?.data as { runId?: string } | undefined)?.runId
+    if (runId) {
+      recoverFailedPhotoRun(runId, `任务处理异常: ${err.message}`).catch((e) => {
+        console.error(`[photo] run ${runId} 兜底 failRun 也失败: ${(e as Error).message}`)
+      })
+    }
+  })
+  return w
+}
+
+startPhotoWorker()
 
 // 超时兜底后被抛弃的 job promise 若晚到 reject 不应拖垮整个 worker（保住并发中的其它任务）
 process.on('unhandledRejection', (reason) => {

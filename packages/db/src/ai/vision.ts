@@ -283,3 +283,80 @@ export async function describeStyleForPrompt(imageUrls: string[]): Promise<strin
   if (!out) throw new Error(`vision 未返回可用的画风提示词（响应：${JSON.stringify(json).slice(0, 300)}）`)
   return out
 }
+
+// ---------------- 实拍生图:内页自动分类 ----------------
+
+export type InnerPageInfo = {
+  title: string
+  pageSide: 'left' | 'right'
+  titleBand: 'upper' | 'middle' | 'lower'
+}
+
+export const MOCK_INNER_PAGE: InnerPageInfo = { title: '示例标题', pageSide: 'right', titleBand: 'middle' }
+
+const INNER_PAGE_INSTRUCTION =
+  '这是一张翻开书籍的内页照片。请找出照片中主展示页（占画面主体、文字清晰的那一页）上的小节标题' +
+  '（通常是加粗/较大的一行字，可能带小图标），并判断：1) side——主展示页是左页还是右页' +
+  '（看书沟在主页的哪一侧：书沟在右则是左页，书沟在左则是右页）；2) band——标题中心在这张' +
+  '**实体纸页**上下边界之间的位置：上 1/3 记 upper，中间记 middle，下 1/3 记 lower' +
+  '（以纸页物理边界为准，不是照片画面位置）。只输出一个 JSON 对象：' +
+  '{"title":"标题原文","side":"left|right","band":"upper|middle|lower"}，' +
+  '标题必须逐字照抄、不增删标点。不要输出 JSON 以外的任何文字。'
+
+export function parseInnerPage(raw: unknown): InnerPageInfo | null {
+  // 兼容 dashscope 原生与 openai 兼容两种响应形状里的文本取出
+  const d = raw as Record<string, unknown>
+  let text = ''
+  const dashChoices = (d?.output as { choices?: { message?: { content?: unknown } }[] })?.choices
+  const content = dashChoices?.[0]?.message?.content
+  if (typeof content === 'string') text = content
+  else if (Array.isArray(content)) text = content.map((c) => (c as { text?: string })?.text ?? '').join('')
+  if (!text) return null
+  const m = text.match(/\{[\s\S]*\}/)
+  if (!m) return null
+  try {
+    const o = JSON.parse(m[0]) as { title?: unknown; side?: unknown; band?: unknown }
+    const title = typeof o.title === 'string' ? o.title.trim() : ''
+    const side = o.side === 'left' || o.side === 'right' ? o.side : null
+    const band = o.band === 'upper' || o.band === 'middle' || o.band === 'lower' ? o.band : null
+    if (!title || !side || !band) return null
+    return { title, pageSide: side, titleBand: band }
+  } catch { return null }
+}
+
+/** 内页照片 → 标题/左右页/标题位置。imageUrl 需公网可达（走 publicAssetUrl 签名）。 */
+export async function classifyInnerPage(imageUrl: string): Promise<InnerPageInfo> {
+  const cfg = await getCapabilityConfig('vision')
+  if (isMockMode(cfg)) return MOCK_INNER_PAGE
+
+  if (isDashScope(cfg.baseUrl)) {
+    const data = await dashPost(cfg.baseUrl, cfg.apiKey, {
+      model: cfg.model,
+      input: { messages: [{ role: 'user', content: [{ image: imageUrl }, { text: INNER_PAGE_INSTRUCTION }] }] },
+      parameters: {},
+    })
+    const out = parseInnerPage(data)
+    if (!out) throw new Error(`内页识别未返回可用结果（响应：${JSON.stringify(data).slice(0, 300)}）`)
+    return out
+  }
+
+  const res = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: imageUrl } },
+          { type: 'text', text: INNER_PAGE_INSTRUCTION },
+        ],
+      }],
+    }),
+  })
+  if (!res.ok) throw new Error(`内页识别请求失败 ${res.status}: ${(await res.text()).slice(0, 200)}`)
+  const json = await res.json() as { choices?: { message?: { content?: string } }[] }
+  const out = parseInnerPage({ output: { choices: [{ message: { content: json?.choices?.[0]?.message?.content } }] } })
+  if (!out) throw new Error('内页识别未返回可用结果')
+  return out
+}

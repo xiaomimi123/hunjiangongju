@@ -10,6 +10,7 @@ const LABELS: Record<string, { name: string; hint: string }> = {
   tts: { name: 'TTS 配音', hint: '整篇一次性配音' },
   asr: { name: 'ASR 转写', hint: '原视频语音转文字' },
   coze: { name: '扣子工作流', hint: '工具广场调用的扣子(Coze)工作流' },
+  photo: { name: '实拍生图', hint: '学员拍书生成真实感种草照（图生图）' },
 }
 
 /**
@@ -302,6 +303,13 @@ export default function ModelsPage() {
                 <input type="checkbox" checked={c.enabled} onChange={(e) => upd(c.capability, { enabled: e.target.checked })} className="h-5 w-5" />
               </label>
             </div>
+            {c.capability === 'photo' && (
+              <p className="text-xs text-ink3">
+                实拍生图：接口地址如 https://api.apimart.ai，模型如 gpt-image-2（须支持图片输入的图生图模型）。
+                高级参数可设 {'{"resolution":"1k","pricePerImage":1}'}——resolution 生成分辨率（1k/2k），pricePerImage 学员每张消耗积分（默认 1）。
+                内页模式还依赖上方 vision 能力做页面识别
+              </p>
+            )}
             {c.capability === 'coze' && (
               <p className="text-xs text-ink3">扣子(Coze)工作流：接口地址填 https://api.coze.cn，密钥填扣子的 PAT（个人访问令牌），模型留空即可</p>
             )}

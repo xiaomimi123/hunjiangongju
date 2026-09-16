@@ -302,6 +302,32 @@ model CozeTool {
   @@map("coze_tools")
 }
 
+/// AI 实拍生图：学员拍书（封面/内页）→ 图生图生成真实感种草照。软引用 user。
+model PhotoGenRun {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  /// cover | inner
+  mode        String
+  /// cover 模式的拍法：auto|lap_front|angled_pageblock|slightly_open|dark_fabric_close|desk_props；inner 模式为 null
+  shotMode    String?   @map("shot_mode")
+  /// inner 模式的风格：S01|S02；cover 模式为 null
+  style       String?
+  /// 生成张数 1-4
+  count       Int       @default(1)
+  /// 学员上传的原图相对路径（photo-uploads/<uuid>.<ext>）
+  inputImage  String    @map("input_image")
+  status      String    @default("QUEUED")
+  /// [{ url: 'photo-gen/<runId>/<n>.png' } | { url: <远程URL>, note: '未转存' }]
+  outputImages Json?    @map("output_images")
+  errorMsg    String?   @map("error_msg")
+  creditsCost Int       @default(0) @map("credits_cost")
+  refunded    Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  finishedAt  DateTime? @map("finished_at")
+  @@index([userId, createdAt])
+  @@map("photo_gen_runs")
+}
+
 /// 学员的每次运行。软引用 user/tool（与仓库现有风格一致，应用层校验）。
 model CozeToolRun {
   id          String    @id @default(cuid())

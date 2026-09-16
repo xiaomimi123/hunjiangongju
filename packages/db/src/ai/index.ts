@@ -21,6 +21,15 @@ export { parseCozeOutput } from './cozeOutput'
 export type { CozeOutputItem } from './cozeOutput'
 export { cozeProbeWorkflowParams } from './cozeProbe'
 export type { CozeProbedField, CozeProbeResult } from './cozeProbe'
+export { photoGenerate, isMockPhotoUrl, mockPhotoBytes, parsePhotoTask } from './photoGen'
+export type { PhotoGenOpts } from './photoGen'
+export {
+  buildCoverPrompt, buildInnerPrompt,
+  COVER_SHOT_MODES, COVER_SHOT_LABELS, INNER_STYLES, INNER_STYLE_LABELS,
+} from './photoPromptData'
+export type { CoverShotMode, InnerStyle, InnerPageSide, InnerTitleBand } from './photoPromptData'
+export { classifyInnerPage, parseInnerPage, MOCK_INNER_PAGE } from './vision'
+export type { InnerPageInfo } from './vision'
 import { llmComplete } from './llm'
 import { imageGenerate } from './image'
 import { ttsSynthesize } from './tts'
@@ -41,6 +50,14 @@ export async function testCapability(cap: Capability): Promise<{ ok: boolean; de
       const cfg = await getCapabilityConfig('coze')
       if (!cfg.apiKey) return { ok: false, detail: '未配置 Token' }
       return { ok: true, detail: '已保存。扣子连通性将在首次拉取参数或运行时验证' }
+    }
+    if (cap === 'photo') {
+      // 实拍生图的最小真实调用要花一次真实生图费且耗时约 1 分钟——只校验配置，
+      // 与 coze 同理：诚实优于假绿。
+      const cfg = await getCapabilityConfig('photo')
+      if (!cfg.baseUrl) return { ok: false, detail: '未配置接口地址' }
+      if (!cfg.apiKey) return { ok: false, detail: '未配置密钥' }
+      return { ok: true, detail: '已保存。生图连通性将在学员首次运行时验证（每次生成为真实计费调用）' }
     }
     return { ok: true, detail: 'ASR 需上传音频，跳过在线测试（配置已保存）' }
   } catch (e) {

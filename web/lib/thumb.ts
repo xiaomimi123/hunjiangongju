@@ -17,10 +17,15 @@ function thumbPathFor(srcAbs: string): string {
 /** 生成 <原图同目录>/<basename>.thumb.webp（宽 360 等比）。失败仅记 warning,不抛错 */
 export async function makeThumb(srcAbs: string): Promise<boolean> {
   const dst = thumbPathFor(srcAbs)
+  const isVideo = /\.(mp4|mov|webm)$/i.test(srcAbs)
   try {
     await new Promise<void>((resolve, reject) => {
-      ffmpeg(srcAbs)
-        .outputOptions(['-y', '-vf', 'scale=360:-2', '-quality', '78'])
+      const cmd = ffmpeg(srcAbs)
+      // 视频：跳到 0.1s 抽一帧当海报。不加 -frames:v 1 的话 webp 输出会把全部帧
+      // 编码成动画 webp——又慢又大，正好毁掉缩略图省带宽的初衷。
+      if (isVideo) cmd.inputOptions(['-ss', '0.1'])
+      cmd
+        .outputOptions(['-y', '-vf', 'scale=360:-2', '-quality', '78', ...(isVideo ? ['-frames:v', '1'] : [])])
         .output(dst)
         .on('end', () => resolve())
         .on('error', reject)

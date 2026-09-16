@@ -22,6 +22,7 @@ const runIds: string[] = []
 
 afterAll(async () => {
   await prisma.photoGenRun.deleteMany({ where: { id: { in: runIds } } })
+  await prisma.creditLog.deleteMany({ where: { userId: { in: userIds } } })
   await prisma.user.deleteMany({ where: { id: { in: userIds } } })
   await fs.rm(dataDir, { recursive: true, force: true })
   await prisma.$disconnect()
@@ -122,6 +123,11 @@ describe('processPhotoRun', () => {
 
     await processPhotoRun(run.id, deps) // 重复投递
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).credits).toBe(12)
+    // 退分流水恰好一条（幂等）
+    const logs = await prisma.creditLog.findMany({ where: { userId: user.id } })
+    expect(logs).toHaveLength(1)
+    expect(logs[0].delta).toBe(2)
+    expect(logs[0].reason).toContain('实拍生图退回')
   })
 
   it('部分成功（3 张成 2 张）→ SUCCEEDED + 按张退分 + errorMsg 注明', async () => {
@@ -142,6 +148,10 @@ describe('processPhotoRun', () => {
     expect(found.creditsCost).toBe(2)
     expect(found.errorMsg).toContain('1 张生成失败')
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).credits).toBe(11)
+    const logs = await prisma.creditLog.findMany({ where: { userId: user.id } })
+    expect(logs).toHaveLength(1)
+    expect(logs[0].delta).toBe(1)
+    expect(logs[0].reason).toContain('1 张未成')
   })
 
   it('小数单价的部分成功：0.5/张 4 张（总价 2）成 1 张 → 保留 ceil(2×1/4)=1、退 1', async () => {

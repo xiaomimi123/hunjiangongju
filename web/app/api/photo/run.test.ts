@@ -46,6 +46,7 @@ afterEach(async () => {
   if (runIds.length) await prisma.photoGenRun.deleteMany({ where: { id: { in: runIds.splice(0) } } })
 })
 afterAll(async () => {
+  if (userIds.length) await prisma.creditLog.deleteMany({ where: { userId: { in: userIds } } })
   if (userIds.length) await prisma.user.deleteMany({ where: { id: { in: userIds } } })
   await prisma.$disconnect()
 })
@@ -114,6 +115,11 @@ describe('POST /api/photo/run', () => {
     expect(run.shotMode).toBe('lap_front')
     expect(enqueueMock).toHaveBeenCalledWith(id)
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(8)
+    // 扣费入流水
+    const logs = await prisma.creditLog.findMany({ where: { userId: u.id } })
+    expect(logs).toHaveLength(1)
+    expect(logs[0].delta).toBe(-2)
+    expect(logs[0].reason).toContain('实拍生图')
   })
 
   it('单价从 extra.pricePerImage 生效', async () => {

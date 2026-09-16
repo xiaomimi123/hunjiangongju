@@ -95,6 +95,10 @@ export default function MePage() {
           <span className="text-sm text-ink2">工具运行记录</span>
           <span className="text-ink3">›</span>
         </button>
+        <button onClick={() => router.push('/photo/runs')} className="flex w-full items-center justify-between px-4 py-3.5 text-left transition active:bg-surface2">
+          <span className="text-sm text-ink2">生图记录</span>
+          <span className="text-ink3">›</span>
+        </button>
         <button onClick={openPw} className="flex w-full items-center justify-between px-4 py-3.5 text-left transition active:bg-surface2">
           <span className="text-sm text-ink2">修改密码</span>
           <span className="text-ink3">›</span>

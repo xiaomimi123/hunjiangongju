@@ -1,6 +1,6 @@
 'use client'
 // 共享视频卡片：成片库 / 首页最近成片 / 运行结果页复用。
-// 无 src 时展示渐变占位 + 低透明度播放钮；有 src 时先显示视频首帧（#t=0.1），
+// 无 src 时展示渐变占位 + 低透明度播放钮；有 src 时海报显示静态缩略图（.thumb.webp），
 // 点击海报原地切换为带 controls 的可播放 video（不整页跳转）。
 // 若传了 onClick，点击交给外部（比如跳转到运行详情页），不进入内嵌播放。
 import { useEffect, useRef, useState } from 'react'
@@ -25,11 +25,13 @@ const BADGE_TONE: Record<'ok' | 'run' | 'bad' | 'warn', string> = {
   warn: 'bg-[rgba(245,158,11,0.92)]',
 }
 
-function formatDuration(sec: number): string {
-  const s = Math.max(0, Math.round(sec))
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`
+// 由视频 URL 推导海报缩略图 URL（与 web/lib/thumbUrl.ts 同规则；这里不 import 服务端模块）
+function thumbOf(src: string): string {
+  const qIdx = src.search(/[?#]/)
+  const base = qIdx === -1 ? src : src.slice(0, qIdx)
+  const dot = base.lastIndexOf('.')
+  if (dot <= base.lastIndexOf('/')) return src
+  return base.slice(0, dot) + '.thumb.webp' + (qIdx === -1 ? '' : src.slice(qIdx))
 }
 
 // 内联 SVG 三角播放钮，禁用 emoji
@@ -49,7 +51,6 @@ export default function VideoCard({
   src, title, subtitle, trailing, badge, overlayTitle, posterClassName, onClick, footer,
 }: VideoCardProps) {
   const [playing, setPlaying] = useState(false)
-  const [duration, setDuration] = useState<number | null>(null)
   // 视频加载失败（典型场景：库里记录还在、文件已丢——如 2026-08-31 生产事故丢掉的旧渲染）：
   // 降级为渐变占位，别让一张坏卡反复发 404、也别给学员/运营一个点不动的假播放钮
   const [srcFailed, setSrcFailed] = useState(false)
@@ -106,29 +107,21 @@ export default function VideoCard({
           />
         ) : src && !srcFailed ? (
           <>
-            {/* 未进入视口前不挂 src，避免大量卡片同时发起首帧抽帧请求；
-                进入视口（提前 200px）后才真正加载 */}
+            {/* 海报走静态缩略图（.thumb.webp，服务端按需抽帧生成、永久缓存），不再用
+                <video preload> 抓首帧——那会让一屏几十张卡并发下载几百 KB～几 MB 的视频头，
+                把服务器上行带宽打满、连累全站请求排队（2026-09-16 后台生成页真实卡顿事故）。
+                每张 webp 仅约 10-20KB。仍保留视口懒挂载兜底。 */}
             {inView && (
-              // eslint-disable-next-line jsx-a11y/media-has-caption
-              <video
-                src={`${src}#t=0.1`}
-                preload="metadata"
-                muted
-                playsInline
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={thumbOf(src)}
+                alt=""
+                loading="lazy"
                 className="absolute inset-0 h-full w-full object-cover"
                 onError={() => { setSrcFailed(true); setPlaying(false) }}
-          onLoadedMetadata={(e) => {
-                  const d = e.currentTarget.duration
-                  if (Number.isFinite(d)) setDuration(d)
-                }}
               />
             )}
             <PlayIcon />
-            {duration != null && (
-              <span className="absolute bottom-[7px] right-[7px] rounded-full bg-black/55 px-1.5 py-0.5 text-[0.62rem]">
-                {formatDuration(duration)}
-              </span>
-            )}
           </>
         ) : (
           <PlayIcon dim />

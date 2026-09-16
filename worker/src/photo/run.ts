@@ -66,6 +66,11 @@ async function failRun(runId: string, userId: string, creditsCost: number, error
     })
     if (claimedRefund.count === 1) {
       await tx.user.updateMany({ where: { id: userId }, data: { credits: { increment: creditsCost } } })
+      if (creditsCost > 0) {
+        await tx.creditLog.create({
+          data: { userId, delta: creditsCost, reason: '实拍生图退回（生成失败）' },
+        })
+      }
     }
   })
 }
@@ -163,6 +168,9 @@ export async function processPhotoRun(runId: string, deps: PhotoRunDeps = defaul
       })
       if (claimed.count === 1 && refundAmount > 0) {
         await tx.user.updateMany({ where: { id: run.userId }, data: { credits: { increment: refundAmount } } })
+        await tx.creditLog.create({
+          data: { userId: run.userId, delta: refundAmount, reason: `实拍生图退回（${failedCount} 张未成）` },
+        })
       }
     })
   } catch (err) {

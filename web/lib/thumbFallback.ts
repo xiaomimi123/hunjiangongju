@@ -21,8 +21,9 @@ import fsp from 'fs/promises'
 /** 缩略图后缀。与 thumbUrl() 保持一致，改这里必须同步改那边。 */
 export const THUMB_SUFFIX = '.thumb.webp'
 
-/** 可能的原图扩展名。缩略图名里看不出原图是什么格式，只能逐个试。 */
-const ORIGINAL_EXTS = ['.png', '.jpg', '.jpeg', '.webp']
+/** 可能的原文件扩展名。缩略图名里看不出原文件是什么格式，只能逐个试。
+ *  .mp4 也在列：视频列表卡的海报走同一套按需补生成（makeThumb 对视频抽首帧）。 */
+const ORIGINAL_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.mp4']
 
 export async function isFile(abs: string): Promise<boolean> {
   try {

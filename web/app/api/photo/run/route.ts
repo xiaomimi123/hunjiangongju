@@ -31,6 +31,12 @@ export const POST = handler(async (req) => {
       if (claimed.count === 0) {
         const exists = await tx.user.count({ where: { id: s.userId } })
         if (exists > 0) throw new HttpError(403, '积分已用完，请扫码联系导师充值', 'NO_CREDITS')
+      } else {
+        // 扣费入流水：全站此前只有充值写 CreditLog，消费不写——导师在学员积分明细里
+        // 对不上账（2026-09-16 线上就有「退分了但看着像没退」的误会）。photo 链路扣/退全记。
+        await tx.creditLog.create({
+          data: { userId: s.userId, delta: -price, reason: `实拍生图（${params.count} 张）` },
+        })
       }
     }
     return tx.photoGenRun.create({
@@ -62,6 +68,11 @@ export const POST = handler(async (req) => {
       })
       if (claimedRefund.count === 1) {
         await tx.user.updateMany({ where: { id: s.userId }, data: { credits: { increment: run.creditsCost } } })
+        if (run.creditsCost > 0) {
+          await tx.creditLog.create({
+            data: { userId: s.userId, delta: run.creditsCost, reason: '实拍生图退回（入队失败）' },
+          })
+        }
       }
     })
     throw err

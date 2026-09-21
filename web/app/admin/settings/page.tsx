@@ -17,25 +17,28 @@ export default function SettingsPage() {
   const [qrUrl, setQrUrl] = useState('')
   const [qrErr, setQrErr] = useState('')
   const [qrBusy, setQrBusy] = useState(false)
-  // 积分定价：视频单价（积分，支持两位小数）
+  // 积分定价：视频/生图单价（积分，支持两位小数）
   const [videoPrice, setVideoPrice] = useState('1')
+  const [photoPrice, setPhotoPrice] = useState('1')
   const [priceErr, setPriceErr] = useState('')
   const [priceBusy, setPriceBusy] = useState(false)
 
   useEffect(() => {
     api<Cfg>('/api/admin/smtp').then(setCfg).catch((e) => setErr((e as Error).message))
     api<{ qrUrl: string }>('/api/admin/recharge-qr').then((r) => setQrUrl(r.qrUrl)).catch(() => {})
-    api<{ videoPriceCredits: string }>('/api/admin/pricing').then((r) => setVideoPrice(r.videoPriceCredits)).catch(() => {})
+    api<{ videoPriceCredits: string; photoPriceCredits: string }>('/api/admin/pricing').then((r) => {
+      setVideoPrice(r.videoPriceCredits); setPhotoPrice(r.photoPriceCredits)
+    }).catch(() => {})
   }, [])
 
-  async function saveVideoPrice() {
+  async function savePricing() {
     setPriceBusy(true); setPriceErr('')
     try {
-      const r = await api<{ videoPriceCredits: string }>('/api/admin/pricing', {
-        method: 'PUT', body: { videoPriceCredits: videoPrice.trim() },
+      const r = await api<{ videoPriceCredits: string; photoPriceCredits: string }>('/api/admin/pricing', {
+        method: 'PUT', body: { videoPriceCredits: videoPrice.trim(), photoPriceCredits: photoPrice.trim() },
       })
-      setVideoPrice(r.videoPriceCredits)
-      setMsg('视频单价已保存')
+      setVideoPrice(r.videoPriceCredits); setPhotoPrice(r.photoPriceCredits)
+      setMsg('定价已保存')
     } catch (e) { setPriceErr((e as Error).message) } finally { setPriceBusy(false) }
   }
 
@@ -91,13 +94,18 @@ export default function SettingsPage() {
       <div className="grid items-start gap-4 lg:grid-cols-2">
       <div className="card space-y-3 p-4">
         <p className="font-medium">积分定价</p>
-        <p className="text-xs text-ink3">积分最小单位 0.01。生成一条视频的扣费在此调整；生图单价在「模型配置 → 实拍生图」的高级参数 pricePerImage；扣子工具单价在各工具的编辑弹窗里。</p>
+        <p className="text-xs text-ink3">积分最小单位 0.01，支持两位小数（如 0.08）。视频价是全局默认，框架库可给单个框架设专属价；扣子工具单价在各工具的编辑弹窗里。</p>
         <label className="flex items-center gap-3">
-          <span className="text-sm">生成视频</span>
-          <input className="field w-28" value={videoPrice} onChange={(e) => setVideoPrice(e.target.value)} />
+          <span className="w-16 text-sm">生成视频</span>
+          <input className="field w-28" inputMode="decimal" value={videoPrice} onChange={(e) => setVideoPrice(e.target.value)} />
           <span className="text-sm text-ink3">积分/条</span>
-          <button onClick={saveVideoPrice} disabled={priceBusy} className="btn-quiet text-sm">{priceBusy ? '保存中…' : '保存'}</button>
         </label>
+        <label className="flex items-center gap-3">
+          <span className="w-16 text-sm">实拍生图</span>
+          <input className="field w-28" inputMode="decimal" value={photoPrice} onChange={(e) => setPhotoPrice(e.target.value)} />
+          <span className="text-sm text-ink3">积分/张</span>
+        </label>
+        <button onClick={savePricing} disabled={priceBusy} className="btn-quiet text-sm">{priceBusy ? '保存中…' : '保存定价'}</button>
         {priceErr && <p className="pill pill-bad">{priceErr}</p>}
       </div>
 

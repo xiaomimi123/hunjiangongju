@@ -52,7 +52,7 @@ afterAll(async () => {
 })
 
 let seq = 0
-async function makeStudent(credits = 10) {
+async function makeStudent(credits = 1000) {
   seq += 1
   const u = await prisma.user.create({
     data: { email: `photo-rt-${process.pid}-${seq}@test.local`, passwordHash: 'x', role: 'student', credits },
@@ -103,46 +103,46 @@ describe('POST /api/photo/run', () => {
     expect(res.status).toBe(503)
   })
 
-  it('积分充足 → 扣 count×单价、建 run、入队', async () => {
-    const u = await makeStudent(10)
+  it('积分充足 → 扣 count×单价（cc）、建 run、入队', async () => {
+    const u = await makeStudent(1000)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     const res = await trackRunOf(await runPOST(jsonReq(VALID), { params: {} }))
     expect(res.status).toBe(200)
     const { id } = await res.json()
     const run = await prisma.photoGenRun.findUniqueOrThrow({ where: { id } })
-    expect(run.creditsCost).toBe(2)
+    expect(run.creditsCost).toBe(200) // 2 张 × 100cc(1 积分)/张
     expect(run.mode).toBe('cover')
     expect(run.shotMode).toBe('lap_front')
     expect(enqueueMock).toHaveBeenCalledWith(id)
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(8)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(800)
     // 扣费入流水
     const logs = await prisma.creditLog.findMany({ where: { userId: u.id } })
     expect(logs).toHaveLength(1)
-    expect(logs[0].delta).toBe(-2)
+    expect(logs[0].delta).toBe(-200)
     expect(logs[0].reason).toContain('实拍生图')
   })
 
-  it('单价从 extra.pricePerImage 生效', async () => {
-    const u = await makeStudent(10)
+  it('单价从 extra.pricePerImage 生效（积分 → cc）', async () => {
+    const u = await makeStudent(1000)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     capConfigMock.mockResolvedValue({ capability: 'photo', baseUrl: 'x', apiKey: 'k', model: 'm', enabled: true, extra: { pricePerImage: 3 } })
     const res = await trackRunOf(await runPOST(jsonReq({ ...VALID, count: 2 }), { params: {} }))
     expect(res.status).toBe(200)
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(4)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(400) // 1000 - 2×300cc
   })
 
-  it('小数单价 0.5：1 张扣 1（向上取整）、4 张扣 2', async () => {
-    const u = await makeStudent(10)
+  it('小数单价 0.08/张：1 张扣 8cc、4 张扣 32cc（精确计费）', async () => {
+    const u = await makeStudent(1000)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
-    capConfigMock.mockResolvedValue({ capability: 'photo', baseUrl: 'x', apiKey: 'k', model: 'm', enabled: true, extra: { pricePerImage: 0.5 } })
+    capConfigMock.mockResolvedValue({ capability: 'photo', baseUrl: 'x', apiKey: 'k', model: 'm', enabled: true, extra: { pricePerImage: 0.08 } })
     await trackRunOf(await runPOST(jsonReq({ ...VALID, count: 1 }), { params: {} }))
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(9)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(992)
     await trackRunOf(await runPOST(jsonReq({ ...VALID, count: 4 }), { params: {} }))
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(7)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(960)
   })
 
   it('积分不足 → 403 NO_CREDITS，不建 run 不入队', async () => {
-    const u = await makeStudent(1)
+    const u = await makeStudent(100)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     const res = await runPOST(jsonReq(VALID), { params: {} })
     expect(res.status).toBe(403)
@@ -161,7 +161,7 @@ describe('POST /api/photo/run', () => {
   })
 
   it('入队失败 → 非 200、run 落 FAILED、积分退回', async () => {
-    const u = await makeStudent(10)
+    const u = await makeStudent(1000)
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     enqueueMock.mockRejectedValueOnce(new Error('redis 挂了'))
     const res = await runPOST(jsonReq(VALID), { params: {} })
@@ -170,7 +170,7 @@ describe('POST /api/photo/run', () => {
     runIds.push(run.id)
     expect(run.status).toBe('FAILED')
     expect(run.refunded).toBe(true)
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(10)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(1000)
   })
 })
 

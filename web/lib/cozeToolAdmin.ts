@@ -83,12 +83,13 @@ export function validateInputs(raw: unknown): CozeToolInput[] {
   })
 }
 
-// priceCredits 夹到 [0, 1000] 的整数；非数字/非法输入一律拒收（不是静默夹到边界）。
+// priceCredits 单位是 cc（0.01 积分，2026-09-21 厘分记账迁移后）；后台表单以「积分」
+// 展示/输入（可两位小数），提交前 ×100。夹到 [0, 100000]（即 0-1000 积分）的整数。
 export function validatePriceCredits(raw: unknown): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || !Number.isInteger(raw)) {
-    throw new HttpError(400, 'priceCredits 必须是整数')
+    throw new HttpError(400, 'priceCredits 必须是整数（单位 0.01 积分）')
   }
-  if (raw < 0 || raw > 1000) throw new HttpError(400, 'priceCredits 必须在 0-1000 之间')
+  if (raw < 0 || raw > 100000) throw new HttpError(400, 'priceCredits 必须在 0-100000 之间（0-1000 积分）')
   return raw
 }
 

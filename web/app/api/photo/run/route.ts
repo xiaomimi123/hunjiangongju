@@ -6,7 +6,7 @@ import { prisma, enqueuePhotoGenRun, getCapabilityConfig } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { checkRate } from '@/lib/ratelimit'
-import { validatePhotoRun, resolvePricePerImage, totalPhotoPrice } from '@/lib/photoInputs'
+import { validatePhotoRun, resolvePricePerImage, totalPhotoPriceCc } from '@/lib/photoInputs'
 
 export const POST = handler(async (req) => {
   const s = await requireRole()
@@ -20,7 +20,7 @@ export const POST = handler(async (req) => {
   if (process.env.AI_MOCK !== '1' && !cfg.enabled) {
     throw new HttpError(503, '实拍生图能力未开启，请联系运营在后台「模型配置」配置并启用')
   }
-  const price = totalPhotoPrice(resolvePricePerImage(cfg.extra), params.count)
+  const price = totalPhotoPriceCc(resolvePricePerImage(cfg.extra), params.count)
 
   const run = await prisma.$transaction(async (tx) => {
     if (s.role !== 'operator' && price > 0) {
@@ -35,6 +35,7 @@ export const POST = handler(async (req) => {
         // 扣费入流水：全站此前只有充值写 CreditLog，消费不写——导师在学员积分明细里
         // 对不上账（2026-09-16 线上就有「退分了但看着像没退」的误会）。photo 链路扣/退全记。
         await tx.creditLog.create({
+          // delta 单位 cc（0.01 积分）——全库积分字段同此单位
           data: { userId: s.userId, delta: -price, reason: `实拍生图（${params.count} 张）` },
         })
       }

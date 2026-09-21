@@ -166,6 +166,9 @@ async function failRun(runId: string, userId: string, creditsCost: number, error
       // false，永远退不出去。updateMany 命中 0 行只是静默跳过——账户都没了，钱退不进去是
       // 可接受的终态，不该反过来把「标记失败」这一步也一起回滚掉。
       await tx.user.updateMany({ where: { id: userId }, data: { credits: { increment: creditsCost } } })
+      if (creditsCost > 0) {
+        await tx.creditLog.create({ data: { userId, delta: creditsCost, reason: '工具退回（运行失败）' } })
+      }
     }
   })
 }

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { api, ApiError } from '@/lib/fetcher'
+import { formatCredits } from '@/lib/credits'
 
 type Wallet = { credits: number; qrUrl: string }
 type Mode = 'cover' | 'inner'
@@ -56,7 +57,7 @@ export default function PhotoGenPage() {
     loadWallet()
     api<{ pricePerImage: number }>('/api/photo/config').then((c) => setPrice(c.pricePerImage)).catch(() => {})
   }, [])
-  const totalPrice = Math.ceil(price * count) // 单价可为小数（如 0.5），总价向上取整成整数积分
+  const totalCc = Math.round(price * 100) * count // cc（0.01 积分）精确计费
 
   async function upload(file: File) {
     setErr(''); setUploading(true)
@@ -97,7 +98,7 @@ export default function PhotoGenPage() {
         {wallet && (
           <button onClick={() => setShowRecharge(true)} className="card shrink-0 px-3.5 py-2 text-right">
             <p className="text-xs text-ink3">剩余积分</p>
-            <p className="num text-lg font-bold">{wallet.credits}</p>
+            <p className="num text-lg font-bold">{formatCredits(wallet.credits)}</p>
           </button>
         )}
       </div>
@@ -184,7 +185,7 @@ export default function PhotoGenPage() {
       {err && <p className="pill pill-bad">{err}</p>}
       <button onClick={submit} disabled={submitting || uploading || !rel} className="btn-primary w-full">
         <BoltIcon />
-        {submitting ? '提交中…' : rel ? `消耗 ${totalPrice} 积分 · 开始生成` : '先拍一张照片'}
+        {submitting ? '提交中…' : rel ? `消耗 ${formatCredits(totalCc)} 积分 · 开始生成` : '先拍一张照片'}
       </button>
       <p className="text-center text-[0.66rem] text-ink3">生成约需 1-3 分钟 · 失败自动退回积分</p>
       <Link href="/photo/runs" className="block text-center text-sm text-flame">我的生图记录 →</Link>
@@ -194,7 +195,7 @@ export default function PhotoGenPage() {
           <div className="card w-full max-w-sm space-y-4 p-6 text-center" onClick={(e) => e.stopPropagation()}>
             <div>
               <h3 className="font-display text-lg font-bold">{wallet && wallet.credits > 0 ? '积分充值' : '积分已用完'}</h3>
-              <p className="mt-1 text-sm text-ink3">生成 {count} 张需 {totalPrice} 积分。扫码添加导师微信充值，到账后即可继续使用</p>
+              <p className="mt-1 text-sm text-ink3">生成 {count} 张需 {formatCredits(totalCc)} 积分。扫码添加导师微信充值，到账后即可继续使用</p>
             </div>
             {wallet?.qrUrl ? (
               // eslint-disable-next-line @next/next/no-img-element

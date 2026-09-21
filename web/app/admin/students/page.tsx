@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import { StatusPill } from '@/components/ui'
 import PageHeader from '@/components/admin/PageHeader'
+import { formatCredits } from '@/lib/credits'
 
 type Row = { id: string; email: string; nickname: string | null; disabled: boolean; createdAt: string; taskCount: number; doneCount: number; credits: number }
 type CreditLog = { id: string; delta: number; reason: string; createdAt: string }
@@ -40,8 +41,10 @@ export default function StudentsPage() {
   }
   async function saveRecharge() {
     if (!rechargeFor) return
-    const amount = Number(rechargeVal)
-    if (!Number.isInteger(amount) || amount < 1) { setRechargeErr('请输入正整数积分'); return }
+    const credits = Number(rechargeVal)
+    // 充值支持两位小数（如 0.5 积分），接口收 cc（0.01 积分整数单位）
+    const amount = Math.round(credits * 100)
+    if (!Number.isFinite(credits) || credits <= 0 || Math.abs(credits * 100 - amount) > 1e-6) { setRechargeErr('请输入正的积分数，最多两位小数'); return }
     setRechargeBusy(true); setRechargeErr('')
     try {
       await api(`/api/admin/students/${rechargeFor.id}`, { method: 'PATCH', body: { action: 'recharge', amount } })
@@ -210,7 +213,7 @@ export default function StudentsPage() {
                   <td className="num px-4 py-3 text-ink2">{new Date(s.createdAt).toLocaleString('zh-CN')}</td>
                   <td className="num px-4 py-3 text-right">
                     <button className="hover:text-flame" title="点击给该学员充值积分" onClick={() => openRecharge(s)}>
-                      {s.credits}{s.credits === 0 && <span className="pill pill-bad ml-1.5">待充值</span>}
+                      {formatCredits(s.credits)}{s.credits === 0 && <span className="pill pill-bad ml-1.5">待充值</span>}
                     </button>
                   </td>
                   <td className="num px-4 py-3 text-right">{s.taskCount}</td>
@@ -334,16 +337,16 @@ export default function StudentsPage() {
             <div>
               <h3 className="font-display text-lg font-bold">积分充值</h3>
               <p className="mt-0.5 text-sm text-ink3">
-                学员「{rechargeFor.nickname ?? rechargeFor.email}」 · 当前余额 <span className="num">{rechargeFor.credits}</span> 分。1 条视频 = 1 积分。
+                学员「{rechargeFor.nickname ?? rechargeFor.email}」 · 当前余额 <span className="num">{formatCredits(rechargeFor.credits)}</span> 分。积分定价见「系统设置」。
               </p>
             </div>
 
             <label className="block">
               <span className="mb-1 block text-xs text-ink3">充值积分数</span>
               <input
-                className="field num" type="text" inputMode="numeric" autoFocus
+                className="field num" type="text" inputMode="decimal" autoFocus
                 value={rechargeVal}
-                onChange={(e) => setRechargeVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onChange={(e) => setRechargeVal(e.target.value.replace(/[^\d.]/g, '').slice(0, 9))}
                 placeholder="如 100"
               />
             </label>
@@ -356,7 +359,7 @@ export default function StudentsPage() {
                   <ul className="max-h-36 space-y-1 overflow-y-auto">
                     {rechargeLogs.map((l) => (
                       <li key={l.id} className="flex items-center justify-between rounded-lg bg-surface2 px-3 py-1.5 text-xs">
-                        <span className="num font-medium text-ok">+{l.delta}</span>
+                        <span className="num font-medium text-ok">+{formatCredits(l.delta)}</span>
                         <span className="num text-ink3">{new Date(l.createdAt).toLocaleString('zh-CN')}</span>
                       </li>
                     ))}

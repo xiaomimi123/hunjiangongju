@@ -132,8 +132,8 @@ describe('POST /api/admin/coze-tools', () => {
     expect(res.status).toBe(400)
   })
 
-  it('priceCredits 超范围 → 400', async () => {
-    const res = await createTool({ ...VALID_BODY, priceCredits: 1001 })
+  it('priceCredits 超范围 → 400（上限 100000cc = 1000 积分）', async () => {
+    const res = await createTool({ ...VALID_BODY, priceCredits: 100001 })
     expect(res.status).toBe(400)
   })
 

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import { formatCredits } from '@/lib/credits'
 
 type Status = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
 type Run = { id: string; toolId: string; status: Status; errorMsg: string | null; creditsCost: number; createdAt: string; finishedAt: string | null }
@@ -52,7 +53,7 @@ export default function ToolRunsPage() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{tools[r.toolId] ?? '已下架工具'}</p>
               <p className="mt-0.5 truncate text-xs text-ink3">
-                {r.status === 'FAILED' && r.creditsCost > 0 ? `已退 ${r.creditsCost} 积分` : new Date(r.createdAt).toLocaleString()}
+                {r.status === 'FAILED' && r.creditsCost > 0 ? `已退 ${formatCredits(r.creditsCost)} 积分` : new Date(r.createdAt).toLocaleString()}
               </p>
             </div>
             <div className="shrink-0 text-right text-xs">

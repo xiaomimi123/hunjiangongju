@@ -47,18 +47,23 @@ export const POST = handler(async (req) => {
     const voice = await prisma.clonedVoice.findUnique({ where: { voiceId: normalizedVariables.voiceId } })
     if (!voice) throw new HttpError(400, '所选音色不存在')
   }
-  // ★ 学员积分：1 条视频 = 1 积分。扣分与建任务同一事务，中途失败不白扣。
-  // updateMany 带 credits >= 1 条件是并发闸：两个请求同抢最后 1 分只放行一个，余额不为负。
+  // ★ 学员积分：一条视频扣 SiteConfig.videoPriceCc（单位 0.01 积分，后台「设置」可调，
+  // 缺省 100 = 1 积分）。扣分与建任务同一事务，中途失败不白扣。
+  // updateMany 带 credits >= price 条件是并发闸：两个请求同抢最后余额只放行一个，余额不为负。
+  const siteCfg = await prisma.siteConfig.findUnique({ where: { id: 1 } })
+  const videoPrice = siteCfg?.videoPriceCc ?? 100
   const task = await prisma.$transaction(async (tx) => {
-    if (s.role !== 'operator') {
+    if (s.role !== 'operator' && videoPrice > 0) {
       const claimed = await tx.user.updateMany({
-        where: { id: s.userId, credits: { gte: 1 } },
-        data: { credits: { decrement: 1 } },
+        where: { id: s.userId, credits: { gte: videoPrice } },
+        data: { credits: { decrement: videoPrice } },
       })
       if (claimed.count === 0) {
         // 分不够或账号已不存在。学员被删号但会话 cookie 还活着的情况沿用老行为：任务照建、账记不上即可
         const exists = await tx.user.count({ where: { id: s.userId } })
         if (exists > 0) throw new HttpError(403, '积分已用完，请扫码联系导师充值', 'NO_CREDITS')
+      } else {
+        await tx.creditLog.create({ data: { userId: s.userId, delta: -videoPrice, reason: '生成视频' } })
       }
     }
     return tx.generationTask.create({

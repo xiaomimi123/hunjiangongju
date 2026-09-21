@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api, ApiError } from '@/lib/fetcher'
 import BottomSheet from '@/components/BottomSheet'
+import { formatCredits } from '@/lib/credits'
 
 type Framework = {
   id: string
@@ -103,7 +104,7 @@ export default function FrameworkLibraryPage() {
         {wallet && (
           <button onClick={() => setShowRecharge(true)} className="card shrink-0 px-3.5 py-2 text-right">
             <p className="text-xs text-ink3">剩余积分</p>
-            <p className="num text-lg font-bold">{wallet.credits}</p>
+            <p className="num text-lg font-bold">{formatCredits(wallet.credits)}</p>
           </button>
         )}
       </div>

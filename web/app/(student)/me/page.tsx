@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/fetcher'
 import BottomSheet from '@/components/BottomSheet'
+import { formatCredits } from '@/lib/credits'
 
 type Me = { email: string; nickname: string | null; role: string }
 type Wallet = { credits: number; qrUrl: string }
@@ -75,7 +76,7 @@ export default function MePage() {
       <div className="grad flex items-center justify-between rounded-[20px] p-[18px] text-white shadow-lift">
         <div>
           <p className="text-[0.7rem] opacity-80">剩余积分</p>
-          <b className="text-[1.6rem]">{wallet?.credits ?? '--'}</b>
+          <b className="text-[1.6rem]">{wallet ? formatCredits(wallet.credits) : '--'}</b>
         </div>
         <button
           onClick={() => setShowRecharge(true)}

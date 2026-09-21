@@ -28,6 +28,9 @@ export const POST = handler(async (req, { params }) => {
         // 分不够或账号已不存在。学员被删号但会话 cookie 还活着的情况沿用 generate 的语义：任务照建、账记不上即可
         const exists = await tx.user.count({ where: { id: s.userId } })
         if (exists > 0) throw new HttpError(403, '积分已用完，请扫码联系导师充值', 'NO_CREDITS')
+      } else {
+        // 扣费入流水（delta 单位 cc）：与实拍生图同口径，导师在学员明细里可逐笔对账
+        await tx.creditLog.create({ data: { userId: s.userId, delta: -tool.priceCredits, reason: `工具·${tool.name}` } })
       }
     }
     return tx.cozeToolRun.create({
@@ -58,6 +61,9 @@ export const POST = handler(async (req, { params }) => {
       })
       if (claimedRefund.count === 1) {
         await tx.user.updateMany({ where: { id: s.userId }, data: { credits: { increment: run.creditsCost } } })
+        if (run.creditsCost > 0) {
+          await tx.creditLog.create({ data: { userId: s.userId, delta: run.creditsCost, reason: '工具退回（入队失败）' } })
+        }
       }
     })
     throw err

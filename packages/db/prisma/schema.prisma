@@ -16,9 +16,10 @@ model User {
   passwordHash String   @map("password_hash")
   role         String   @default("student")
   disabled     Boolean  @default(false)
-  // 积分（仅学员扣减）：1 条视频 = 1 积分；新账号默认送 30；
+  // 积分（仅学员扣减）：视频/工具/生图按各自定价扣；新账号默认送 30 积分；
   // 用完由导师在后台充值（流水见 CreditLog），删任务不返还。
-  credits      Int      @default(30)
+  /// 积分余额。单位：0.01 积分（厘分记账，显示时 /100）——2026-09-21 起全库积分字段同此单位
+  credits      Int      @default(3000)
   /// 会话代次。改密码时 +1，使该用户所有已签发的 token 立即失效（JWT 无状态，靠比对这个数收口）
   sessionEpoch Int      @default(0) @map("session_epoch")
   createdAt    DateTime @default(now()) @map("created_at")
@@ -43,6 +44,8 @@ model CreditLog {
 model SiteConfig {
   id            Int      @id @default(1)
   rechargeQrUrl String   @default("") @map("recharge_qr_url")
+  /// 生成一条视频的扣费。单位 0.01 积分（100 = 1 积分）
+  videoPriceCc  Int      @default(100) @map("video_price_cc")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("site_config")

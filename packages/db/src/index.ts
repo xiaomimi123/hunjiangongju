@@ -71,3 +71,4 @@ export {
   looksChineseTitle,
 } from './booklist/bookPick'
 export type { PickedBook } from './booklist/bookPick'
+export { CREDIT_SCALE, formatCredits, creditsToCc } from './credits'

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import { formatCredits } from '@/lib/credits'
 
 type Tool = { id: string; name: string; description: string | null; priceCredits: number }
 
@@ -55,7 +56,7 @@ export default function ToolsPlazaPage() {
               <p className="truncate font-medium">{t.name}</p>
               {t.description && <p className="mt-0.5 truncate text-xs text-ink3">{t.description}</p>}
             </div>
-            <span className="shrink-0 text-xs font-bold text-flame">{t.priceCredits} 积分/次</span>
+            <span className="shrink-0 text-xs font-bold text-flame">{formatCredits(t.priceCredits)} 积分/次</span>
           </Link>
         ))}
         {tools.length === 0 && !err && (

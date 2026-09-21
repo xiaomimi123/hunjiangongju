@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import Link from 'next/link'
 import PageHeader from '@/components/admin/PageHeader'
+import { formatCredits } from '@/lib/credits'
 
 const INPUT_TYPES = ['text', 'textarea', 'select', 'image', 'fixed'] as const
 type CozeInputType = (typeof INPUT_TYPES)[number]
@@ -116,7 +117,7 @@ function toForm(t: Tool): FormState {
     name: t.name,
     description: t.description,
     workflowId: t.workflowId,
-    priceCredits: String(t.priceCredits),
+    priceCredits: formatCredits(t.priceCredits), // cc → 积分（可两位小数）
     sortOrder: String(t.sortOrder),
     enabled: t.enabled,
     demoVideoUrl: t.demoVideoUrl ?? '',
@@ -345,7 +346,8 @@ export default function CozeToolsPage() {
     if (!form.name.trim()) return '请填写名称'
     if (!form.workflowId.trim()) return '请填写 workflowId'
     const priceCredits = Number(form.priceCredits)
-    if (!Number.isInteger(priceCredits) || priceCredits < 0 || priceCredits > 1000) return '价格必须是 0-1000 的整数'
+    if (!Number.isFinite(priceCredits) || priceCredits < 0 || priceCredits > 1000) return '价格必须是 0-1000 的数字'
+    if (Math.abs(priceCredits * 100 - Math.round(priceCredits * 100)) > 1e-6) return '价格最多两位小数'
     const sortOrder = Number(form.sortOrder)
     if (!Number.isInteger(sortOrder)) return '排序必须是整数'
     for (let i = 0; i < form.inputs.length; i++) {
@@ -367,7 +369,7 @@ export default function CozeToolsPage() {
       name: form.name.trim(),
       description: form.description.trim(),
       workflowId: form.workflowId.trim(),
-      priceCredits: Number(form.priceCredits),
+      priceCredits: Math.round(Number(form.priceCredits) * 100), // 积分 → cc
       sortOrder: Number(form.sortOrder),
       enabled: form.enabled,
       demoVideoUrl: form.demoVideoUrl.trim(),
@@ -435,7 +437,7 @@ export default function CozeToolsPage() {
                   {t.description && <p className="mt-0.5 text-xs text-ink3">{t.description}</p>}
                 </td>
                 <td className="num px-4 py-3 text-ink3">{t.workflowId}</td>
-                <td className="num px-4 py-3 text-right">{t.priceCredits}</td>
+                <td className="num px-4 py-3 text-right">{formatCredits(t.priceCredits)}</td>
                 <td className="num px-4 py-3 text-right text-ink3">{t.sortOrder}</td>
                 <td className="px-4 py-3 text-center">
                   <button
@@ -490,7 +492,7 @@ export default function CozeToolsPage() {
                     <span className={`pill ${RUN_STATUS_TONE[r.status] ?? ''}`}>{RUN_STATUS_LABELS[r.status] ?? r.status}</span>
                   </td>
                   <td className="px-4 py-3 text-ink3">{runUserLabel(r)}</td>
-                  <td className="num px-4 py-3 text-right">{r.creditsCost}</td>
+                  <td className="num px-4 py-3 text-right">{formatCredits(r.creditsCost)}</td>
                   <td className="num px-4 py-3 text-ink3">{new Date(r.createdAt).toLocaleString('zh-CN')}</td>
                   <td className="num px-4 py-3 text-ink3">{r.finishedAt ? new Date(r.finishedAt).toLocaleString('zh-CN') : '—'}</td>
                   <td className="px-4 py-3 text-bad">{r.errorMsg ?? ''}</td>
@@ -522,7 +524,7 @@ export default function CozeToolsPage() {
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs text-ink3">价格（积分）</span>
-                <input className="field num" inputMode="numeric" value={form.priceCredits}
+                <input className="field num" inputMode="decimal" value={form.priceCredits}
                   onChange={(e) => setForm((f) => ({ ...f, priceCredits: e.target.value.replace(/\D/g, '').slice(0, 4) }))} />
               </label>
             </div>

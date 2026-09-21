@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { api } from '@/lib/fetcher'
 import { effStatus } from '@/lib/effStatus'
 import VideoCard from '@/components/VideoCard'
+import { formatCredits } from '@/lib/credits'
 
 // 生成任务状态 → 中文标签 + 色调（成片流水线，区别于旧混剪状态）
 const GEN_LABELS: Record<string, string> = {
@@ -99,7 +100,7 @@ export default function HomePage() {
             <small className="ml-2 text-[0.68rem] font-normal tracking-normal text-white/55">电商带货创作台</small>
           </div>
           <div className="text-right">
-            <b className="block text-[1.15rem] text-[#ffc53d]">{wallet?.credits ?? '--'}</b>
+            <b className="block text-[1.15rem] text-[#ffc53d]">{wallet ? formatCredits(wallet.credits) : '--'}</b>
             <span className="block text-[0.66rem] text-white/55">剩余积分</span>
           </div>
         </div>
@@ -167,7 +168,7 @@ export default function HomePage() {
                   {t.name.slice(0, 1)}
                 </div>
                 <p className="mt-1 truncate text-[0.68rem] text-ink2">{t.name}</p>
-                <small className="text-[0.6rem] text-ink3">{t.priceCredits} 积分</small>
+                <small className="text-[0.6rem] text-ink3">{formatCredits(t.priceCredits)} 积分</small>
               </Link>
             ))}
             {Array.from({ length: fillCount }).map((_, i) => (

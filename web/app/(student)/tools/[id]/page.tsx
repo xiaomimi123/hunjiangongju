@@ -4,6 +4,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { api, ApiError } from '@/lib/fetcher'
 import VideoCard from '@/components/VideoCard'
+import { formatCredits } from '@/lib/credits'
 
 type InputType = 'text' | 'textarea' | 'select' | 'image'
 type ToolInput = { name: string; label: string; type: InputType; options?: string[]; placeholder?: string; required: boolean }
@@ -168,12 +169,12 @@ export default function ToolFormPage() {
         {wallet && (
           <button onClick={() => setShowRecharge(true)} className="card shrink-0 px-3.5 py-2 text-right">
             <p className="text-xs text-ink3">剩余积分</p>
-            <p className="num text-lg font-bold">{wallet.credits}</p>
+            <p className="num text-lg font-bold">{formatCredits(wallet.credits)}</p>
           </button>
         )}
       </div>
 
-      <p className="pill pill-run w-fit">消耗 {tool.priceCredits} 积分</p>
+      <p className="pill pill-run w-fit">消耗 {formatCredits(tool.priceCredits)} 积分</p>
       {prefillNote && <p className="pill pill-warn w-fit">{prefillNote}</p>}
 
       {(tool.demoVideoUrl || tool.tutorialVideoUrl) && (
@@ -241,7 +242,7 @@ export default function ToolFormPage() {
       {err && <p className="pill pill-bad">{err}</p>}
       <button onClick={submit} disabled={submitting || anyUploading} className="btn-primary w-full">
         <BoltIcon />
-        {submitting ? '提交中…' : `消耗 ${tool.priceCredits} 积分 · 开始生成`}
+        {submitting ? '提交中…' : `消耗 ${formatCredits(tool.priceCredits)} 积分 · 开始生成`}
       </button>
       <p className="text-center text-[0.66rem] text-ink3">生成约需 3-10 分钟 · 失败自动退回积分</p>
 
@@ -253,7 +254,7 @@ export default function ToolFormPage() {
                 {wallet && wallet.credits > 0 ? '积分充值' : '积分已用完'}
               </h3>
               <p className="mt-1 text-sm text-ink3">
-                运行一次消耗 {tool.priceCredits} 积分。扫码添加导师微信充值，到账后即可继续使用
+                运行一次消耗 {formatCredits(tool.priceCredits)} 积分。扫码添加导师微信充值，到账后即可继续使用
               </p>
             </div>
             {wallet?.qrUrl ? (

@@ -64,9 +64,10 @@ export const PATCH = handler(async (req, { params }) => {
     // 禁用/启用不需要 bump epoch：disabled 字段在 requireRole 里直接查库判断，立即生效
     await prisma.user.update({ where: { id: params.id }, data: { disabled: action === 'disable' } })
   } else if (action === 'recharge') {
-    // 积分充值：导师线下收款后在这里落账。加分与流水同一事务，对账不缺笔
-    if (!Number.isInteger(amount) || amount < 1 || amount > 100000) {
-      throw new HttpError(400, '充值积分须为 1~100000 的整数')
+    // 积分充值：导师线下收款后在这里落账。加分与流水同一事务，对账不缺笔。
+    // amount 单位 cc（0.01 积分，前端已 ×100）：1 = 0.01 积分，10000000 = 10 万积分
+    if (!Number.isInteger(amount) || amount < 1 || amount > 10000000) {
+      throw new HttpError(400, '充值积分须为 0.01~100000 积分（接口单位 0.01 积分）')
     }
     await prisma.$transaction([
       prisma.user.update({ where: { id: params.id }, data: { credits: { increment: amount } } }),

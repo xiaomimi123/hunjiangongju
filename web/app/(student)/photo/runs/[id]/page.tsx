@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
+import { formatCredits } from '@/lib/credits'
 
 type Status = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
 type Run = {
@@ -64,7 +65,7 @@ export default function PhotoRunResultPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-xl font-bold">生成结果</h1>
-          <p className="mt-1 text-xs text-ink3">{sub} · 消耗 {run.creditsCost} 积分</p>
+          <p className="mt-1 text-xs text-ink3">{sub} · 消耗 {formatCredits(run.creditsCost)} 积分</p>
         </div>
         <span className={`pill pill-${tone(run.status)} shrink-0`}>{STATUS_LABEL[run.status]}</span>
       </div>

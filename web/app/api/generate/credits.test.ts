@@ -47,20 +47,20 @@ const req = (body: unknown) =>
 
 beforeEach(() => { requireRoleMock.mockReset() })
 
-describe('学员生成积分（1 条视频 = 1 积分）', () => {
-  it('新账号默认 30 积分', async () => {
+describe('学员生成积分（视频单价 SiteConfig.videoPriceCc，默认 100cc=1 积分）', () => {
+  it('新账号默认 3000cc（30 积分）', async () => {
     const u = await makeStudent()
-    expect(u.credits).toBe(30)
+    expect(u.credits).toBe(3000)
   })
 
-  it('积分充足 → 生成成功且扣 1 分', async () => {
-    const u = await makeStudent(2)
+  it('积分充足 → 生成成功且扣 100cc（1 积分）', async () => {
+    const u = await makeStudent(200)
     const fw = await makeFramework()
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     const res = await POST(req({ frameworkId: fw.id, subject: '正常生成' }), { params: {} })
     expect(res.status).toBe(200)
     taskIds.push((await res.json()).id)
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(1)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(100)
   })
 
   it('积分为 0 → 403 + NO_CREDITS 错误码，不建任务、不扣分', async () => {
@@ -78,7 +78,7 @@ describe('学员生成积分（1 条视频 = 1 积分）', () => {
 
   // ★ 并发抢最后 1 分：updateMany 带 credits >= 1 条件是乐观闸，只放行一个
   it('并发抢最后 1 积分 → 恰好放行一个，余额归 0 不为负', async () => {
-    const u = await makeStudent(1)
+    const u = await makeStudent(100)
     const fw = await makeFramework()
     requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
     const results = await Promise.all([

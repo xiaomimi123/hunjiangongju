@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/fetcher'
 import VideoCard from '@/components/VideoCard'
+import { formatCredits } from '@/lib/credits'
 
 type OutputItem = { kind: 'text'; text: string } | { kind: 'image' | 'video' | 'file' | 'link'; url: string }
 type Status = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
@@ -88,7 +89,7 @@ export default function ToolRunResultPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-xl font-bold">运行结果</h1>
-          <p className="mt-1 text-xs text-ink3">消耗 {run.creditsCost} 积分</p>
+          <p className="mt-1 text-xs text-ink3">消耗 {formatCredits(run.creditsCost)} 积分</p>
         </div>
         <span className={`pill pill-${tone(run.status)} shrink-0`}>{STATUS_LABEL[run.status]}</span>
       </div>

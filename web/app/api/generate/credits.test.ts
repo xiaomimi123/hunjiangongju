@@ -37,9 +37,11 @@ async function makeStudent(credits?: number) {
   userIds.push(u.id)
   return u
 }
-async function makeFramework(priceCc?: number) {
+// 默认给框架专属价 100cc：让扣分断言与全局单例 SiteConfig.videoPriceCc 解耦——
+// pricing 路由测试会真实改写那个单行表，并行跑时这里若依赖全局价就会被污染。
+async function makeFramework(priceCc: number | null = 100) {
   const fw = await prisma.copyFramework.create({
-    data: { frameworkText: 'T', published: true, ...(priceCc === undefined ? {} : { priceCc }) },
+    data: { frameworkText: 'T', published: true, ...(priceCc === null ? {} : { priceCc }) },
   })
   fwIds.push(fw.id)
   return fw

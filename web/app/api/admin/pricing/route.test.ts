@@ -19,6 +19,9 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // 恢复现场：这两处都是全局单行配置，脏着离开会污染后续/并行用例
+  await prisma.siteConfig.upsert({ where: { id: 1 }, update: { videoPriceCc: 100 }, create: { id: 1 } })
+  await prisma.aiCapabilityConfig.deleteMany({ where: { capability: 'photo', baseUrl: '' } })
   await prisma.$disconnect()
 })
 

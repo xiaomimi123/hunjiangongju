@@ -11,6 +11,8 @@ type Framework = {
   industryCategory: string | null
   suggestedSegmentCount: number | null
   imageStylePrompt: string | null
+  priceCc: number
+
   /** 该框架开放给学员的配音音色。空数组表示不开放，此时不显示选择项 */
   voices?: { id: string; label: string }[]
   defaultVoice?: string
@@ -120,6 +122,7 @@ export default function FrameworkLibraryPage() {
               <p className="mt-0.5 truncate text-xs text-ink3">
                 {f.industryCategory ?? '通用'}
                 {f.suggestedSegmentCount ? <> · 约 <span className="num">{f.suggestedSegmentCount}</span> 段</> : null}
+                {' · '}<span className="num">{formatCredits(f.priceCc)}</span> 积分/条
               </p>
             </div>
             <span className="shrink-0 text-xs font-bold text-flame">去做片</span>
@@ -175,7 +178,7 @@ export default function FrameworkLibraryPage() {
                 {wallet && wallet.credits > 0 ? '积分充值' : '积分已用完'}
               </h3>
               <p className="mt-1 text-sm text-ink3">
-                1 条视频消耗 1 积分。扫码添加导师微信充值，到账后即可继续生成
+                扫码添加导师微信充值，到账后即可继续生成（各框架价格见列表）
               </p>
             </div>
             {wallet?.qrUrl ? (

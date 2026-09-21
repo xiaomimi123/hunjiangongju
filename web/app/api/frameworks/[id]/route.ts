@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@mixcut/db'
+import { prisma, creditsToCc } from '@mixcut/db'
 import { requireRole, HttpError } from '@/lib/auth'
 import { handler } from '@/lib/api'
 import { deleteFrameworkDeep } from '@/lib/deleteCascade'
@@ -32,6 +32,16 @@ export const PATCH = handler(async (req, { params }) => {
   if (b.maxTotalChars !== undefined) data.maxTotalChars = b.maxTotalChars === null ? null : Number(b.maxTotalChars)
   if (b.suggestedSegmentCount !== undefined) data.suggestedSegmentCount = b.suggestedSegmentCount === null ? null : Number(b.suggestedSegmentCount)
   if (typeof b.published === 'boolean') data.published = b.published
+  // 框架级生成价格（积分，可两位小数）：null/空 = 用全局视频单价
+  if ('priceCredits' in b) {
+    if (b.priceCredits === null || b.priceCredits === '') {
+      data.priceCc = null
+    } else {
+      const cc = creditsToCc(b.priceCredits)
+      if (cc === null) throw new HttpError(400, '生成价格必须是 0-1000000 的数字，最多两位小数')
+      data.priceCc = cc
+    }
+  }
   const updated = await prisma.copyFramework.update({ where: { id: params.id }, data })
   return NextResponse.json(updated)
 })

@@ -14,9 +14,14 @@ export const GET = handler(async () => {
       suggestedSegmentCount: true,
       imageStylePrompt: true,
       overlayTemplate: true,
+      priceCc: true,
     },
     orderBy: { createdAt: 'desc' },
   })
+  // 每框架实际生成价（cc）：框架专属价缺省时用全局视频单价
+  const siteCfg = await prisma.siteConfig.findUnique({ where: { id: 1 } })
+  const globalPrice = siteCfg?.videoPriceCc ?? 100
+  const priced = frameworks.map((f) => ({ ...f, priceCc: f.priceCc ?? globalPrice }))
 
   // 音色标签表：内置 + 运营在 tts.extra.customVoices 里登记的克隆音色。
   // 学员端只拿到**这个框架开放的那几个**——名单之外的 id 连名字都不该露出去。
@@ -30,7 +35,7 @@ export const GET = handler(async () => {
     if (!labels.has(id)) labels.set(id, label.trim())
   }
 
-  return NextResponse.json(frameworks.map(({ overlayTemplate, ...f }) => {
+  return NextResponse.json(priced.map(({ overlayTemplate, ...f }) => {
     const v = readFrameworkVoices(overlayTemplate)
     return {
       ...f,

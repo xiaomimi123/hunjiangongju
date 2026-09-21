@@ -132,6 +132,8 @@ model CopyFramework {
   // 老框架/非剪映来源框架为 null。结构见 packages/db/src/booklist/draftProvenance.ts。
   draftFidelityReport   Json?            @map("draft_fidelity_report")
   published             Boolean          @default(false)
+  /// 本框架的生成价格（单位 0.01 积分）；null = 用全局视频单价 SiteConfig.videoPriceCc
+  priceCc               Int?             @map("price_cc")
   createdBy             String?          @map("created_by")
   createdAt             DateTime         @default(now()) @map("created_at")
   generationTasks       GenerationTask[]

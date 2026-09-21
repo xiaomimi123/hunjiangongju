@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useState } from 'react'
 import { api } from '@/lib/fetcher'
 import PageHeader from '@/components/admin/PageHeader'
 import Modal from '@/components/admin/Modal'
+import { formatCredits } from '@/lib/credits'
 
 // 与 packages/db/src/booklist/draftProvenance.ts 的导出保持一致（本页是客户端组件,不能 import @mixcut/db）。
 type ProvenanceEntry = { path: string; status: 'extracted' | 'defaulted' | 'unsupported'; detail?: string }
@@ -13,13 +14,14 @@ type FrameworkRow = { id: string; name: string | null; industryCategory: string 
 type FrameworkFull = {
   id: string; name: string | null; frameworkText: string; industryCategory: string | null
   imageStylePrompt: string | null; overlayTemplate: unknown; renderTemplate: string | null
-  maxLines: number | null; maxTotalChars: number | null; suggestedSegmentCount: number | null
+  maxLines: number | null; maxTotalChars: number | null; suggestedSegmentCount: number | null; priceCc?: number | null
   visualStyleType: string
 }
 
 type Form = {
   name: string; frameworkText: string; industryCategory: string; imageStylePrompt: string
   overlayTemplate: string; renderTemplate: string; maxLines: string; maxTotalChars: string; suggestedSegmentCount: string
+  priceCredits: string // 生成价格（积分，可两位小数）；空 = 用全局视频单价
 }
 
 // 把结构化保真度报告译成悬浮提示——只列 status!=extracted 且带 detail 的条目（extracted 条目
@@ -149,6 +151,7 @@ export default function FrameworksPage() {
         maxLines: f.maxLines == null ? '' : String(f.maxLines),
         maxTotalChars: f.maxTotalChars == null ? '' : String(f.maxTotalChars),
         suggestedSegmentCount: f.suggestedSegmentCount == null ? '' : String(f.suggestedSegmentCount),
+        priceCredits: f.priceCc == null ? '' : formatCredits(f.priceCc),
       })
     } catch (e) { setModalErr((e as Error).message) }
   }
@@ -177,6 +180,7 @@ export default function FrameworksPage() {
       maxLines: form.maxLines.trim() === '' ? null : Number(form.maxLines),
       maxTotalChars: form.maxTotalChars.trim() === '' ? null : Number(form.maxTotalChars),
       suggestedSegmentCount: form.suggestedSegmentCount.trim() === '' ? null : Number(form.suggestedSegmentCount),
+      priceCredits: form.priceCredits.trim() === '' ? null : Number(form.priceCredits),
     }
     if (form.overlayTemplate.trim() === '') {
       body.overlayTemplate = null
@@ -501,6 +505,10 @@ export default function FrameworksPage() {
               <label className="block">
                 <span className="eyebrow">建议分段数</span>
                 <input className="field mt-1" inputMode="numeric" value={form.suggestedSegmentCount} onChange={(e) => setF({ suggestedSegmentCount: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="eyebrow">生成价格（积分/条）</span>
+                <input className="field mt-1" inputMode="decimal" placeholder="留空 = 用全局视频单价" value={form.priceCredits} onChange={(e) => setF({ priceCredits: e.target.value })} />
               </label>
             </div>
             {modalErr && <p className="pill pill-bad">{modalErr}</p>}

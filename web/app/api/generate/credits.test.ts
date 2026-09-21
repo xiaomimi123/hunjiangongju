@@ -22,6 +22,7 @@ afterAll(async () => {
   await prisma.generationTask.deleteMany({ where: { id: { in: taskIds } } })
   await prisma.generationTask.deleteMany({ where: { createdBy: { in: userIds } } })
   await prisma.copyFramework.deleteMany({ where: { id: { in: fwIds } } })
+  await prisma.creditLog.deleteMany({ where: { userId: { in: userIds } } })
   await prisma.user.deleteMany({ where: { id: { in: userIds } } })
   await prisma.$disconnect()
 })
@@ -36,8 +37,10 @@ async function makeStudent(credits?: number) {
   userIds.push(u.id)
   return u
 }
-async function makeFramework() {
-  const fw = await prisma.copyFramework.create({ data: { frameworkText: 'T', published: true } })
+async function makeFramework(priceCc?: number) {
+  const fw = await prisma.copyFramework.create({
+    data: { frameworkText: 'T', published: true, ...(priceCc === undefined ? {} : { priceCc }) },
+  })
   fwIds.push(fw.id)
   return fw
 }
@@ -61,6 +64,18 @@ describe('学员生成积分（视频单价 SiteConfig.videoPriceCc，默认 100
     expect(res.status).toBe(200)
     taskIds.push((await res.json()).id)
     expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(100)
+  })
+
+  it('框架设了专属价 → 按框架价扣（覆盖全局单价）', async () => {
+    const u = await makeStudent(1000)
+    requireRoleMock.mockResolvedValue({ userId: u.id, role: 'student' })
+    const fw = await makeFramework(50) // 0.5 积分/条
+    const res = await POST(req({ frameworkId: fw.id, subject: '测试' }), { params: {} })
+    expect(res.status).toBe(200)
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: u.id } })).credits).toBe(950)
+    const logs = await prisma.creditLog.findMany({ where: { userId: u.id } })
+    expect(logs).toHaveLength(1)
+    expect(logs[0].delta).toBe(-50)
   })
 
   it('积分为 0 → 403 + NO_CREDITS 错误码，不建任务、不扣分', async () => {

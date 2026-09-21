@@ -1,5 +1,6 @@
 import SidebarNav from '@/components/SidebarNav'
 import SignOut from '@/components/SignOut'
+import PhotoBalanceAlert from '@/components/admin/PhotoBalanceAlert'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
       <main className="min-w-0 flex-1 px-5 py-7 md:px-9">
-        <div className="mx-auto max-w-7xl">{children}</div>
+        <div className="mx-auto max-w-7xl"><PhotoBalanceAlert />{children}</div>
       </main>
     </div>
   )

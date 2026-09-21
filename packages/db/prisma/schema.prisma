@@ -46,6 +46,8 @@ model SiteConfig {
   rechargeQrUrl String   @default("") @map("recharge_qr_url")
   /// 生成一条视频的扣费。单位 0.01 积分（100 = 1 积分）
   videoPriceCc  Int      @default(100) @map("video_price_cc")
+  /// 运营告警邮箱：每日生图余额/用量日报发到这里；留空 = 不发
+  alertEmail    String   @default("") @map("alert_email")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("site_config")

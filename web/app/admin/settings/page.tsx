@@ -31,6 +31,26 @@ export default function SettingsPage() {
     }).catch(() => {})
   }, [])
 
+  // 运营告警邮箱（每日生图余额日报收件人）
+  const [alertEmail, setAlertEmail] = useState('')
+  const [alertErr, setAlertErr] = useState('')
+  const [alertBusy, setAlertBusy] = useState(false)
+
+  useEffect(() => {
+    api<{ alertEmail: string }>('/api/admin/alert-email').then((r) => setAlertEmail(r.alertEmail)).catch(() => {})
+  }, [])
+
+  async function saveAlertEmail() {
+    setAlertBusy(true); setAlertErr('')
+    try {
+      const r = await api<{ alertEmail: string }>('/api/admin/alert-email', {
+        method: 'PUT', body: { alertEmail: alertEmail.trim() },
+      })
+      setAlertEmail(r.alertEmail)
+      setMsg(r.alertEmail ? '日报邮箱已保存，明早 9 点开始发送' : '已停发日报')
+    } catch (e) { setAlertErr((e as Error).message) } finally { setAlertBusy(false) }
+  }
+
   async function savePricing() {
     setPriceBusy(true); setPriceErr('')
     try {
@@ -107,6 +127,18 @@ export default function SettingsPage() {
         </label>
         <button onClick={savePricing} disabled={priceBusy} className="btn-quiet text-sm">{priceBusy ? '保存中…' : '保存定价'}</button>
         {priceErr && <p className="pill pill-bad">{priceErr}</p>}
+      </div>
+
+      <div className="card space-y-3 p-4">
+        <p className="font-medium">运营告警</p>
+        <p className="text-xs text-ink3">每天早上 9 点自动查询生图服务余额并连同昨日用量发日报到此邮箱；余额告急时主题带【告急】。留空 = 停发。需要先在下方 SMTP 配置里开启邮件服务。</p>
+        <label className="flex items-center gap-3">
+          <span className="w-16 text-sm">日报邮箱</span>
+          <input className="field flex-1" inputMode="email" placeholder="如 boss@example.com" value={alertEmail}
+            onChange={(e) => setAlertEmail(e.target.value)} />
+          <button onClick={saveAlertEmail} disabled={alertBusy} className="btn-quiet shrink-0 text-sm">{alertBusy ? '保存中…' : '保存'}</button>
+        </label>
+        {alertErr && <p className="pill pill-bad">{alertErr}</p>}
       </div>
 
       <div className="card space-y-3 p-4">

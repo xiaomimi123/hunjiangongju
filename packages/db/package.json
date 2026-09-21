@@ -7,10 +7,12 @@
     "@prisma/client": "^5.22.0",
     "bullmq": "^5.8.0",
     "fontkit": "^2.0.4",
+    "nodemailer": "^6.10.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/fontkit": "^2.0.9",
+    "@types/nodemailer": "^6.4.24",
     "@types/ws": "^8.5.13",
     "prisma": "^5.22.0"
   }

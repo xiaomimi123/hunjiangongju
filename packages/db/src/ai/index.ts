@@ -21,7 +21,8 @@ export { parseCozeOutput } from './cozeOutput'
 export type { CozeOutputItem } from './cozeOutput'
 export { cozeProbeWorkflowParams } from './cozeProbe'
 export type { CozeProbedField, CozeProbeResult } from './cozeProbe'
-export { photoGenerate, isMockPhotoUrl, mockPhotoBytes, parsePhotoTask } from './photoGen'
+export { photoGenerate, isMockPhotoUrl, mockPhotoBytes, parsePhotoTask, queryPhotoBalance, parsePhotoBalance } from './photoGen'
+export type { PhotoBalance } from './photoGen'
 export type { PhotoGenOpts } from './photoGen'
 export {
   buildCoverPrompt, buildInnerPrompt,

@@ -3,6 +3,7 @@ import { redisConnection } from '@mixcut/db'
 import { startGenWorker } from './gen'
 import { processCozeRun, recoverFailedCozeRun } from './coze/run'
 import { processPhotoRun, recoverFailedPhotoRun } from './photo/run'
+import { startBalanceReporter } from './balanceReport'
 
 startGenWorker()
 
@@ -66,6 +67,9 @@ function startPhotoWorker(): Worker {
 }
 
 startPhotoWorker()
+
+// 每日生图余额/用量日报（北京时间 09:00,收件人在后台系统设置配置,留空不发）
+startBalanceReporter()
 
 // 超时兜底后被抛弃的 job promise 若晚到 reject 不应拖垮整个 worker（保住并发中的其它任务）
 process.on('unhandledRejection', (reason) => {

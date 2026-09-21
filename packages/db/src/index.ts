@@ -72,3 +72,5 @@ export {
 } from './booklist/bookPick'
 export type { PickedBook } from './booklist/bookPick'
 export { CREDIT_SCALE, formatCredits, creditsToCc } from './credits'
+export { sendMailShared, loadSmtpCfg, smtpTransport } from './mailer'
+export type { SmtpCfg } from './mailer'

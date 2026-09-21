@@ -102,3 +102,26 @@ export function isMockPhotoUrl(url: string): boolean {
 export function mockPhotoBytes(): Buffer {
   return Buffer.from(MOCK_PNG)
 }
+
+// ---------------- 余额查询（每日告警日报用） ----------------
+
+export type PhotoBalance = { unlimited: boolean; remainUsd: number | null; usedUsd: number | null }
+
+export function parsePhotoBalance(data: unknown): PhotoBalance {
+  const d = data as { unlimited_quota?: unknown; remain_balance?: unknown; used_balance?: unknown }
+  const unlimited = d?.unlimited_quota === true || d?.remain_balance === -1
+  const remain = typeof d?.remain_balance === 'number' && d.remain_balance >= 0 ? d.remain_balance : null
+  const used = typeof d?.used_balance === 'number' && d.used_balance >= 0 ? d.used_balance : null
+  return { unlimited, remainUsd: remain, usedUsd: used }
+}
+
+/** 查生图服务账户余额（apimart/one-api 系 GET /v1/balance，2026-09-21 实测）。 */
+export async function queryPhotoBalance(): Promise<PhotoBalance> {
+  const cfg = await getCapabilityConfig('photo')
+  if (!cfg.baseUrl || !cfg.apiKey) throw new Error('photo 能力未配置接口地址/密钥')
+  const res = await fetch(`${base(cfg.baseUrl)}/v1/balance`, {
+    headers: { Authorization: `Bearer ${cfg.apiKey}` },
+  })
+  if (!res.ok) throw new Error(`余额查询失败 ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+  return parsePhotoBalance(await res.json())
+}
